@@ -1,0 +1,222 @@
+name: Self-Healing Data Pipeline
+
+on:
+  workflow_dispatch: 
+    inputs:
+      pipeline:
+        description: 'Which Agent to run?'
+        type: choice
+        default: eu_sales
+        options: [skip, eu_sales, us_crm, global_marketing, all]
+      bootstrap_infra:
+        description: 'Provision baseline AWS infrastructure? Run once on first setup.'
+        type: choice
+        default: 'skip'
+        options: ['skip', 'apply', 'destroy']
+      chaos_target:
+        description: 'Where to inject dirty data?'
+        type: choice
+        default: skip
+        options: [skip, eu_sales, us_crm, global_marketing, all]
+      db_type:
+        description: 'Database Type for Chaos'
+        type: choice
+        default: postgres
+        options: [postgres, sqlite, mysql]
+      rows:
+        description: 'Number of dirty rows'
+        type: string
+        default: '100'
+      ingest_knowledge:
+        description: 'Sync Global Knowledge Base to Pinecone?'
+        type: choice
+        default: 'yes'
+        options: ['yes', 'no']
+
+jobs:
+  orchestrate:
+    runs-on: ubuntu-latest
+    permissions: 
+      contents: write
+      actions: write
+    defaults:
+        run:
+          working-directory: .
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          fetch-depth: 0
+
+      # execute_terraform() runs the terraform CLI; ubuntu-latest does not include it by default.
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Capture Pipeline IAM ARN
+        if: ${{ github.event.inputs.bootstrap_infra != 'skip' }}
+        id: pipeline-arn
+        run: echo "arn=$(aws sts get-caller-identity --query Arn --output text)" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS credentials (Bootstrap)
+        if: ${{ github.event.inputs.bootstrap_infra != 'skip' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.BOOTSTRAP_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.BOOTSTRAP_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Bootstrap Infrastructure (Optional)
+        if: ${{ github.event.inputs.bootstrap_infra == 'apply' }}
+        env:
+          TF_VAR_region: ${{ vars.BOOTSTRAP_REGION }}
+          TF_VAR_state_bucket: ${{ vars.BOOTSTRAP_STATE_BUCKET }}
+          TF_VAR_lock_table: ${{ vars.BOOTSTRAP_LOCK_TABLE }}
+          TF_VAR_ecr_repo_name: ${{ vars.BOOTSTRAP_ECR_REPO_NAME }}
+          TF_VAR_eks_cluster_name: ${{ vars.BOOTSTRAP_EKS_CLUSTER_NAME }}
+          TF_VAR_eks_version: ${{ vars.BOOTSTRAP_EKS_VERSION }}
+          TF_VAR_cluster_role_name: ${{ vars.BOOTSTRAP_CLUSTER_ROLE_NAME }}
+          TF_VAR_node_role_name: ${{ vars.BOOTSTRAP_NODE_ROLE_NAME }}
+          TF_VAR_rds_db_name: ${{ secrets.POSTGRES_DB_NAME }}
+          TF_VAR_rds_username: ${{ secrets.POSTGRES_DB_USER }}
+          TF_VAR_rds_allowed_cidrs: ${{ vars.BOOTSTRAP_RDS_ALLOWED_CIDRS }}
+          TF_VAR_rds_password: ${{ secrets.POSTGRES_DB_PASSWORD }}
+          TF_VAR_pipeline_iam_arn: ${{ steps.pipeline-arn.outputs.arn }}
+        run: |
+          terraform -chdir=bootstrap init
+          terraform -chdir=bootstrap apply -auto-approve
+
+      - name: Destroy Infrastructure
+        if: ${{ github.event.inputs.bootstrap_infra == 'destroy' }}
+        env:
+          TF_VAR_region: ${{ vars.BOOTSTRAP_REGION }}
+          TF_VAR_state_bucket: ${{ vars.BOOTSTRAP_STATE_BUCKET }}
+          TF_VAR_lock_table: ${{ vars.BOOTSTRAP_LOCK_TABLE }}
+          TF_VAR_ecr_repo_name: ${{ vars.BOOTSTRAP_ECR_REPO_NAME }}
+          TF_VAR_eks_cluster_name: ${{ vars.BOOTSTRAP_EKS_CLUSTER_NAME }}
+          TF_VAR_eks_version: ${{ vars.BOOTSTRAP_EKS_VERSION }}
+          TF_VAR_cluster_role_name: ${{ vars.BOOTSTRAP_CLUSTER_ROLE_NAME }}
+          TF_VAR_node_role_name: ${{ vars.BOOTSTRAP_NODE_ROLE_NAME }}
+          TF_VAR_rds_db_name: ${{ secrets.POSTGRES_DB_NAME }}
+          TF_VAR_rds_username: ${{ secrets.POSTGRES_DB_USER }}
+          TF_VAR_rds_allowed_cidrs: ${{ vars.BOOTSTRAP_RDS_ALLOWED_CIDRS }}
+          TF_VAR_rds_password: ${{ secrets.POSTGRES_DB_PASSWORD }}
+          TF_VAR_pipeline_iam_arn: ${{ steps.pipeline-arn.outputs.arn }}
+        run: |
+          terraform -chdir=bootstrap init
+          terraform -chdir=bootstrap destroy -auto-approve
+
+      - name: Restore AWS credentials
+        if: ${{ github.event.inputs.bootstrap_infra == 'apply' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Install uv and dependencies
+        if: ${{ github.event.inputs.bootstrap_infra != 'destroy' }}
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.astral/bin" >> $GITHUB_PATH
+          # Ensure uv is on PATH for this shell, then run install
+          export PATH="$HOME/.astral/bin:$PATH"
+          make install
+
+      - name: Seed Dirty Data (Optional)
+        # Seed Dirty Data is optional and only runs if the chaos_target is not skip
+        if: ${{ github.event.inputs.chaos_target != 'skip' && github.event.inputs.bootstrap_infra != 'destroy' }}
+        env:
+          POSTGRES_DB_HOST: ${{ secrets.POSTGRES_DB_HOST }}
+          POSTGRES_DB_PORT: ${{ secrets.POSTGRES_DB_PORT }}
+          POSTGRES_DB_USER: ${{ secrets.POSTGRES_DB_USER }}
+          POSTGRES_DB_PASSWORD: ${{ secrets.POSTGRES_DB_PASSWORD }}
+          POSTGRES_DB_NAME: ${{ secrets.POSTGRES_DB_NAME }}
+          
+        run: |
+          make chaos \
+            target=${{ github.event.inputs.chaos_target }} \
+            db_type=${{ github.event.inputs.db_type }} \
+            rows=${{ github.event.inputs.rows }}
+
+      - name: Sync Knowledge Base (RAG) (Optional)
+        # Runs if the user selected 'yes' (or kept the old input, if not 'skip')
+        if: ${{ github.event.inputs.ingest_knowledge == 'yes' && github.event.inputs.bootstrap_infra != 'destroy' }}
+        env:
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+        run: make ingest
+
+      - name: Login to Amazon ECR
+        if: ${{ github.event.inputs.bootstrap_infra != 'destroy' }}
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Configure kubectl for EKS
+        if: ${{ github.event.inputs.bootstrap_infra != 'destroy' }}
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ secrets.AWS_DEFAULT_REGION }} \
+            --name ${{ vars.BOOTSTRAP_EKS_CLUSTER_NAME }}
+
+      - name: Run Self-Healing Agent
+        if: ${{ github.event.inputs.pipeline != 'skip' && github.event.inputs.bootstrap_infra != 'destroy' }}
+        env:
+          # --- AI & Knowledge Base ---
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+          LANGCHAIN_TRACING_V2: ${{ secrets.LANGCHAIN_TRACING_V2 }}
+          LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+          LANGCHAIN_PROJECT: ${{ secrets.LANGCHAIN_PROJECT }}
+
+          # --- Cloud Credentials ---
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: "configs/keys/gcp-service-account.json"
+
+          # --- Monitoring & Automation ---
+          GRAFANA_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
+          TRINO_USER: ${{ secrets.TRINO_USER }}
+          TRINO_PASSWORD: ${{ secrets.TRINO_PASSWORD }}
+          # GitHub API (fetch_github_action_logs): reads GITHUB_TOKEN or GH_TOKEN (see agents/tools.py).
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          
+          # Fixed values
+          PROJECT_ENV: production
+          LOG_LEVEL: INFO
+
+          # --- Database Credentials ---
+          POSTGRES_DB_HOST: ${{ secrets.POSTGRES_DB_HOST }}
+          POSTGRES_DB_PORT: ${{ secrets.POSTGRES_DB_PORT }}
+          POSTGRES_DB_USER: ${{ secrets.POSTGRES_DB_USER }}
+          POSTGRES_DB_PASSWORD: ${{ secrets.POSTGRES_DB_PASSWORD }}
+          POSTGRES_DB_NAME: ${{ secrets.POSTGRES_DB_NAME }}
+
+        run: |
+          if [ "${{ github.event.inputs.pipeline }}" = "all" ]; then
+            make run p=eu_sales
+            make run p=us_crm
+            make run p=global_marketing
+          else
+            make run p=${{ github.event.inputs.pipeline }}
+          fi
