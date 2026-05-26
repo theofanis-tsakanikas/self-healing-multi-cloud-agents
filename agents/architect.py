@@ -197,10 +197,21 @@ def architect_node(state: AgentState):
         logger.info(f"✅ GATE: Implementation phase. Missing: {missing_artifacts or 'none'}")
 
     # Bind only the phase-specific tools to the LLM.
-    # Force a tool call during Implementation when artifacts are still missing —
-    # without this, the LLM may respond with text only and loop indefinitely.
+    # Force tool_choice="required" in every phase where there is still work to do —
+    # without this the LLM can skip the tool call and reply with plain text,
+    # which triggers the Supervisor's keyword scan and causes false Medic routing.
     current_phase_tools = [full_tools_map[name] for name in allowed_tool_names]
-    if "write_project_file" in allowed_tool_names and missing_artifacts and not is_fix_mode:
+
+    should_force_tool = not is_fix_mode and (
+        # Discovery phase: standards still missing
+        ("query_vector_store" in allowed_tool_names and not has_all_standards)
+        # Schema phase: schema not yet read
+        or ("read_data_schema" in allowed_tool_names and not schema_discovered)
+        # Implementation phase: artifacts still missing
+        or ("write_project_file" in allowed_tool_names and bool(missing_artifacts))
+    )
+
+    if should_force_tool:
         llm_with_tools = llm.bind_tools(current_phase_tools, tool_choice="required")
     else:
         llm_with_tools = llm.bind_tools(current_phase_tools)

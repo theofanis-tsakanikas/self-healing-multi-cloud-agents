@@ -78,6 +78,11 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      # ── LangSmith Tracing ────────────────────────────────────────────────────
+      LANGCHAIN_TRACING_V2: ${{ vars.LANGCHAIN_TRACING_V2 }}
+      LANGCHAIN_PROJECT:    ${{ vars.LANGCHAIN_PROJECT }}
+      LANGCHAIN_API_KEY:    ${{ secrets.LANGCHAIN_API_KEY }}
+
       # ── LLM ─────────────────────────────────────────────────────────────────
       LLM_MODEL:         ${{ vars.LLM_MODEL }}
       LLM_TIMEOUT_SEC:   ${{ vars.LLM_TIMEOUT_SEC }}
