@@ -3,16 +3,108 @@ name: Run Multi-Cloud Self-Healing Agent
 on:
   workflow_dispatch:
     inputs:
-      pipeline_input:
-        description: >
-          Pipeline name (e.g. eu_sales) or a natural-language description
-          (e.g. "daily sales data from PostgreSQL to S3")
+
+      pipeline:
+        description: 'Pipeline to run (name or natural-language description)'
         required: true
+        type: choice
+        options:
+          - eu_sales
+          - global_marketing
+          - us_crm
+        default: eu_sales
+
+      run_bootstrap:
+        description: 'Provision baseline AWS infrastructure? (first setup only)'
+        required: true
+        type: choice
+        options:
+          - skip
+          - run
+        default: skip
+
+      sync_knowledge_base:
+        description: 'Sync Knowledge Base to Pinecone?'
+        required: true
+        type: choice
+        options:
+          - skip
+          - sync
+        default: skip
+
+      inject_chaos:
+        description: 'Inject dirty/chaos data into the database?'
+        required: true
+        type: choice
+        options:
+          - skip
+          - inject
+        default: skip
+
+      chaos_target:
+        description: 'Chaos target pipeline (only if inject_chaos = inject)'
+        required: false
+        type: choice
+        options:
+          - eu_sales
+          - global_marketing
+          - us_crm
+          - all
+        default: eu_sales
+
+      chaos_db_type:
+        description: 'Database type for chaos injection'
+        required: false
+        type: choice
+        options:
+          - postgres
+          - mysql
+          - sqlite
+        default: postgres
+
+      chaos_rows:
+        description: 'Number of dirty rows to inject'
+        required: false
+        default: '100'
         type: string
 
 jobs:
   run-agent:
     runs-on: ubuntu-latest
+
+    env:
+      # ── LLM ─────────────────────────────────────────────────────────────────
+      LLM_MODEL:         ${{ vars.LLM_MODEL }}
+      LLM_TIMEOUT_SEC:   ${{ vars.LLM_TIMEOUT_SEC }}
+      LLM_MAX_RETRIES:   ${{ vars.LLM_MAX_RETRIES }}
+      OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      # ── Vector Store ─────────────────────────────────────────────────────────
+      PINECONE_API_KEY:    ${{ secrets.PINECONE_API_KEY }}
+      PINECONE_INDEX_NAME: ${{ vars.PINECONE_INDEX_NAME }}
+
+      # ── GitHub ───────────────────────────────────────────────────────────────
+      GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+
+      # ── AWS — credentials for SSM access (DB config read from SSM at runtime)
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION:    ${{ vars.AWS_DEFAULT_REGION }}
+
+      # ── MySQL — GCP Cloud SQL (global_marketing pipeline) ─────────────────────
+      MYSQL_DB_HOST:     ${{ vars.MYSQL_DB_HOST }}
+      MYSQL_DB_PORT:     ${{ vars.MYSQL_DB_PORT }}
+      MYSQL_DB_USER:     ${{ vars.MYSQL_DB_USER }}
+      MYSQL_DB_NAME:     ${{ vars.MYSQL_DB_NAME }}
+      MYSQL_DB_PASSWORD: ${{ secrets.MYSQL_DB_PASSWORD }}
+
+      # ── Trino & Prometheus ────────────────────────────────────────────────────
+      TRINO_HOST:     ${{ vars.TRINO_HOST }}
+      TRINO_PORT:     ${{ vars.TRINO_PORT }}
+      TRINO_USER:     ${{ vars.TRINO_USER }}
+      PROMETHEUS_URL: ${{ vars.PROMETHEUS_URL }}
 
     steps:
       - name: Checkout repository
@@ -29,41 +121,38 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run agent
+      # ── STEP 1: Bootstrap (optional, first setup only) ───────────────────────
+      - name: Install Terraform
+        if: inputs.run_bootstrap == 'run'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      - name: Bootstrap AWS infrastructure
+        if: inputs.run_bootstrap == 'run'
+        working-directory: bootstrap/aws
         env:
-          # ── LLM ─────────────────────────────────────────────────────────────
-          LLM_MODEL:         ${{ vars.LLM_MODEL }}
-          LLM_TIMEOUT_SEC:   ${{ vars.LLM_TIMEOUT_SEC }}
-          LLM_MAX_RETRIES:   ${{ vars.LLM_MAX_RETRIES }}
-          OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TF_VAR_rds_allowed_cidrs: ${{ vars.TF_VAR_RDS_ALLOWED_CIDRS }}
+          TF_VAR_pipeline_iam_arn:  ${{ vars.TF_VAR_PIPELINE_IAM_ARN }}
+        run: |
+          terraform init
+          terraform apply -auto-approve
+          echo "✅ Bootstrap complete. RDS + EKS + SSM populated."
 
-          # ── Vector Store ─────────────────────────────────────────────────────
-          PINECONE_API_KEY:    ${{ secrets.PINECONE_API_KEY }}
-          PINECONE_INDEX_NAME: ${{ vars.PINECONE_INDEX_NAME }}
+      # ── STEP 2: Sync Knowledge Base (optional) ───────────────────────────────
+      - name: Sync Knowledge Base to Pinecone
+        if: inputs.sync_knowledge_base == 'sync'
+        run: uv run python scripts/ingest_to_pinecone.py
 
-          # ── GitHub ───────────────────────────────────────────────────────────
-          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
+      # ── STEP 3: Inject chaos data (optional) ────────────────────────────────
+      - name: Inject chaos data
+        if: inputs.inject_chaos == 'inject'
+        run: |
+          uv run python scripts/seed_chaos.py \
+            --target "${{ inputs.chaos_target }}" \
+            --db-type "${{ inputs.chaos_db_type }}" \
+            --rows "${{ inputs.chaos_rows }}"
 
-          # ── AWS — credentials for SSM access (DB config read from SSM at runtime)
-          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION:    ${{ vars.AWS_DEFAULT_REGION }}
-
-          # ── MySQL — GCP Cloud SQL (global_marketing pipeline) ─────────────────
-          # Host/user/name are non-sensitive. Password read from .bootstrap_outputs
-          # or env var until GCP Secret Manager is configured.
-          MYSQL_DB_HOST:     ${{ vars.MYSQL_DB_HOST }}
-          MYSQL_DB_PORT:     ${{ vars.MYSQL_DB_PORT }}
-          MYSQL_DB_USER:     ${{ vars.MYSQL_DB_USER }}
-          MYSQL_DB_NAME:     ${{ vars.MYSQL_DB_NAME }}
-          MYSQL_DB_PASSWORD: ${{ secrets.MYSQL_DB_PASSWORD }}
-
-          # ── Trino & Prometheus ────────────────────────────────────────────────
-          TRINO_HOST:     ${{ vars.TRINO_HOST }}
-          TRINO_PORT:     ${{ vars.TRINO_PORT }}
-          TRINO_USER:     ${{ vars.TRINO_USER }}
-          PROMETHEUS_URL: ${{ vars.PROMETHEUS_URL }}
-
-        run: uv run python main.py "${{ github.event.inputs.pipeline_input }}"
+      # ── STEP 4: Run the agent ────────────────────────────────────────────────
+      - name: Run agent
+        run: uv run python main.py "${{ inputs.pipeline }}"
