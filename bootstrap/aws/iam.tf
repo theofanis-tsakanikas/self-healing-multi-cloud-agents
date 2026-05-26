@@ -4,6 +4,41 @@ locals {
   oidc_issuer_host = replace(aws_eks_cluster.main.identity[0].oidc[0].issuer, "https://", "")
 }
 
+# ── Runtime Service Account: SSM read permissions ────────────────────────────
+# self-healing-agent-svc reads DB credentials from SSM at runtime.
+# This is the only permission the runtime user needs — no DB passwords in env vars.
+
+resource "aws_iam_user_policy" "svc_ssm_read" {
+  name = "multi-cloud-self-healing-agent-ssm-read"
+  user = "self-healing-agent-svc"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+        ]
+        Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/multi-cloud-self-healing-agent/*"
+      },
+      {
+        # Required to decrypt SecureString parameters (rds_password)
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${var.region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+}
+
 # ── EKS OIDC Provider (required for IRSA) ────────────────────────────────────
 
 data "tls_certificate" "eks" {
