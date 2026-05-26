@@ -288,7 +288,11 @@ def architect_node(state: AgentState):
                         # Regardless of what was asked, if the response contains the knowledge, we store it.
 
                         # 1. Check for Python Standards
-                        if any(word in res_lower for word in ["sqlalchemy", "pandas", "chunksize", "os.getenv"]):
+                        if any(word in res_lower for word in [
+                            "sqlalchemy", "pandas", "chunksize", "os.getenv",
+                            "python", "def ", "import ", "logging", ".py",
+                            "etl", "ingestion", "script", "boto3", "pyspark",
+                        ]):
                             collected_specs["arch_standard_python"] = str(result)
                             logger.info("🎯 Smart Mapping: Python Standards Secured.")
 
@@ -301,6 +305,16 @@ def architect_node(state: AgentState):
                         if any(word in res_lower for word in ["grafana", "schemaversion", "json dashboard"]):
                             collected_specs["arch_standard_grafana"] = str(result)
                             logger.info("🎯 Smart Mapping: Grafana Standards Secured.")
+
+                        # Fallback: if smart mapping still didn't capture a missing key
+                        # and the result is non-empty, store it for the first missing key.
+                        # Prevents infinite discovery loops when content keywords don't match.
+                        no_relevant = "no relevant guidelines found" in res_lower
+                        still_missing = [k for k in required_knowledge_keys if k not in collected_specs]
+                        if still_missing and not no_relevant and str(result).strip():
+                            target_key = still_missing[0]
+                            collected_specs[target_key] = str(result)
+                            logger.info(f"🎯 Fallback Mapping: {target_key} secured from query result.")
 
                     # Logic for Writing Files (Implementation Phase)
                     elif tool_name == "write_project_file":
