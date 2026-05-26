@@ -102,7 +102,13 @@ def medic_node(state: AgentState):
             tool_name = tool_call["name"]
             tool_args = tool_call["args"]
 
-            tool_func = {t.name: t for t in tools}[tool_name]
+            tool_func = {t.name: t for t in tools}.get(tool_name)
+            if tool_func is None:
+                result_str = f"Error: tool '{tool_name}' is not available in this phase."
+                t_msg = ToolMessage(tool_call_id=tool_call["id"], content=result_str)
+                messages.append(t_msg)
+                new_messages_for_state.append(t_msg)
+                continue
             result = tool_func.invoke(tool_args)
             result_str = str(result)
 

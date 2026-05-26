@@ -21,6 +21,7 @@ from pinecone import Pinecone
 import time
 import logging
 from langchain_openai import OpenAIEmbeddings
+from utils.cloud_config import cloud_get
 
 # Initialize Pinecone client
 try:
@@ -124,31 +125,33 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
     try:
         # 1. Build the connection URL dynamically based on db_type
         if db_type == "postgres":
-            user = os.getenv("POSTGRES_DB_USER")
-            pw = os.getenv("POSTGRES_DB_PASSWORD")
-            host = os.getenv("POSTGRES_DB_HOST")
-            port = os.getenv("POSTGRES_DB_PORT", "5432")
-            db = os.getenv("POSTGRES_DB_NAME")
+            # Priority: SSM → .bootstrap_outputs.json → env vars
+            host = cloud_get("aws", "rds_host")
+            port = cloud_get("aws", "rds_port") or "5432"
+            user = cloud_get("aws", "rds_username")
+            pw   = cloud_get("aws", "rds_password")
+            db   = cloud_get("aws", "rds_db_name")
             db_url = f"postgresql://{user}:{pw}@{host}:{port}/{db}"
-        
+
         elif db_type == "mysql":
-            user = os.getenv("MYSQL_DB_USER")
-            pw = os.getenv("MYSQL_DB_PASSWORD")
-            host = os.getenv("MYSQL_DB_HOST")
-            port = os.getenv("MYSQL_DB_PORT", "3306")
-            db = os.getenv("MYSQL_DB_NAME")
+            # Priority: .bootstrap_outputs.json → env vars (GCP Cloud SQL)
+            host = cloud_get("gcp", "db_host")
+            port = cloud_get("gcp", "db_port") or "3306"
+            user = cloud_get("gcp", "db_user")
+            pw   = cloud_get("gcp", "db_password")
+            db   = cloud_get("gcp", "db_name")
             # Use the pymysql driver for MySQL
             db_url = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
-            
+
         elif db_type == "sqlite":
             # For SQLite, read the URL/path directly from .env
-            db_url = os.getenv("SQLITE_SALES_URL") 
-        
+            db_url = os.getenv("SQLITE_SALES_URL")
+
         else:
             return f"Error: Unsupported db_type '{db_type}'"
 
         if not db_url:
-            return f"Error: Connection details for {db_type} are missing from .env"
+            return f"Error: Connection details for {db_type} not found in SSM, .bootstrap_outputs.json, or env vars"
 
         # 2. Create engine and fetch metadata
         engine = create_engine(db_url)

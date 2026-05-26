@@ -15,8 +15,7 @@ CONFIGS_DIR = os.path.join(BASE_DIR, "configs")
 INFRA_CONFIGS_DIR = os.path.join(CONFIGS_DIR, "infra")
 PROMPTS_DIR = os.path.join(BASE_DIR, "agents", "prompts")
 
-# 4. Global Settings (Optional)
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+# 4. Global Settings
 TEMPERATURE = 0
 
 DEFAULT_REQUIRED_ARTIFACTS = [
@@ -46,9 +45,7 @@ DEFAULT_REQUIRED_DATABRICKS_TF_FILES = [
     "terraform/terraform.tfvars",
 ]
 
-# LLM provider selection. Valid values: "openai", "anthropic", "vertexai"
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
-
-# OpenAI HTTP timeout (seconds). Prevents unbounded hangs on slow/stuck API calls.
-LLM_TIMEOUT_SEC = float(os.getenv("LLM_TIMEOUT_SEC", "120"))
-LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1"))
+# LLM timeout / retries — read directly by llm_factory.py from env vars.
+# Defined here only as documentation; do not import these — use os.getenv() in llm_factory.
+# LLM_TIMEOUT_SEC  (default: 120s)
+# LLM_MAX_RETRIES  (default: 1)

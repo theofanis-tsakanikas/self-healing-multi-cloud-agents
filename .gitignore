@@ -3,6 +3,7 @@
 
 # Environment secrets
 .env
+.env.bootstrap
 configs/keys/
 
 # Python

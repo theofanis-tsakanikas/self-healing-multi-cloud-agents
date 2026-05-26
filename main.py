@@ -66,6 +66,7 @@ def _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
         "last_push_sha": "",
         "medic_fix_requested": False,
         "agent_error": False,
+        "ci_poll_attempt": 0,
         "raw_configs": {
             "pipeline": pipe_conf,
             "database": db_conf,
@@ -175,7 +176,9 @@ def run_self_healing_system(pipeline_name: str):
     _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task)
 
 if __name__ == "__main__":
-    _provider = os.getenv("LLM_PROVIDER", "openai").lower()
+    from agents.llm_factory import _infer_provider
+    _model    = os.getenv("LLM_MODEL", "gpt-4o")
+    _provider = (os.getenv("LLM_PROVIDER") or _infer_provider(_model)).lower()
     if _provider == "openai" and not os.getenv("OPENAI_API_KEY"):
         logger.error("OPENAI_API_KEY not set. Add it to .env (local) or GitHub Secrets (CI).")
         sys.exit(1)

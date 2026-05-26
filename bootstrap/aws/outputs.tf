@@ -28,21 +28,21 @@ output "irsa_role_arn" {
 }
 
 output "rds_host" {
-  description = "Set as POSTGRES_DB_HOST in .env"
+  description = "Written to SSM: /multi-cloud-self-healing-agent/aws/rds_host"
   value       = aws_db_instance.eu_sales_raw.address
 }
 
 output "rds_port" {
-  description = "Set as POSTGRES_DB_PORT in .env"
+  description = "Written to SSM: /multi-cloud-self-healing-agent/aws/rds_port"
   value       = aws_db_instance.eu_sales_raw.port
 }
 
 output "rds_db_name" {
-  description = "Set as POSTGRES_DB_NAME in .env"
+  description = "Written to SSM: /multi-cloud-self-healing-agent/aws/rds_db_name"
   value       = aws_db_instance.eu_sales_raw.db_name
 }
 
 output "rds_username" {
-  description = "Set as POSTGRES_DB_USER in .env"
+  description = "Written to SSM: /multi-cloud-self-healing-agent/aws/rds_username"
   value       = aws_db_instance.eu_sales_raw.username
 }

@@ -73,3 +73,8 @@ class AgentState(TypedDict):
     # Set by the agent node; cleared to False by Supervisor when routing to Medic
     # so the next agent starts with a clean error state.
     agent_error: bool
+
+    # Exponential-backoff counter used by Medic when CI logs are still PENDING.
+    # Incremented each time Medic sleeps waiting for the CI run to complete.
+    # Reset to 0 after logs arrive or a fix is requested.
+    ci_poll_attempt: int

@@ -38,6 +38,13 @@ resource "aws_db_subnet_group" "rds" {
   }
 }
 
+# Auto-generate a 32-char password — never hardcoded, stored only in SSM.
+resource "random_password" "rds" {
+  length           = 32
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}|;"
+}
+
 resource "aws_db_instance" "eu_sales_raw" {
   identifier        = "eu-sales-raw-data"
   engine            = "postgres"
@@ -47,7 +54,7 @@ resource "aws_db_instance" "eu_sales_raw" {
 
   db_name  = var.rds_db_name
   username = var.rds_username
-  password = var.rds_password
+  password = random_password.rds.result
 
   db_subnet_group_name   = aws_db_subnet_group.rds.name
   vpc_security_group_ids = [aws_security_group.rds.id]

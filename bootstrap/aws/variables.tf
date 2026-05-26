@@ -40,12 +40,6 @@ variable "rds_username" {
   default     = "postgres"
 }
 
-variable "rds_password" {
-  description = "Master password for the RDS instance (POSTGRES_DB_PASSWORD)"
-  type        = string
-  sensitive   = true
-}
-
 variable "rds_allowed_cidrs" {
   description = "CIDR blocks allowed to connect to RDS on port 5432 (add your local IP)"
   type        = list(string)
