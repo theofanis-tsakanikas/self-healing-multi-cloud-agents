@@ -1,0 +1,46 @@
+aws_setup:
+  bucket_name: eu-sales-insights-data
+  ecr_repository: <AWS_ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/eu-sales-pipeline-repo
+  eks_cluster_name: multi-cloud-agent-cluster
+  iam_role_name: eu-sales-insights-role
+  k8s_namespace: analytics
+  k8s_service_account_name: eu-sales-insights-sa
+  lock_table: terraform-state-lock
+  region: eu-central-1
+  state_bucket: multi-cloud-agent-tf-state-bucket
+  state_key: terraform/eu-sales-insights/terraform.tfstate
+business_rules_config: configs/business_rules/sales_logic.yaml
+cloud_provider: aws
+data_domain: sales
+owner: analytics_team
+pipeline_id: pipe_eu_sales_to_s3
+priority: high
+project_folder_name: multi-cloud-self-healing-agent
+project_name: eu-sales-insights
+project_structure:
+  data_dir: data
+  monitoring_path: dashboards/monitoring_specs.json
+  python_dir: scripts
+  python_script_path: scripts/pipe_eu_sales_to_s3.py
+  requirements_path: requirements.txt
+  sql_dir: sql
+  trino_setup_path: sql/setup_trino.sql
+shared_services:
+  grafana:
+    namespace: monitoring
+    url: http://grafana.monitoring.svc.cluster.local
+  trino:
+    catalog: hive
+    host: trino.analytics.svc.cluster.local
+    port: 8080
+    schema: sales_eu
+    table_name: pipe_eu_sales_to_s3
+source_config: configs/databases/postgres_sales.yaml
+target_infra_config: configs/infra/aws_s3.yaml
+update_frequency: daily
+# Optional — omit to use system defaults from agents/constants.py
+required_artifacts:
+  - scripts/{pipeline_name}.py
+  - sql/setup_trino.sql
+  - dashboards/monitoring_specs.json
+  - requirements.txt

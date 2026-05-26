@@ -1,0 +1,198 @@
+import os
+import sys
+import datetime
+import yaml
+import logging
+from dotenv import load_dotenv
+
+from agents.constants import CONFIGS_DIR
+from utils.prompt_utils import format_prompt
+from utils.file_utils import read_file
+from utils.config_utils import load_pipeline_bundle
+from utils.nlp_parser import build_pipeline_bundle_from_nl
+
+# The Compiled Graph
+from graph import app
+
+# Load environment variables
+load_dotenv()
+
+# --- LOGGING CONFIGURATION ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("pipeline_execution.log", mode="a")
+    ]
+)
+logger = logging.getLogger("PIPELINE_ORCHESTRATOR")
+
+
+def _is_natural_language(arg: str) -> bool:
+    """
+    Heuristic: if the argument is longer than 4 words it is a natural language
+    description, not a pipeline YAML slug.
+    """
+    return len(arg.split()) > 4
+
+
+def _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
+    """
+    Common launch path: initialize state and run the LangGraph workflow.
+    Called by both the YAML-based and NL-based entry points.
+    """
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    unique_project_id = f"{pipeline_id.upper()}-{timestamp}"
+    logger.info(f"Generated Project ID: {unique_project_id}")
+
+    os.environ["PROJECT_ID"] = unique_project_id
+
+    initial_state = {
+        "task": task,
+        "messages": [],
+        "generated_code": "",
+        "error_log": "",
+        "project_id": unique_project_id,
+        "config_path": "",
+        "target_infra": infra_conf.get("service_name", pipe_conf.get("cloud_provider", "unknown")),
+        "written_files": [],
+        "infra_provisioned": False,
+        "collected_specs": {},
+        "architect_status": "",
+        "infra_status": "",
+        "schema_discovered": False,
+        "github_done": False,
+        "last_push_sha": "",
+        "medic_fix_requested": False,
+        "agent_error": False,
+        "raw_configs": {
+            "pipeline": pipe_conf,
+            "database": db_conf,
+            "rules": rules_conf,
+            "infrastructure": infra_conf,
+        },
+    }
+
+    print("\n" + "=" * 75)
+    print(f"🚀 LAUNCHING PIPELINE: {pipeline_id.upper()}")
+    print(f"🆔 PROJECT ID:         {unique_project_id}")
+    print(f"☁️  CLOUD:              {pipe_conf.get('cloud_provider', '?').upper()}")
+    print("=" * 75 + "\n")
+
+    try:
+        run_config = {
+            "run_name": f"Run_{pipeline_id}_{timestamp}",
+            "recursion_limit": 200,
+            "configurable": {"thread_id": unique_project_id},
+        }
+        logger.info("Handing over to LangGraph Supervisor...")
+        for output in app.stream(initial_state, config=run_config):
+            for node_name, state_update in output.items():
+                logger.info(f"Node '{node_name.upper()}' finished execution.")
+                if "written_files" in state_update:
+                    logger.info(f"📂 Files: {state_update['written_files']}")
+                if "next_step" in state_update:
+                    print(f"    👉 Routing to: {state_update['next_step']}")
+                if state_update.get("error_log"):
+                    logger.warning(f"Health issues reported by '{node_name}'.")
+    except Exception as e:
+        logger.critical(f"Workflow engine crashed: {str(e)}")
+        sys.exit(1)
+
+
+def run_from_natural_language(description: str):
+    """
+    Entry point for natural language pipeline creation.
+    Parses the description, generates a full config bundle, and launches.
+    """
+    print("\n" + "=" * 75)
+    print("🧠 NATURAL LANGUAGE MODE")
+    print(f"📝 Input: {description[:100]}{'...' if len(description) > 100 else ''}")
+    print("=" * 75)
+    print("Parsing intent...\n")
+
+    try:
+        pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task = \
+            build_pipeline_bundle_from_nl(description)
+    except Exception as e:
+        logger.error(f"NL parsing failed: {e}")
+        sys.exit(1)
+
+    logger.info(
+        f"Parsed: pipeline_id={pipeline_id}, "
+        f"cloud={pipe_conf.get('cloud_provider')}, "
+        f"db={db_conf.get('db_type')}, "
+        f"rules={len(rules_conf.get('quality_standards', []))}"
+    )
+
+    _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task)
+
+
+def run_self_healing_system(pipeline_name: str):
+    """
+    Main entry point to run the self-healing data engineering system.
+    Dynamically loads the full configuration bundle and initiates the LangGraph workflow.
+    """
+    
+    pipeline_dir = os.path.join(CONFIGS_DIR, "pipelines")
+    spec_file = os.path.join(pipeline_dir, f"{pipeline_name}_pipeline.yaml")
+    objective_file = os.path.join(pipeline_dir, f"{pipeline_name}_objective.md")
+
+    logger.info(f"Initializing pipeline: {pipeline_name}")
+
+    if not os.path.exists(spec_file) or not os.path.exists(objective_file):
+        logger.error(
+            f"Configuration files missing for '{pipeline_name}'. "
+            f"Expected: {spec_file} and {objective_file}"
+        )
+        sys.exit(1)
+
+    try:
+        pipe_conf, db_conf, rules_conf, infra_conf = load_pipeline_bundle(os.getcwd(), spec_file)
+        pipeline_id = pipe_conf.get("pipeline_id", pipeline_name)
+        logger.info(f"Configuration bundle loaded for {pipeline_id}.")
+    except Exception as e:
+        logger.error(f"Failed to load configuration bundle: {str(e)}")
+        sys.exit(1)
+
+    # Build a temporary project_id for placeholder resolution in the objective template
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    temp_project_id = f"{pipeline_name.upper()}-{timestamp}"
+
+    pipeline_objective = read_file(objective_file)
+    try:
+        task = format_prompt(
+            pipeline_objective,
+            project_id=temp_project_id,
+            infra_standards=infra_conf,
+            **pipe_conf,
+        )
+    except Exception as e:
+        logger.error(f"Objective formatting failed: {str(e)}")
+        sys.exit(1)
+
+    _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task)
+
+if __name__ == "__main__":
+    _provider = os.getenv("LLM_PROVIDER", "openai").lower()
+    if _provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+        logger.error("OPENAI_API_KEY not set. Add it to .env (local) or GitHub Secrets (CI).")
+        sys.exit(1)
+    if _provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
+        logger.error("ANTHROPIC_API_KEY not set. Add it to .env (local) or GitHub Secrets (CI).")
+        sys.exit(1)
+    # vertexai relies on GOOGLE_APPLICATION_CREDENTIALS — validated by the SDK at call time
+
+    if len(sys.argv) < 2:
+        print("⚠️  Usage:")
+        print("  YAML mode : python main.py eu_sales")
+        print('  NL mode   : python main.py "I need daily sales data from PostgreSQL to GCP"')
+        sys.exit(1)
+
+    user_input = " ".join(sys.argv[1:])  # supports multi-word args without quotes
+
+    if _is_natural_language(user_input):
+        run_from_natural_language(user_input)
+    else:
+        run_self_healing_system(user_input)

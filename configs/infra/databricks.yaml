@@ -1,0 +1,55 @@
+provider: databricks
+
+# Host cloud — Databricks runs ON one of the 3 clouds
+host_cloud: azure          # aws | azure | gcp
+host_region: westeurope    # matches host_cloud region
+
+# Databricks workspace
+workspace_name: "${pipeline_id}-workspace"
+databricks_tier: premium   # standard | premium (Unity Catalog requires premium)
+
+# Compute — Jobs cluster (batch pipelines)
+jobs_cluster:
+  node_type: Standard_DS3_v2   # Azure VM type (2 vCPU, 14 GB RAM)
+  num_workers: 2
+  autoscale_min: 1
+  autoscale_max: 4
+  spark_version: "14.3.x-scala2.12"
+  runtime_engine: PHOTON        # Photon engine for 3-5x faster Spark
+
+# Compute — SQL Warehouse (analytics / Trino replacement)
+sql_warehouse:
+  size: XSMALL                  # XSMALL | SMALL | MEDIUM
+  auto_stop_mins: 10
+  channel: CURRENT
+
+# Storage — Delta Lake backend
+delta_storage:
+  format: delta
+  # Resolves to the host_cloud storage at deploy time:
+  #   azure → abfss://{container}@{account}.dfs.core.windows.net/{pipeline_id}/
+  #   aws   → s3://{bucket}/{pipeline_id}/
+  #   gcp   → gs://{bucket}/{pipeline_id}/
+  partition_by: run_date         # Hive-style partitioning
+
+# Unity Catalog
+unity_catalog:
+  enabled: true
+  metastore: "${host_region}-metastore"
+  catalog: "${pipeline_id}_catalog"
+  schema: raw
+
+# MLflow (Mosaic AI tracking)
+mlflow:
+  enabled: false               # set true if pipeline includes ML model training
+  experiment_name: "${pipeline_id}-experiment"
+
+# State backend (Terraform)
+terraform_backend:
+  # Resolves to host_cloud state storage at deploy time
+  state_key: "databricks/${pipeline_id}/terraform.tfstate"
+
+# GitHub Actions
+cicd:
+  runner: ubuntu-latest
+  databricks_cli_version: "0.18.0"

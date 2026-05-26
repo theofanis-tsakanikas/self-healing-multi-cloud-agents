@@ -1,0 +1,22 @@
+# Azure Infrastructure Standards for Data Lake (ADLS Gen2)
+infrastructure_type: "object_storage"
+cloud_provider: "azure"
+service_name: "blob_storage"
+
+# STORAGE STANDARDS
+storage_tier: "Hot"
+hierarchical_namespace: true
+data_format: "parquet"
+compression_type: "snappy"
+
+# SECURITY & ACCESS STANDARDS
+auth_method: "azure_ad_workload_identity"
+public_access_level: "private"
+encryption_type: "customer_managed_keys"
+
+# NETWORKING & CONNECTIVITY
+target_uri_pattern: "abfss://{container}@{account}.dfs.core.windows.net/{path}/"
+
+# RETENTION & COMPLIANCE
+versioning_enabled: true
+soft_delete_retention_days: 7

@@ -1,0 +1,30 @@
+# GCP Infrastructure Standards for Cloud Storage (GCS)
+infrastructure_type: "object_storage"
+cloud_provider: "gcp"
+service_name: "storage_bucket"
+
+# STORAGE STANDARDS
+storage_class: "STANDARD"
+data_format: "parquet"
+compression_type: "snappy"
+
+# SECURITY & ACCESS STANDARDS
+auth_method: "gcp_workload_identity"
+iam_configuration: "uniform"
+public_access_prevention: "enforced"
+
+# ENCRYPTION
+encryption:
+  type: "google_managed"
+
+# DATA RETENTION & LIFECYCLE
+versioning_enabled: true
+lifecycle_rules:
+  - action:
+      type: "SetStorageClass"
+      storageClass: "NEARLINE"
+    condition:
+      age: 90
+
+# NETWORKING & CONNECTIVITY
+target_uri_pattern: "gs://{bucket_name}/{path}/"

@@ -1,0 +1,33 @@
+domain: "customer_relationship_management"
+domain_description: "Contains PII and unique customer identity markers."
+
+quality_standards:
+  - capability: "pii_protection"
+    description: "Legal compliance for personal data protection."
+    target_criteria: "Fields containing 'name', 'email', 'phone', or 'address'."
+    logic: "Apply SHA-256 Hashing for names; Mask emails (e.g., a***@b.com)."
+    on_failure_action: "ABORT_PIPELINE"
+
+  - capability: "entity_uniqueness"
+    description: "Maintains a single source of truth for customer records."
+    target_criteria: "Primary Customer Identifiers (cust_id, uuid)."
+    logic: "Enforce uniqueness. Deduplicate based on ID."
+    on_failure_action: "KEEP_MOST_RECENT"
+
+  - capability: "contact_format_integrity"
+    description: "Validates that communication channels are usable."
+    target_criteria: "Email and Phone number strings."
+    logic: "Must conform to standard RFC email regex and E.164 phone patterns."
+    on_failure_action: "NULLIFY_FIELD"
+
+  - capability: "categorical_consistency"
+    description: "Standardizes customer segments or status labels."
+    target_criteria: "Fields like 'status', 'tier', or 'type'."
+    logic: "Trim whitespace and convert to UPPERCASE."
+    on_failure_action: "COERCE"
+
+  - capability: "mandatory_contact_info"
+    description: "Ensures at least one way to reach the customer exists."
+    target_criteria: "Email AND Phone columns."
+    logic: "At least one of these fields must be non-NULL."
+    on_failure_action: "MARK_AS_INCOMPLETE"

@@ -1,0 +1,24 @@
+# Bootstrap outputs — contains AWS account IDs, GCP project IDs, Azure subscription IDs
+.bootstrap_outputs.json
+
+# Environment secrets
+.env
+configs/keys/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl
+
+# Logs
+*.log
+pipeline_execution.log

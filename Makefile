@@ -1,0 +1,110 @@
+# --- Variables ---
+PYTHON = uv run python
+APP = main.py
+SCRIPTS_DIR = scripts
+
+# --- Commands ---
+
+.PHONY: bootstrap-aws
+bootstrap-aws: ## Provision baseline AWS infrastructure (EKS + RDS + S3 + ECR)
+	@echo "Provisioning AWS baseline infrastructure..."
+	terraform -chdir=bootstrap/aws init
+	terraform -chdir=bootstrap/aws apply
+
+.PHONY: bootstrap-azure
+bootstrap-azure: ## Provision baseline Azure infrastructure (AKS + PostgreSQL + ACR)
+	@echo "Provisioning Azure baseline infrastructure..."
+	terraform -chdir=bootstrap/azure init
+	terraform -chdir=bootstrap/azure apply
+
+.PHONY: bootstrap-gcp
+bootstrap-gcp: ## Provision baseline GCP infrastructure (GKE + Cloud SQL + AR)
+	@echo "Provisioning GCP baseline infrastructure..."
+	terraform -chdir=bootstrap/gcp init
+	terraform -chdir=bootstrap/gcp apply
+
+.PHONY: destroy-aws
+destroy-aws: ## DANGER: Tear down all baseline AWS infrastructure
+	@echo "Destroying baseline AWS infrastructure..."
+	terraform -chdir=bootstrap/aws init
+	terraform -chdir=bootstrap/aws destroy
+
+.PHONY: destroy-azure
+destroy-azure: ## DANGER: Tear down all baseline Azure infrastructure
+	@echo "Destroying baseline Azure infrastructure..."
+	terraform -chdir=bootstrap/azure init
+	terraform -chdir=bootstrap/azure destroy
+
+.PHONY: destroy-gcp
+destroy-gcp: ## DANGER: Tear down all baseline GCP infrastructure
+	@echo "Destroying baseline GCP infrastructure..."
+	terraform -chdir=bootstrap/gcp init
+	terraform -chdir=bootstrap/gcp destroy
+
+## Single source of truth: pyproject.toml
+## Before running: cp .env.example .env  (then fill in your credentials)
+.PHONY: install
+install: ## Install all dependencies using uv
+	@echo "Installing dependencies..."
+	uv sync
+
+.PHONY: ingest
+ingest: ## Sync Global Knowledge Base (all 3 clouds) to Pinecone
+	@echo "Syncing Global Standards to Pinecone..."
+	$(PYTHON) $(SCRIPTS_DIR)/ingest_to_pinecone.py --path knowledge_base
+
+.PHONY: chaos
+chaos: ## Seed dirty data. Usage: make chaos target=eu_sales db_type=postgres rows=100
+	@$(if $(target),,$(error Error: target is undefined. Usage: make chaos target=eu_sales))
+	@echo "Seeding chaos into $(target) (db_type=$(db_type))..."
+	$(PYTHON) $(SCRIPTS_DIR)/seed_chaos.py --target $(target) --db-type $(if $(db_type),$(db_type),postgres) --rows $(if $(rows),$(rows),100)
+
+.PHONY: run
+run: ## Run the Self-Healing Agent. Usage: make run p=eu_sales
+	@$(if $(p),,$(error Error: p is undefined. Usage: make run p=eu_sales))
+	@echo "Starting Multi-Cloud Self-Healing Agent for: $(p)..."
+	$(PYTHON) $(APP) $(p)
+
+.PHONY: run-all
+run-all: ## Run all three pipelines sequentially
+	@make run p=eu_sales
+	@make run p=us_crm
+	@make run p=global_marketing
+
+.PHONY: demo-aws
+demo-aws: ## Full AWS demo: ingest + chaos + run eu_sales
+	@make ingest
+	@make chaos target=eu_sales db_type=postgres rows=100
+	@make run p=eu_sales
+
+.PHONY: demo-azure
+demo-azure: ## Full Azure demo: ingest + chaos + run us_crm
+	@make ingest
+	@make chaos target=us_crm db_type=postgres rows=100
+	@make run p=us_crm
+
+.PHONY: demo-gcp
+demo-gcp: ## Full GCP demo: ingest + chaos + run global_marketing
+	@make ingest
+	@make chaos target=global_marketing db_type=mysql rows=100
+	@make run p=global_marketing
+
+.PHONY: test
+test: ## Run the full test suite
+	uv run pytest tests/ -v --tb=short
+
+.PHONY: format
+format: ## Format code with Black and isort
+	@echo "Formatting code..."
+	uv run isort .
+	uv run black .
+
+.PHONY: clean
+clean: ## Remove temporary files and caches
+	@echo "Cleaning up..."
+	find . -type d -name "__pycache__" -exec rm -rf {} +
+	rm -rf .pytest_cache .ruff_cache .uv_cache pipeline_execution.log
+
+.PHONY: help
+help: ## Display this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'

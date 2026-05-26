@@ -1,0 +1,34 @@
+domain: "marketing_analytics"
+domain_description: "Tracks multi-channel ad spend and engagement logs."
+
+quality_standards:
+  - capability: "taxonomy_alignment"
+    description: "Groups fragmented platform names into corporate categories."
+    target_criteria: "Columns indicating 'source', 'platform', or 'network'."
+    logic: "Map ['FB', 'Instagram', 'Meta'] -> 'META_ECOSYSTEM'; ['Google_Ads', 'Youtube'] -> 'GOOGLE_ECOSYSTEM'."
+    on_failure_action: "KEEP_ORIGINAL"
+
+  - capability: "type_safety_enforcement"
+    description: "Ensures metrics can be used in mathematical aggregations."
+    target_criteria: "Metrics like 'spend', 'clicks', 'impressions'."
+    logic: "Force conversion to Numeric (Float/Int). Handle non-numeric strings."
+    on_failure_action: "COERCE_TO_ZERO"
+
+  - capability: "engagement_logic_check"
+    description: "Ensures derived metrics make logical sense."
+    target_criteria: "Relation between 'clicks' and 'impressions'."
+    logic: "Clicks cannot exceed Impressions (CTR <= 100%)."
+    on_failure_action: "ADJUST_OR_NULLIFY"
+
+  - capability: "incremental_window_sync"
+    description: "Handles hourly data ingestion batches."
+    target_criteria: "The 'event_timestamp' or 'ingestion_time' field."
+    logic: "Only process records from the current T-1 hour window."
+    on_failure_action: "SKIP_RECORD"
+
+  - capability: "campaign_id_validation"
+    description: "Ensures every log is attributed to a valid campaign."
+    target_criteria: "Columns containing 'campaign_id' or 'ad_id'."
+    logic: "Pattern match: 'CMP-####' or similar organizational format."
+    on_failure_action: "DEFAULT_VALUE"
+    default: "UNASSIGNED_CAMPAIGN"

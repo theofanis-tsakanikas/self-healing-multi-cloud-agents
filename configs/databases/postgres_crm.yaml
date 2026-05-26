@@ -1,0 +1,6 @@
+db_id: "postgres_crm_us"
+db_type: "postgresql"
+connection_type: "network"
+env_var_url: "POSTGRES_CRM_URL"      # e.g. postgresql://user:pass@localhost:5432/crm
+default_table: "customers"
+description: "Global CRM containing sensitive customer profiles and loyalty data."

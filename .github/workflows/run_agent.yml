@@ -1,0 +1,103 @@
+name: Run Multi-Cloud Data Engineer Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      pipeline_input:
+        description: >
+          Pipeline name (e.g. eu_sales) or a natural-language description
+          (e.g. "daily sales data from PostgreSQL to S3")
+        required: true
+        type: string
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        working-directory: projects/multi-cloud-self-healing-agent
+        run: uv sync
+
+      - name: Run agent
+        working-directory: projects/multi-cloud-self-healing-agent
+        env:
+          # ── LLM — non-sensitive (GitHub Variables) ──────────────────────────
+          LLM_PROVIDER:      ${{ vars.LLM_PROVIDER }}
+          LLM_TIMEOUT_SEC:   ${{ vars.LLM_TIMEOUT_SEC }}
+          LLM_MAX_RETRIES:   ${{ vars.LLM_MAX_RETRIES }}
+          OPENAI_MODEL:      ${{ vars.OPENAI_MODEL }}
+          ANTHROPIC_MODEL:   ${{ vars.ANTHROPIC_MODEL }}
+          VERTEXAI_MODEL:    ${{ vars.VERTEXAI_MODEL }}
+
+          # ── LLM — sensitive (GitHub Secrets) ────────────────────────────────
+          OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # ── GCP Vertex AI — sensitive ────────────────────────────────────────
+          # GOOGLE_APPLICATION_CREDENTIALS is written to disk in a separate step
+          # if LLM_PROVIDER=vertexai; GOOGLE_CLOUD_PROJECT is a Variable.
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+
+          # ── Vector Store — Pinecone ──────────────────────────────────────────
+          PINECONE_API_KEY:   ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME: ${{ vars.PINECONE_INDEX_NAME }}
+
+          # ── GitHub ───────────────────────────────────────────────────────────
+          # GITHUB_TOKEN is provided automatically by Actions with repo scope.
+          # If the agent needs to trigger other workflows, replace with a PAT
+          # stored as secrets.GH_PAT (needs repo + workflow scopes).
+          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+          # ── PostgreSQL (eu_sales pipeline) ───────────────────────────────────
+          POSTGRES_DB_HOST:     ${{ vars.POSTGRES_DB_HOST }}
+          POSTGRES_DB_PORT:     ${{ vars.POSTGRES_DB_PORT }}
+          POSTGRES_DB_USER:     ${{ vars.POSTGRES_DB_USER }}
+          POSTGRES_DB_NAME:     ${{ vars.POSTGRES_DB_NAME }}
+          POSTGRES_DB_PASSWORD: ${{ secrets.POSTGRES_DB_PASSWORD }}
+
+          # ── MySQL (global_marketing pipeline) ────────────────────────────────
+          MYSQL_DB_HOST:     ${{ vars.MYSQL_DB_HOST }}
+          MYSQL_DB_PORT:     ${{ vars.MYSQL_DB_PORT }}
+          MYSQL_DB_USER:     ${{ vars.MYSQL_DB_USER }}
+          MYSQL_DB_NAME:     ${{ vars.MYSQL_DB_NAME }}
+          MYSQL_DB_PASSWORD: ${{ secrets.MYSQL_DB_PASSWORD }}
+
+          # ── Trino & Prometheus ────────────────────────────────────────────────
+          TRINO_HOST:      ${{ vars.TRINO_HOST }}
+          TRINO_PORT:      ${{ vars.TRINO_PORT }}
+          TRINO_USER:      ${{ vars.TRINO_USER }}
+          PROMETHEUS_URL:  ${{ vars.PROMETHEUS_URL }}
+
+          # ── AWS ───────────────────────────────────────────────────────────────
+          AWS_ACCESS_KEY_ID:       ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY:   ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION:      ${{ vars.AWS_DEFAULT_REGION }}
+          TF_VAR_rds_password:     ${{ secrets.TF_VAR_RDS_PASSWORD }}
+          TF_VAR_rds_allowed_cidrs: ${{ vars.TF_VAR_RDS_ALLOWED_CIDRS }}
+          TF_VAR_pipeline_iam_arn: ${{ vars.TF_VAR_PIPELINE_IAM_ARN }}
+
+          # ── Azure ─────────────────────────────────────────────────────────────
+          ARM_CLIENT_ID:       ${{ vars.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET:   ${{ secrets.ARM_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ vars.ARM_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID:       ${{ vars.ARM_TENANT_ID }}
+          TF_VAR_subscription_id: ${{ vars.ARM_SUBSCRIPTION_ID }}
+          TF_VAR_db_password:  ${{ secrets.TF_VAR_DB_PASSWORD }}
+
+          # ── GCP ───────────────────────────────────────────────────────────────
+          TF_VAR_project_id:   ${{ vars.TF_VAR_PROJECT_ID }}
+
+        run: uv run python main.py "${{ github.event.inputs.pipeline_input }}"

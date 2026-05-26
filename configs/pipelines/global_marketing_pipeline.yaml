@@ -1,0 +1,46 @@
+pipeline_id: "pipe_mkt_global_to_gcp"
+owner: "marketing_analytics_global"
+project_name: "global-marketing-insights"
+project_folder_name: "multi-cloud-self-healing-agent"
+
+# 1. SOURCE
+source_config: "configs/databases/mysql_marketing.yaml"
+
+# 2. LOGIC
+business_rules_config: "configs/business_rules/marketing_logic.yaml"
+
+# 3. DESTINATION
+target_infra_config: "configs/infra/gcp_bucket.yaml"
+
+# 4. SHARED INFRASTRUCTURE
+shared_services:
+  trino:
+    host: "trino.analytics.svc.cluster.local"
+    port: 8080
+    catalog: "gcp_catalog"
+    schema: "marketing_global"
+    table_name: "pipe_mkt_global_to_gcp"
+  grafana:
+    url: "http://grafana.monitoring.svc.cluster.local"
+    namespace: "monitoring"
+
+# 5. METADATA
+data_domain: "marketing"
+priority: "high"
+update_frequency: "hourly"
+cloud_provider: "gcp"
+
+# 6. CLOUD INFRASTRUCTURE SPECIFICS (GCP)
+gcp_setup:
+  bucket_name: "global-marketing-insights-data"
+  region: "europe-west3"
+  project_id_env: "GCP_PROJECT_ID"
+  service_account_id: "global-mkt-insights-sa"
+  k8s_service_account_name: "global-mkt-insights-sa"
+  k8s_namespace: "analytics"
+  artifact_registry_region: "europe-west3"
+  artifact_registry_repo: "multi-cloud-agent-repo"
+  gke_cluster_name: "multi-cloud-agent-gke"
+  state_bucket: "multi-cloud-agent-tfstate"
+  state_prefix: "gcp/global-marketing-insights/terraform.tfstate"
+  schedule: "0 * * * *"  # hourly CronJob

@@ -1,0 +1,52 @@
+# Business Rules: EU Sales Pipeline
+# domain:           Identifies the business area these rules apply to.
+# quality_standards: List of data quality rules. Each rule defines WHAT to check,
+#                    WHERE to check it, and WHAT to do on failure.
+#
+# on_failure_action values:
+#   DROP_RECORD       — Remove the offending row entirely.
+#   EXCLUDE_AND_LOG   — Remove the row and log it as a warning.
+#   DEFAULT_VALUE     — Replace the invalid value with the specified default.
+#   FLAG_AS_SUSPICIOUS — Keep the row but mark it with a boolean flag column.
+
+domain: "financial_services"
+domain_description: "Handles retail transactions, unit pricing, and order quantities."
+
+quality_standards:
+
+  - capability: "monetary_integrity"
+    description: "Ensures financial metrics are logically sound for accounting."
+    target_criteria: "Numerical columns whose name contains 'price', 'amount', or 'cost'."
+    logic: "Value must be > 0.0."
+    on_failure_action: "DROP_RECORD"
+
+  - capability: "temporal_validity"
+    description: "Prevents future-dated transactions from entering historical reports."
+    target_criteria: "The primary date or timestamp column of the table."
+    logic: "Value must be <= current timestamp."
+    on_failure_action: "EXCLUDE_AND_LOG"
+
+  - capability: "completeness_enforcement"
+    description: "Ensures mandatory audit fields are present."
+    target_criteria: "Identifier columns (e.g. order_id, transaction_id)."
+    logic: "Field must not be NULL or empty string."
+    on_failure_action: "DROP_RECORD"
+
+  - capability: "currency_standardization"
+    description: "Aligns all transactions to supported corporate currencies."
+    target_criteria: "Columns representing ISO currency codes."
+    logic: "Value must be in ['EUR', 'GBP']. Default to 'EUR' if unknown."
+    on_failure_action: "DEFAULT_VALUE"
+    default: "EUR"
+
+  - capability: "volume_sanity_check"
+    description: "Detects extreme quantity outliers that suggest technical glitches."
+    target_criteria: "Columns representing 'quantity' or 'units'."
+    logic: "Value must be < 1000 per single line item."
+    on_failure_action: "FLAG_AS_SUSPICIOUS"
+
+  - capability: "quantity_validity"
+    description: "Flags negative quantities which indicate returns or data entry errors."
+    target_criteria: "Columns representing 'quantity' or 'units'."
+    logic: "Value must be > 0."
+    on_failure_action: "FLAG_AS_SUSPICIOUS"
