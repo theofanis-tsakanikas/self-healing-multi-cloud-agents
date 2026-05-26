@@ -5,22 +5,27 @@ on:
     inputs:
 
       pipeline:
-        description: 'Pipeline to run (name or natural-language description)'
-        required: true
-        type: choice
-        options:
-          - eu_sales
-          - global_marketing
-          - us_crm
-        default: eu_sales
-
-      run_bootstrap:
-        description: 'Provision baseline AWS infrastructure? (first setup only)'
+        description: 'Pipeline to run (skip = only run the selected steps above)'
         required: true
         type: choice
         options:
           - skip
-          - run
+          - eu_sales
+          - global_marketing
+          - us_crm
+        default: skip
+
+      bootstrap_cloud:
+        description: 'Provision baseline infrastructure? (first setup only)'
+        required: true
+        type: choice
+        options:
+          - skip
+          - aws
+          - azure
+          - gcp
+          - databricks
+          - all
         default: skip
 
       sync_knowledge_base:
@@ -123,13 +128,13 @@ jobs:
 
       # ── STEP 1: Bootstrap (optional, first setup only) ───────────────────────
       - name: Install Terraform
-        if: inputs.run_bootstrap == 'run'
+        if: inputs.bootstrap_cloud != 'skip'
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "~1.9"
 
-      - name: Bootstrap AWS infrastructure
-        if: inputs.run_bootstrap == 'run'
+      - name: Bootstrap — AWS
+        if: inputs.bootstrap_cloud == 'aws' || inputs.bootstrap_cloud == 'all'
         working-directory: bootstrap/aws
         env:
           TF_VAR_rds_allowed_cidrs: ${{ vars.TF_VAR_RDS_ALLOWED_CIDRS }}
@@ -137,7 +142,46 @@ jobs:
         run: |
           terraform init
           terraform apply -auto-approve
-          echo "✅ Bootstrap complete. RDS + EKS + SSM populated."
+          echo "✅ AWS bootstrap complete. RDS + EKS + SSM populated."
+
+      - name: Bootstrap — Azure
+        if: inputs.bootstrap_cloud == 'azure' || inputs.bootstrap_cloud == 'all'
+        working-directory: bootstrap/azure
+        env:
+          ARM_CLIENT_ID:       ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET:   ${{ secrets.ARM_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID:       ${{ secrets.ARM_TENANT_ID }}
+          TF_VAR_subscription_id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          TF_VAR_db_password:  ${{ secrets.AZURE_DB_PASSWORD }}
+        run: |
+          terraform init
+          terraform apply -auto-approve
+          echo "✅ Azure bootstrap complete. AKS + ACR + PostgreSQL provisioned."
+
+      - name: Bootstrap — GCP
+        if: inputs.bootstrap_cloud == 'gcp' || inputs.bootstrap_cloud == 'all'
+        working-directory: bootstrap/gcp
+        env:
+          TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          echo '${{ secrets.GCP_SA_KEY_JSON }}' > /tmp/gcp-sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa.json
+          terraform init
+          terraform apply -auto-approve
+          rm /tmp/gcp-sa.json
+          echo "✅ GCP bootstrap complete. GKE + Artifact Registry + Cloud SQL provisioned."
+
+      - name: Bootstrap — Databricks
+        if: inputs.bootstrap_cloud == 'databricks' || inputs.bootstrap_cloud == 'all'
+        working-directory: bootstrap/databricks
+        env:
+          DATABRICKS_HOST:  ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          terraform init
+          terraform apply -auto-approve
+          echo "✅ Databricks bootstrap complete. Workspace + Unity Catalog provisioned."
 
       # ── STEP 2: Sync Knowledge Base (optional) ───────────────────────────────
       - name: Sync Knowledge Base to Pinecone
@@ -155,4 +199,5 @@ jobs:
 
       # ── STEP 4: Run the agent ────────────────────────────────────────────────
       - name: Run agent
+        if: inputs.pipeline != 'skip'
         run: uv run python main.py "${{ inputs.pipeline }}"
