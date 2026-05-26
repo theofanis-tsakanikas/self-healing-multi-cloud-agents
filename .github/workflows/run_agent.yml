@@ -137,6 +137,11 @@ jobs:
         if: inputs.bootstrap_cloud == 'aws' || inputs.bootstrap_cloud == 'all'
         working-directory: bootstrap/aws
         env:
+          # Bootstrap uses a dedicated admin IAM user — NOT the runtime service account.
+          # The runtime user (AWS_ACCESS_KEY_ID) has only SSM read permissions.
+          AWS_ACCESS_KEY_ID:     ${{ secrets.BOOTSTRAP_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BOOTSTRAP_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION:    ${{ vars.AWS_DEFAULT_REGION }}
           TF_VAR_rds_allowed_cidrs: ${{ vars.TF_VAR_RDS_ALLOWED_CIDRS }}
           TF_VAR_pipeline_iam_arn:  ${{ vars.TF_VAR_PIPELINE_IAM_ARN }}
         run: |
