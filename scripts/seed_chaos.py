@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 import logging
 import numpy as np
@@ -6,6 +7,10 @@ import pandas as pd
 from faker import Faker
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils.cloud_config import cloud_get
 
 # --- LOGGING CONFIGURATION ---
 logging.basicConfig(
@@ -87,34 +92,40 @@ def build_engine(db_type, target):
 
     if target in CREDENTIAL_MAP:
         cfg = CREDENTIAL_MAP[target]
-        prefix = cfg["prefix"]
         driver = cfg["driver"]
         default_port = cfg["default_port"]
-        user     = os.getenv(f"{prefix}_DB_USER")
-        password = os.getenv(f"{prefix}_DB_PASSWORD")
-        host     = os.getenv(f"{prefix}_DB_HOST")
-        port     = os.getenv(f"{prefix}_DB_PORT", default_port)
-        db_name  = os.getenv(f"{prefix}_DB_NAME")
+
+        # eu_sales → AWS RDS via SSM; global_marketing → GCP env fallback
+        if target == "eu_sales":
+            host    = cloud_get("aws", "rds_host")
+            port    = cloud_get("aws", "rds_port") or default_port
+            user    = cloud_get("aws", "rds_username")
+            password = cloud_get("aws", "rds_password")
+            db_name = cloud_get("aws", "rds_db_name")
+        elif target == "global_marketing":
+            host    = cloud_get("gcp", "db_host")
+            port    = cloud_get("gcp", "db_port") or default_port
+            user    = cloud_get("gcp", "db_user")
+            password = cloud_get("gcp", "db_password")
+            db_name = cloud_get("gcp", "db_name")
+        else:  # us_crm (Azure) — env var fallback until Azure Secret Manager is set up
+            prefix = cfg["prefix"]
+            host    = os.getenv(f"{prefix}_DB_HOST")
+            port    = os.getenv(f"{prefix}_DB_PORT", default_port)
+            user    = os.getenv(f"{prefix}_DB_USER")
+            password = os.getenv(f"{prefix}_DB_PASSWORD")
+            db_name = os.getenv(f"{prefix}_DB_NAME")
+
         url = f"{driver}://{user}:{password}@{host}:{port}/{db_name}"
         return create_engine(url)
 
-    # Fallback: use db_type directly with POSTGRES_DB_* (for backward compat / sqlite)
+    # Fallback for explicit db_type (backward compat)
     if db_type == "postgres":
-        user     = os.getenv("POSTGRES_DB_USER")
-        password = os.getenv("POSTGRES_DB_PASSWORD")
-        host     = os.getenv("POSTGRES_DB_HOST")
-        port     = os.getenv("POSTGRES_DB_PORT", "5432")
-        db_name  = os.getenv("POSTGRES_DB_NAME")
-        url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}"
+        url = f"postgresql+psycopg2://{cloud_get('aws','rds_username')}:{cloud_get('aws','rds_password')}@{cloud_get('aws','rds_host')}:{cloud_get('aws','rds_port') or '5432'}/{cloud_get('aws','rds_db_name')}"
         return create_engine(url)
 
     if db_type == "mysql":
-        user     = os.getenv("MYSQL_DB_USER")
-        password = os.getenv("MYSQL_DB_PASSWORD")
-        host     = os.getenv("MYSQL_DB_HOST")
-        port     = os.getenv("MYSQL_DB_PORT", "3306")
-        db_name  = os.getenv("MYSQL_DB_NAME")
-        url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}"
+        url = f"mysql+pymysql://{cloud_get('gcp','db_user')}:{cloud_get('gcp','db_password')}@{cloud_get('gcp','db_host')}:{cloud_get('gcp','db_port') or '3306'}/{cloud_get('gcp','db_name')}"
         return create_engine(url)
 
     raise ValueError(f"Unsupported DB type: {db_type}")
