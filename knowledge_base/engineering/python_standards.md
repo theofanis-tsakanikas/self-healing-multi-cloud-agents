@@ -171,7 +171,30 @@ cursor.fetchall()
 logging.info(f"Trino partition run_date={run_date} registered.")
 ```
 
-> **Explicit dependency:** `trino` MUST be in `requirements.txt`.
+> **Explicit dependency:** `trino` MUST be in `requirements.txt`. This is the most commonly omitted dependency — the script will crash with `ModuleNotFoundError` without it.
+
+## Requirements Standard
+The `requirements.txt` MUST contain exactly these packages (add cloud-specific storage SDK based on `cloud_provider`):
+
+```
+pandas
+sqlalchemy
+psycopg2-binary
+pyarrow
+trino
+prometheus-client
+# AWS:
+boto3
+s3fs
+# GCP:
+# google-cloud-storage
+# gcsfs
+# Azure:
+# azure-storage-blob
+# adlfs
+```
+
+`trino` is always required regardless of cloud. `boto3`/`s3fs`, `google-cloud-storage`/`gcsfs`, or `azure-storage-blob`/`adlfs` are included only for the active cloud provider.
 > **Explicit dependency:** `boto3` MUST be in `requirements.txt` for AWS pipelines.
 
 ---
