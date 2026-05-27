@@ -897,18 +897,18 @@ def push_to_github(project_id: str, commit_message: str):
             )
             logger.info("🔑 CI detected: remote URL configured with GITHUB_TOKEN.")
 
-        # 3. Selective Staging — paths relative to REPO_ROOT (monorepo root).
-        # PROJECT_ROOT is the self-healing project dir inside the monorepo.
-        project_rel = os.path.relpath(PROJECT_ROOT, REPO_ROOT)
+        # 3. Selective Staging — stage every directory/file that agents generate.
+        # REPO_ROOT == PROJECT_ROOT (standalone repo — not a monorepo anymore).
+        # All generated artifacts land directly under REPO_ROOT, so paths are simple.
         paths_to_add = [
-            os.path.join(project_rel, "projects", project_id),
-            os.path.join(project_rel, "scripts"),
-            os.path.join(project_rel, "sql"),
-            os.path.join(project_rel, "dashboards"),
-            os.path.join(project_rel, "data"),
-            os.path.join(project_rel, "k8s"),
-            os.path.join(project_rel, "Dockerfile"),
-            os.path.join(project_rel, "requirements.txt"),
+            "scripts",
+            "sql",
+            "terraform",
+            "dashboards",
+            "data",
+            "k8s",
+            "Dockerfile",
+            "requirements.txt",
             ".github/workflows/",
         ]
         for path in paths_to_add:
