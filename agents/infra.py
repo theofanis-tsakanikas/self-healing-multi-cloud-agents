@@ -357,6 +357,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     new_messages = [response]
     updated_files = list(written_files)
     infra_success_detected = tf_done
+    validation_errors: list[str] = []  # Accumulated for error_log → Medic signal
 
     github_success = state.get("github_done", False)
     last_push_sha = state.get("last_push_sha", "")
@@ -500,6 +501,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                         if "VALIDATION FAILED" in validation_result:
                             any_tool_error = True
                             logger.warning(f"⚠️ AUTO-VALIDATION FAILED: {auto_validate_path}")
+                            validation_errors.append(f"{auto_validate_path}: {validation_result}")
                             result_str = (
                                 f"{result_str}\n\n"
                                 f"AUTO-VALIDATION FAILED — fix these errors and regenerate '{auto_validate_path}':\n"
@@ -532,6 +534,10 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=str(result)))
 
     # 10. RETURN UPDATED STATE
+    # Write validation errors to error_log so Medic reads them as a structured signal
+    # instead of having to infer the problem from message history.
+    error_log = ("\n\n".join(validation_errors)) if validation_errors else state.get("error_log", "")
+
     return {
         "messages": new_messages,
         "written_files": updated_files,
@@ -544,5 +550,6 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         "last_agent": "infra",
         "medic_fix_requested": not github_success and state.get("medic_fix_requested", False),
         "agent_error": any_tool_error,
-        "healing_context": "",  # One-shot: clear after use so it doesn't leak into future turns
+        "healing_context": "",
+        "error_log": error_log,
     }

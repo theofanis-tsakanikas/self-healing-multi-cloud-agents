@@ -274,6 +274,13 @@ def validate_generated_code(filename: str) -> str:
             # required fields, type mismatches) without touching the cluster.
             # We add only project-specific POLICY checks: architecture decisions that
             # kubectl cannot enforce (which ConfigMaps exist, which env vars the app needs, etc.)
+            # kubectl --dry-run=client is NOT fully offline: it tries to download
+            # the OpenAPI schema from the API server even in client mode.
+            # If no cluster is reachable, we treat it as a non-blocking warning
+            # (same class as "ruff not installed") — the code is not wrong,
+            # the validation environment is limited.
+            # Our policy checks below (placeholders, :latest, per-file rules) run
+            # regardless and catch the real project-level errors.
             kubectl = shutil.which("kubectl")
             if kubectl:
                 result = subprocess.run(
@@ -281,7 +288,22 @@ def validate_generated_code(filename: str) -> str:
                     capture_output=True, text=True
                 )
                 if result.returncode != 0:
-                    errors.append(f"KUBECTL DRY-RUN:\n{result.stderr.strip()}")
+                    stderr = result.stderr.strip()
+                    # Distinguish environment issues (no cluster) from real schema errors
+                    is_no_cluster = any(phrase in stderr for phrase in [
+                        "connection refused",
+                        "failed to download openapi",
+                        "dial tcp",
+                        "unable to connect to the server",
+                        "no such host",
+                    ])
+                    if is_no_cluster:
+                        warnings.append(
+                            "kubectl dry-run skipped — no cluster reachable locally. "
+                            "Schema validation will run in CI where a cluster context is configured."
+                        )
+                    else:
+                        errors.append(f"KUBECTL DRY-RUN:\n{stderr}")
             else:
                 warnings.append(
                     "kubectl not installed — K8s schema validation skipped. "
@@ -860,7 +882,22 @@ def push_to_github(project_id: str, commit_message: str):
         subprocess.run(["git", "config", "user.name", "github-actions[bot]"], cwd=REPO_ROOT, check=True)
         subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], cwd=REPO_ROOT, check=True)
 
-        # 2. Selective Staging — paths relative to REPO_ROOT (monorepo root).
+        # 2. Authentication: in CI (GitHub Actions) the default remote URL is HTTPS
+        # without a token embedded, causing 'git push' to fail with exit 128.
+        # Rewrite the remote URL to use GITHUB_TOKEN so the push is authenticated.
+        # Locally, GITHUB_TOKEN / GITHUB_REPOSITORY are not set → this block is skipped
+        # and git uses whatever credentials are configured on the developer's machine.
+        github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+        github_repository = os.getenv("GITHUB_REPOSITORY")
+        if github_token and github_repository:
+            authed_url = f"https://x-access-token:{github_token}@github.com/{github_repository}.git"
+            subprocess.run(
+                ["git", "remote", "set-url", "origin", authed_url],
+                cwd=REPO_ROOT, check=True
+            )
+            logger.info("🔑 CI detected: remote URL configured with GITHUB_TOKEN.")
+
+        # 3. Selective Staging — paths relative to REPO_ROOT (monorepo root).
         # PROJECT_ROOT is the self-healing project dir inside the monorepo.
         project_rel = os.path.relpath(PROJECT_ROOT, REPO_ROOT)
         paths_to_add = [
@@ -878,7 +915,7 @@ def push_to_github(project_id: str, commit_message: str):
             if os.path.exists(os.path.join(REPO_ROOT, path)):
                 subprocess.run(["git", "add", path], cwd=REPO_ROOT, check=True)
 
-        # 3. Commit with Scope
+        # 4. Commit with Scope
         full_message = f"fix({project_id}): {commit_message}"
         
         status = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=REPO_ROOT)

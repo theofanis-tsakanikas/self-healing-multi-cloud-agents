@@ -340,13 +340,24 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                     # Logic for Writing Files (Implementation Phase)
                     elif tool_name == "write_project_file":
                         filename = tool_args.get("filename", "")
+                        filename_base = Path(filename).name.lower()
+
+                        # Determine whether to skip this write.
+                        # Fix mode: only the file named in healing_context may be overwritten.
+                        # All other existing files are already valid — no reason to regenerate.
+                        already_exists = filename in written_files
+                        is_fix_target = is_fix_mode and filename_base in healing_context.lower()
+                        should_skip = already_exists and not is_fix_target
+
                         if not _is_architect_allowed_file(filename):
                             result = f"Policy Error: Architect is not permitted to modify '{filename}'."
                             any_tool_error = True
-                        elif filename in written_files and not is_fix_mode:
+                        elif should_skip:
                             result = f"Skipped: '{filename}' already exists in workspace."
                             logger.info(f"⏭️ Skipping existing file: {filename}")
                         else:
+                            if is_fix_target:
+                                logger.info(f"✏️ Fix target: overwriting '{filename}'")
                             result = tool_func.invoke(tool_args)
                             if filename not in written_files:
                                 written_files.append(filename)
