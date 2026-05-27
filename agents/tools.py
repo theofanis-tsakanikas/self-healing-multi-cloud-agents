@@ -135,25 +135,49 @@ def validate_generated_code(filename: str) -> str:
             warnings.append("ruff not installed — only py_compile ran (syntax check only).")
 
         # Project policy: cloud_get() is MANDATORY for all DB credentials.
-        # os.getenv() bypasses SSM and .bootstrap_outputs.json, breaking production
-        # where .env is not mounted. Any os.getenv() call for a credential-related
-        # variable name is a policy violation — not caught by ruff or py_compile.
+        # os.getenv() bypasses SSM and .bootstrap_outputs.json, breaking production.
+        # Only the explicit credential env-vars below are violations — infrastructure
+        # endpoints like TRINO_HOST, PUSHGATEWAY_URL etc. may stay as os.getenv().
+        _CRED_ENVVARS = frozenset({
+            "POSTGRES_DB_HOST", "POSTGRES_DB_PORT", "POSTGRES_DB_USER",
+            "POSTGRES_DB_PASSWORD", "POSTGRES_DB_NAME",
+            "MYSQL_DB_HOST", "MYSQL_DB_PORT", "MYSQL_DB_USER",
+            "MYSQL_DB_PASSWORD", "MYSQL_DB_NAME",
+        })
+        # Maps each credential env-var to the exact cloud_get() call that replaces it.
+        _CRED_TO_CLOUD_GET = {
+            "POSTGRES_DB_HOST":     'cloud_get("aws", "rds_host")',
+            "POSTGRES_DB_PORT":     'cloud_get("aws", "rds_port")',
+            "POSTGRES_DB_USER":     'cloud_get("aws", "rds_username")',
+            "POSTGRES_DB_PASSWORD": 'cloud_get("aws", "rds_password")',
+            "POSTGRES_DB_NAME":     'cloud_get("aws", "rds_db_name")',
+            "MYSQL_DB_HOST":        'cloud_get("gcp", "db_host")',
+            "MYSQL_DB_PORT":        'cloud_get("gcp", "db_port")',
+            "MYSQL_DB_USER":        'cloud_get("gcp", "db_user")',
+            "MYSQL_DB_PASSWORD":    'cloud_get("gcp", "db_password")',
+            "MYSQL_DB_NAME":        'cloud_get("gcp", "db_name")',
+        }
         with open(filename, encoding="utf-8") as f:
             py_content = f.read()
-        cred_pattern = re.compile(
-            r'os\.getenv\s*\(\s*["\']'
-            r'(?:[A-Z_]*(?:HOST|USER|USERNAME|PASSWORD|PASS|DB_NAME|DATABASE)[A-Z_]*'
-            r'|(?:POSTGRES|MYSQL|RDS|DB)_[A-Z_]+)'
-            r'["\']',
-            re.IGNORECASE,
-        )
-        cred_violations = cred_pattern.findall(py_content)
-        if cred_violations:
+        getenv_scan = re.compile(r'os\.getenv\s*\(\s*["\']([^"\']+)["\']', re.IGNORECASE)
+        found_cred_violations = [
+            (m.group(1).upper(), m.group(0))
+            for m in getenv_scan.finditer(py_content)
+            if m.group(1).upper() in _CRED_ENVVARS
+        ]
+        if found_cred_violations:
+            _fallback_call = 'cloud_get("<provider>", "<key>")'
+            replacements = "\n".join(
+                f"  {original}  →  {_CRED_TO_CLOUD_GET.get(env_var, _fallback_call)}"
+                for env_var, original in found_cred_violations
+            )
             errors.append(
-                f"POLICY: os.getenv() used for DB credentials {cred_violations} — "
-                "use cloud_get(provider, key) instead. "
-                "cloud_get() reads from SSM → .bootstrap_outputs.json → env fallback. "
-                "os.getenv() bypasses SSM and breaks in production where .env is not mounted."
+                "POLICY VIOLATION — os.getenv() used for DB credentials.\n"
+                "Apply these EXACT replacements:\n"
+                f"{replacements}\n"
+                "Also add this import at the top of the file:\n"
+                "  from utils.cloud_config import cloud_get\n"
+                "cloud_get() reads SSM → .bootstrap_outputs.json → env fallback (production-safe)."
             )
 
     # ── JSON (Grafana dashboard) ──────────────────────────────────────────────
