@@ -97,7 +97,7 @@ resource "aws_s3_bucket_versioning" "versioning" {
 
 - **Encryption:** Use `aws_s3_bucket_server_side_encryption_configuration` with `sse_algorithm = "aws:kms"` nested inside `rule > apply_server_side_encryption_by_default`.
 
-- **Lifecycle:** Use `aws_s3_bucket_lifecycle_configuration`. Every rule MUST include a `filter {}` block (even if empty) — omitting it causes a provider error in AWS Provider 4+:
+- **Lifecycle:** Use `aws_s3_bucket_lifecycle_configuration`. Every rule MUST include a `filter {}` block (even if empty) — omitting it causes a provider error in AWS Provider 4+. Use a two-tier transition: 90 days → `STANDARD_IA` (still queryable, lower cost), 365 days → `GLACIER` (archive). Do NOT transition to GLACIER before 90 days — daily pipeline data queried for trend analysis within the first 3 months would require expensive Glacier restores:
 ```hcl
 resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
   bucket = aws_s3_bucket.<name>.id
@@ -106,8 +106,12 @@ resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
     status = "Enabled"
     filter {}
     transition {
-      days          = <transition_days>
-      storage_class = "<storage_class>"
+      days          = 90
+      storage_class = "STANDARD_IA"
+    }
+    transition {
+      days          = 365
+      storage_class = "GLACIER"
     }
   }
 }
