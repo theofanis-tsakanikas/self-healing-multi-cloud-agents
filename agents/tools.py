@@ -112,6 +112,7 @@ def validate_generated_code(filename: str) -> str:
         return f"Error: file '{filename}' does not exist. Did write_project_file succeed?"
 
     errors = []
+    warnings = []  # non-blocking: missing optional tools, env notes
     ext = Path(filename).suffix.lower()
     base = Path(filename).name.lower()
 
@@ -131,7 +132,29 @@ def validate_generated_code(filename: str) -> str:
             if result.stdout.strip():
                 errors.append(f"RUFF:\n{result.stdout.strip()}")
         else:
-            errors.append("WARNING: ruff not installed — only py_compile ran.")
+            warnings.append("ruff not installed — only py_compile ran (syntax check only).")
+
+        # Project policy: cloud_get() is MANDATORY for all DB credentials.
+        # os.getenv() bypasses SSM and .bootstrap_outputs.json, breaking production
+        # where .env is not mounted. Any os.getenv() call for a credential-related
+        # variable name is a policy violation — not caught by ruff or py_compile.
+        with open(filename, encoding="utf-8") as f:
+            py_content = f.read()
+        cred_pattern = re.compile(
+            r'os\.getenv\s*\(\s*["\']'
+            r'(?:[A-Z_]*(?:HOST|USER|USERNAME|PASSWORD|PASS|DB_NAME|DATABASE)[A-Z_]*'
+            r'|(?:POSTGRES|MYSQL|RDS|DB)_[A-Z_]+)'
+            r'["\']',
+            re.IGNORECASE,
+        )
+        cred_violations = cred_pattern.findall(py_content)
+        if cred_violations:
+            errors.append(
+                f"POLICY: os.getenv() used for DB credentials {cred_violations} — "
+                "use cloud_get(provider, key) instead. "
+                "cloud_get() reads from SSM → .bootstrap_outputs.json → env fallback. "
+                "os.getenv() bypasses SSM and breaks in production where .env is not mounted."
+            )
 
     # ── JSON (Grafana dashboard) ──────────────────────────────────────────────
     elif ext == ".json":
@@ -193,9 +216,9 @@ def validate_generated_code(filename: str) -> str:
             if output:
                 errors.append(f"HADOLINT:\n{output}")
         else:
-            errors.append(
-                "WARNING: hadolint not installed — Dockerfile not linted. "
-                "Install with: brew install hadolint (macOS) or apt-get install hadolint (Linux)."
+            warnings.append(
+                "hadolint not installed — Dockerfile best-practice lint skipped. "
+                "Install: brew install hadolint (macOS) or apt-get install hadolint (Linux)."
             )
 
         # Project-specific: utils/ is OUR module tree — hadolint cannot know this is required.
@@ -260,9 +283,9 @@ def validate_generated_code(filename: str) -> str:
                 if result.returncode != 0:
                     errors.append(f"KUBECTL DRY-RUN:\n{result.stderr.strip()}")
             else:
-                errors.append(
-                    "WARNING: kubectl not installed — K8s schema not validated. "
-                    "Install kubectl to enable schema validation."
+                warnings.append(
+                    "kubectl not installed — K8s schema validation skipped. "
+                    "Install kubectl to enable dry-run schema checks."
                 )
 
             # ── Universal policy checks (apply to every K8s manifest) ─────────
@@ -326,8 +349,14 @@ def validate_generated_code(filename: str) -> str:
         return f"CLEAN: '{filename}' — no validator for this file type."
 
     if errors:
-        return "VALIDATION FAILED — fix before proceeding:\n\n" + "\n\n".join(errors)
-    return f"CLEAN: '{filename}' passed all validation checks."
+        msg = "VALIDATION FAILED — fix before proceeding:\n\n" + "\n\n".join(errors)
+        if warnings:
+            msg += "\n\nNON-BLOCKING NOTES:\n" + "\n".join(f"  • {w}" for w in warnings)
+        return msg
+    msg = f"CLEAN: '{filename}' passed all validation checks."
+    if warnings:
+        msg += "\n  NOTE: " + " | ".join(warnings)
+    return msg
 
 
 @tool

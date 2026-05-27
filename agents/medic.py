@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import random
 import time
@@ -93,6 +94,7 @@ def medic_node(state: AgentState):
 
     # 3. REASONING LOOP
     fix_requested = False
+    healing_context = ""  # Populated when request_fix is called; written to state for next agent
     for i in range(5):
         response = llm_with_tools.invoke(messages)
         messages.append(response)
@@ -125,6 +127,13 @@ def medic_node(state: AgentState):
                 if "arch" in target: reset_architect = True
                 if "infra" in target: reset_infra = True
                 fix_requested = True
+                # Extract healing_instructions from the JSON payload so the next agent
+                # receives them via the system prompt — not buried in message history.
+                try:
+                    payload = json.loads(result_str)
+                    healing_context = payload.get("healing_instructions", "")
+                except (json.JSONDecodeError, AttributeError):
+                    pass
 
             t_msg = ToolMessage(tool_call_id=tool_call["id"], content=result_str)
             messages.append(t_msg)
@@ -137,7 +146,10 @@ def medic_node(state: AgentState):
     output_state = {
         "messages": new_messages_for_state,
         "next_step": "supervisor",
-        "last_agent": "medic"
+        "last_agent": "medic",
+        # Pass healing_instructions directly to the next agent's system prompt.
+        # Empty string when no fix was requested (verification path).
+        "healing_context": healing_context,
     }
 
 

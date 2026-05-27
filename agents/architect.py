@@ -155,15 +155,15 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
             allowed_tool_names = ["read_data_schema"]
             phase_instruction = "CURRENT PHASE: FIX MODE — SCHEMA. Schema not yet read, retrieve it before writing."
         else:
-            allowed_tool_names = ["write_project_file", "query_vector_store"]
+            # healing_context is in the system prompt — no need to re-query the KB.
+            # query_vector_store is removed to prevent the LLM from running a full
+            # re-discovery cycle (3 calls) instead of applying the ready-made fix.
+            allowed_tool_names = ["write_project_file"]
             phase_instruction = (
                 "CURRENT PHASE: FIX MODE. "
-                "The Medic's diagnosis and healing_instructions are in your message history as a REJECTED_BY_MEDIC payload. "
-                "Step 1: Call query_vector_store using the error signature from the diagnosis as your query. "
-                "Step 2: Rewrite ONLY the affected file using write_project_file. "
-                "CRITICAL: If Step 1 returns 'No relevant guidelines found', do NOT stop. "
-                "Use the 'healing_instructions' field from the REJECTED_BY_MEDIC payload in your message history — "
-                "it contains the exact fix to apply. An empty Knowledge Base result is never a reason to take no action."
+                "The exact fix instructions are in the MANDATORY FIX section of your system prompt above. "
+                "Call write_project_file to rewrite ONLY the affected file, applying the fix exactly as described. "
+                "Do NOT query the knowledge base — the Medic already did that research and the solution is in your system prompt."
             )
         logger.info(f"🔧 GATE: Fix mode. Tools: {allowed_tool_names}")
     elif not has_all_standards:
@@ -228,11 +228,24 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     prompt_path = os.path.join(PROMPTS_DIR, ARCHITECT_PROMPT_FILE)
     raw_template = read_file(prompt_path)
     system_prompt = format_prompt(
-        raw_template, 
-        architect_context=architect_context, 
+        raw_template,
+        architect_context=architect_context,
         project_id=project_id
     )
-    
+
+    # Inject Medic's healing instructions at the top of the dynamic section.
+    # Placing it before the phase instruction ensures maximum LLM attention —
+    # the fix is more specific and time-critical than the general phase guidance.
+    # This replaces relying on the LLM to find the REJECTED_BY_MEDIC JSON in message history.
+    healing_context = state.get("healing_context", "")
+    if healing_context and is_fix_mode:
+        system_prompt += (
+            f"\n\n🚨 MANDATORY FIX — TOP PRIORITY (from Medic diagnostic):\n"
+            f"{healing_context}\n"
+            f"Apply this fix exactly as described. "
+            f"Only call query_vector_store if the instructions above explicitly require it."
+        )
+
     # Add dynamic instructions regarding phase and knowledge capture
     system_prompt += f"\n\nCRITICAL: {phase_instruction}"
     system_prompt += "\nNote: Summarize all retrieved standards into the required state keys."
@@ -433,4 +446,10 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
         "next_step": "supervisor",
         "last_agent": "architect",
         "agent_error": any_tool_error,
+        "healing_context": "",  # One-shot: clear after use so it doesn't leak into future turns
+        # Clear medic_fix_requested when Architect completes its fix cycle.
+        # If left True, Infra incorrectly enters fix mode even though the fix
+        # was handled by the Architect — causing Gate 3 to add query_vector_store
+        # and fix-mode prompts to fire on every Infra invocation.
+        "medic_fix_requested": False if status == "completed" else state.get("medic_fix_requested", False),
     }

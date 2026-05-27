@@ -59,7 +59,8 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     tf_done = state.get("infra_provisioned", False)
     medic_triggered_fix = state.get("medic_fix_requested", False) or (state.get("last_agent") == "medic")
     project_id = state.get("project_id")
-    collected_specs = dict(state.get("collected_specs", {})) 
+    collected_specs = dict(state.get("collected_specs", {}))
+
     
     # 2. CONTEXT GENERATION
     raw_configs = state.get("raw_configs", {})
@@ -147,9 +148,17 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         # Step A: Terraform / IaC
         if not tf_done:
             tf_required = ["terraform/providers.tf", "terraform/main.tf", "terraform/variables.tf", "terraform/outputs.tf", "terraform/terraform.tfvars"]
-            if not files_exist_in_state(tf_required, written_files) or medic_triggered_fix:
+            tf_files_missing = not files_exist_in_state(tf_required, written_files)
+            if tf_files_missing:
+                # First run: files don't exist yet — need both write and execute
+                selected_keys = ["write_terraform_config", "execute_terraform"]
+            elif medic_triggered_fix:
+                # Fix mode: files exist but execute failed. Allow targeted rewrite (dedup
+                # in the execution loop gates which files can actually be overwritten based
+                # on healing_context). Always include execute so the fix is applied immediately.
                 selected_keys = ["write_terraform_config", "execute_terraform"]
             else:
+                # Files exist, no fix needed — just re-run execute (e.g. state recovery)
                 selected_keys = ["execute_terraform"]
 
         # Step B: Orchestration & CI/CD
@@ -209,19 +218,21 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                     selected_keys.append("push_to_github")
 
     # --- GATE 3: MEDIC OVERRIDE ---
-    # Always re-enable query_vector_store in fix mode. The LLM only sees the last N
-    # messages — original ToolMessages with standards are gone from context. Querying
-    # with the error signature retrieves both the relevant standard (engineering-standards)
-    # and any matching past fix (dynamic-experience).
-    # push_to_github must also be available: the agent rewrites the affected file and
-    # must push immediately in the same turn — without it the fix is never deployed and
-    # the next invocation (last_agent="infra") hits the EARLY EXIT falsely.
+    # healing_context (injected into system prompt) already contains the Medic's
+    # KB-researched fix — no need to re-query. query_vector_store is NOT re-enabled
+    # here to prevent the LLM from running a full re-discovery cycle instead of
+    # applying the ready-made fix.
+    # push_to_github MUST be available: the agent rewrites the file and must push
+    # in the same turn — without it the fix is never deployed.
     if medic_triggered_fix:
-        if "query_vector_store" not in selected_keys:
+        has_healing = bool(state.get("healing_context", "").strip())
+        if not has_healing and "query_vector_store" not in selected_keys:
+            # Fallback: no healing_context (edge case) — allow KB lookup as before
             selected_keys.append("query_vector_store")
+            logger.info("🔧 MEDIC BYPASS: No healing_context — re-enabling query_vector_store as fallback.")
         if "push_to_github" not in selected_keys:
             selected_keys.append("push_to_github")
-        logger.info("🔧 MEDIC BYPASS: Re-enabling query_vector_store + push_to_github for error-driven fix.")
+        logger.info("🔧 MEDIC BYPASS: push_to_github enabled for fix cycle.")
 
     # 5. EARLY EXIT GATE
     # If all files exist, all actions are done, and standards are met, signal completion.
@@ -231,7 +242,8 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             "messages": [HumanMessage(content="INFRA_COMPLETE: Infrastructure and CI/CD are finalized.")],
             "infra_status": "completed",
             "next_step": "supervisor",
-            "last_agent": "infra"
+            "last_agent": "infra",
+            "healing_context": "",  # Clear — no fix in progress
         }
 
     # 6. LLM BINDING (Injecting only allowed tools for the current phase)
@@ -254,6 +266,18 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         logger.error(f"Prompt formatting failed: {e}")
         system_prompt = "You are an Infrastructure Specialist."
 
+    # Inject Medic's healing instructions before the phase text.
+    # Placed in the system prompt (not message history) for maximum LLM attention.
+    # Cleared by this node's return dict so it doesn't leak into future turns.
+    healing_context = state.get("healing_context", "")
+    if healing_context and medic_triggered_fix:
+        system_prompt += (
+            f"\n\n🚨 MANDATORY FIX — TOP PRIORITY (from Medic diagnostic):\n"
+            f"{healing_context}\n"
+            f"Apply this fix exactly as described. "
+            f"Only call query_vector_store if the instructions above explicitly require it."
+        )
+
     # Inform the agent about the current operational phase
     if not has_all_standards:
         missing_keys = [k for k in required_standards if k not in collected_specs]
@@ -267,16 +291,13 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     elif medic_triggered_fix:
         phase_text = (
             "CURRENT OPERATIONAL PHASE: FIX MODE. "
-            "The Medic's diagnosis and healing_instructions are in your message history as a REJECTED_BY_MEDIC payload. "
-            "Step 1: Call query_vector_store using the error signature from the diagnosis as your query. "
-            "Step 2: Rewrite ONLY the affected file using the appropriate generation tool "
+            "The exact fix instructions are in the MANDATORY FIX section of your system prompt above — read them first. "
+            "Step 1: Apply the fix by rewriting ONLY the affected file using the appropriate generation tool "
             "(generate_github_action for CI/CD errors, generate_k8s_manifest for Kubernetes errors, etc.). "
-            "Step 3: Immediately call push_to_github to deploy the fix. "
-            "CRITICAL RULES — violating any of these is a failure: "
-            "(1) If query_vector_store returns 'No relevant guidelines found', do NOT stop — "
-            "use the 'healing_instructions' field from the REJECTED_BY_MEDIC payload instead. "
+            "Step 2: Immediately call push_to_github to deploy the fix. "
+            "CRITICAL RULES: "
+            "(1) query_vector_store is only needed if the MANDATORY FIX section above says so. "
             "(2) You MUST call push_to_github in this same turn after rewriting the file. "
-            "Stopping after query_vector_store or after generating the file without pushing is NOT acceptable. "
             "(3) An empty Knowledge Base result is never a reason to take no action."
         )
     else:
@@ -350,15 +371,25 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             if t_name in ("write_terraform_config", "execute_terraform"):
                 t_args.pop("project_id", None)
             try:
-                # Skip files already written (unless in fix mode) to prevent re-generation loops.
-                if t_name == "write_terraform_config" and not medic_triggered_fix:
+                # Skip files already written to prevent re-generation loops.
+                # In fix mode: allow overwrite ONLY for the file explicitly targeted by
+                # healing_context (e.g. "fix providers.tf" → only providers.tf is rewritten).
+                # All other existing TF files are still skipped — no unnecessary rewrites.
+                if t_name == "write_terraform_config":
                     raw = t_args.get("filename", "")
                     tracked = ("terraform/" + Path(raw).name).replace("\\", "/")
+                    filename_base = Path(raw).name.lower()
                     if tracked in updated_files:
-                        result = f"Skipped: '{tracked}' already exists."
-                        new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
-                        logger.info(f"⏭️ Skipping existing terraform file: {tracked}")
-                        continue
+                        # In fix mode, allow overwrite only if this file is the fix target
+                        is_fix_target = (
+                            medic_triggered_fix
+                            and filename_base in healing_context.lower()
+                        )
+                        if not is_fix_target:
+                            result = f"Skipped: '{tracked}' already exists and is not the fix target."
+                            new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
+                            logger.info(f"⏭️ Skipping existing terraform file: {tracked}")
+                            continue
                 elif t_name == "push_to_github" and github_success:
                     result = "Skipped: push_to_github already succeeded in this turn."
                     new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
@@ -513,4 +544,5 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         "last_agent": "infra",
         "medic_fix_requested": not github_success and state.get("medic_fix_requested", False),
         "agent_error": any_tool_error,
+        "healing_context": "",  # One-shot: clear after use so it doesn't leak into future turns
     }

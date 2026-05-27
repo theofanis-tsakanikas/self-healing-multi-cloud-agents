@@ -78,3 +78,9 @@ class AgentState(TypedDict):
     # Incremented each time Medic sleeps waiting for the CI run to complete.
     # Reset to 0 after logs arrive or a fix is requested.
     ci_poll_attempt: int
+
+    # Structured fix instructions from the Medic, injected directly into the next
+    # agent's system prompt. More reliable than relying on the LLM to find the
+    # REJECTED_BY_MEDIC JSON buried in message history.
+    # Written by medic_node, read and cleared by architect_node / infra_node.
+    healing_context: str
