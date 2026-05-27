@@ -3,7 +3,7 @@ import re
 import json
 import logging
 from pathlib import Path
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from agents.llm_factory import get_llm
 from agents.state import AgentState
 from agents.constants import TEMPERATURE, PROMPTS_DIR, SUPERVISOR_PROMPT_FILE
@@ -74,8 +74,12 @@ def supervisor_node(state: AgentState):
     infra_status = state.get("infra_status", "pending")
     
     recent_messages = state["messages"][-5:] if state["messages"] else []
+    # Scan only AIMessages — ToolMessages contain retrieved knowledge base content
+    # which includes error examples (SyntaxError, ImportError, etc.) that would
+    # cause false-positive routing to Medic.
     normalized_last = " ".join(
         str(m.content) for m in recent_messages
+        if isinstance(m, AIMessage) and not isinstance(m, ToolMessage)
     ).lower()
     
     logger.info(f"Supervisor | Last Agent: {last_step} | Arch Status: {arch_status} | Infra Status: {infra_status}")
