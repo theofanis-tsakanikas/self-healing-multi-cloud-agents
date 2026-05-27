@@ -93,6 +93,7 @@ The subdirectory MUST be named `run_date=YYYY-MM-DD` exactly — Trino partition
     2. The Trino DDL SQL script.
     3. The Monitoring JSON specification.
     4. The `requirements.txt` file.
+- **MANDATORY:** After writing the Python pipeline script (`.py`), you MUST immediately call `validate_generated_code` with the same filename. If it returns errors, fix them with another `write_project_file` call before proceeding. A script that does not pass validation MUST NOT be considered complete.
 
 ---
 

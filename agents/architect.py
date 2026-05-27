@@ -18,7 +18,7 @@ from utils.prompt_utils import format_prompt
 from utils.file_utils import read_file
 from utils.message_utils import safe_recent_messages
 from utils.config_utils import build_architect_context
-from agents.tools import read_data_schema, write_project_file, query_vector_store
+from agents.tools import read_data_schema, write_project_file, query_vector_store, validate_generated_code
 
 # Logger configuration
 logging.basicConfig(
@@ -130,7 +130,8 @@ def architect_node(state: AgentState):
     full_tools_map = {
         "read_data_schema": read_data_schema,
         "write_project_file": write_project_file,
-        "query_vector_store": query_vector_store
+        "query_vector_store": query_vector_store,
+        "validate_generated_code": validate_generated_code,
     }
 
     required_knowledge_keys = ["arch_standard_trino", "arch_standard_grafana", "arch_standard_python"]
@@ -178,8 +179,8 @@ def architect_node(state: AgentState):
         phase_instruction = f"CURRENT PHASE: SCHEMA DISCOVERY. Call read_data_schema EXACTLY ONCE with table_name='{table_name}'. Do not call it with any other value."
         logger.info("⚠️ GATE: Schema not yet discovered. Forcing Schema Phase.")
     else:
-        # Phase 3 — Implementation: write all artifacts
-        allowed_tool_names = ["write_project_file"]
+        # Phase 3 — Implementation: write all artifacts, then validate .py files
+        allowed_tool_names = ["write_project_file", "validate_generated_code"]
 
         # Compute missing artifacts using exact filenames/paths so the LLM
         # passes the correct `filename` argument without ambiguity.

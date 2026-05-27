@@ -1,8 +1,11 @@
 # STANDARD: PYTHON DATA PIPELINES
-All Python scripts generated for data engineering must follow these standards:
+All Python scripts generated for data engineering must follow these standards exactly.
+After writing any `.py` file, you MUST call `validate_generated_code` on it — if it returns errors, fix them before proceeding.
+
+---
 
 ## MANDATORY SCRIPT STRUCTURE
-Every pipeline script MUST follow this exact skeleton — imports, order of operations, and structure are non-negotiable:
+Every pipeline script MUST follow this exact skeleton. This is the authoritative execution order — do not reorder steps:
 
 ```python
 import os
@@ -32,251 +35,203 @@ logging.basicConfig(level=logging.INFO)
 
 
 def run():
-    logging.info("Pipeline starting: <pipeline_name>")  # ← FIRST line, before everything
+    logging.info("Pipeline starting: <pipeline_name>")  # ← MUST be the very first line
 
-    # 1. Idempotency check  (cloud-specific SDK selected above)
-    # 2. DB engine + extraction loop (SAME try block)
-    # 3. Trino partition registration
-    # 4. Metrics emission
+    # ── 1. IDEMPOTENCY CHECK ──────────────────────────────────────────────────
+    run_date = datetime.date.today().isoformat()
+    destination_uri = os.getenv("DESTINATION_URI")  # injected by K8s Job env
+    partition_uri = f"{destination_uri}run_date={run_date}/"
+    parsed = urlparse(partition_uri)
+    bucket = parsed.netloc
+    prefix = parsed.path.lstrip('/')
+
+    if _CLOUD == "aws":
+        s3 = boto3.client('s3')
+        response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        if response.get('KeyCount', 0) > 0:
+            logging.info(f"Partition run_date={run_date} already populated. Skipping.")
+            return
+    elif _CLOUD == "gcp":
+        client = gcs.Client()
+        blobs = list(client.list_blobs(bucket, prefix=prefix, max_results=1))
+        if blobs:
+            logging.info("Destination already populated. Skipping.")
+            return
+    elif _CLOUD == "azure":
+        client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))
+        container = client.get_container_client(bucket)
+        blobs = list(container.list_blobs(name_starts_with=prefix))
+        if blobs:
+            logging.info("Destination already populated. Skipping.")
+            return
+
+    # ── 2. CREDENTIALS via cloud_get() ───────────────────────────────────────
+    # NEVER use os.getenv() directly for DB credentials — it bypasses SSM.
+    if _CLOUD == "aws":
+        host = cloud_get("aws", "rds_host")
+        port = cloud_get("aws", "rds_port") or "5432"
+        user = cloud_get("aws", "rds_username")
+        pw   = cloud_get("aws", "rds_password")
+        db   = cloud_get("aws", "rds_db_name")
+        connection_string = (
+            f"postgresql+psycopg2://{user}:{pw}"
+            f"@{host}:{port}/{db}"
+        )
+    elif _CLOUD == "gcp":
+        host = cloud_get("gcp", "db_host")
+        port = cloud_get("gcp", "db_port") or "3306"
+        user = cloud_get("gcp", "db_user")
+        pw   = cloud_get("gcp", "db_password")
+        db   = cloud_get("gcp", "db_name")
+        connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
+    elif _CLOUD == "azure":
+        host = cloud_get("azure", "db_host")
+        port = cloud_get("azure", "db_port") or "1433"
+        user = cloud_get("azure", "db_user")
+        pw   = cloud_get("azure", "db_password")
+        db   = cloud_get("azure", "db_name")
+        connection_string = f"mssql+pyodbc://{user}:{pw}@{host}:{port}/{db}?driver=ODBC+Driver+18+for+SQL+Server"
+
+    # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
+    # CRITICAL: create_engine AND the loop MUST be in the SAME try block.
+    total_rows = 0
+    query = "SELECT * FROM <source_table>"  # replace with actual table from context
+
+    try:
+        engine = create_engine(connection_string)
+        for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
+
+            # 3a. Date conversion — ALWAYS before any date comparison
+            chunk['<date_col>'] = pd.to_datetime(chunk['<date_col>'])
+
+            # 3b. Business rules — translate ALL quality_standards from pipeline config.
+            #     NEVER use placeholder values like `is_suspicious = False`.
+            #     Every rule MUST be real executable pandas code:
+            #
+            #   DROP_RECORD:      chunk = chunk[condition]
+            #   EXCLUDE_AND_LOG:  excluded = chunk[~condition]
+            #                     logging.warning(f"Excluded {len(excluded)} rows: <reason>")
+            #                     chunk = chunk[condition]
+            #   DEFAULT_VALUE:    chunk[col] = chunk[col].where(condition, other=default)
+            #   FLAG_AS_SUSPICIOUS: chunk['is_suspicious'] = ~condition
+            #                       # Do NOT filter after flagging — keep all rows
+
+            # 3c. Type casting — cast float64 → Int64 for integer/count/quantity columns
+            int_cols = [c for c in chunk.select_dtypes(include='float64').columns
+                        if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
+            for col in int_cols:
+                chunk[col] = chunk[col].astype('Int64')
+
+            # 3d. Write — storage_options={} is MANDATORY, do not omit it
+            chunk.to_parquet(
+                f"{partition_uri}part_{i}.parquet",
+                engine="pyarrow",
+                compression="snappy",
+                index=False,
+                storage_options={}
+            )
+            logging.info(f"Chunk {i}: {len(chunk)} rows processed")
+            total_rows += len(chunk)
+
+    except Exception as e:
+        logging.error(f"Pipeline failed: {e}")
+        raise
+
+    logging.info(f"Pipeline completed. Total rows processed: {total_rows}")
+
+    # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
+    trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
+    catalog, schema, table = "<catalog>", "<schema>", "<table>"  # from CATALOG_AND_MONITORING.trino_metadata
+    conn = trino_connect(host=trino_host, port=8080, user="pipeline")
+    cursor = conn.cursor()
+    cursor.execute(f"CALL {catalog}.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
+    cursor.fetchall()
+    logging.info(f"Trino partition run_date={run_date} registered.")
+
+    # ── 5. METRICS EMISSION ───────────────────────────────────────────────────
+    pushgateway_url = os.getenv("PUSHGATEWAY_URL", "http://pushgateway.monitoring.svc.cluster.local:9091")
+    project_id     = os.getenv("PROJECT_ID", "unknown")
+    cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")
+
+    registry = CollectorRegistry()
+    Gauge('pipeline_rows_processed_total', 'Total rows processed',
+          ['project_id', 'cloud_provider'], registry=registry) \
+        .labels(project_id=project_id, cloud_provider=cloud_provider).set(total_rows)
+    Gauge('pipeline_last_success_timestamp', 'Unix timestamp of last successful run',
+          ['project_id', 'cloud_provider'], registry=registry) \
+        .labels(project_id=project_id, cloud_provider=cloud_provider).set(time.time())
+
+    push_to_gateway(pushgateway_url, job=project_id, registry=registry)
+    logging.info(f"Metrics pushed to Pushgateway: rows={total_rows}, cloud={cloud_provider}")
 
 
 if __name__ == "__main__":
     run()
 ```
 
-> **CRITICAL:** `import time` and `from utils.cloud_config import cloud_get` are ALWAYS required regardless of cloud. The cloud storage SDK (`boto3` / `google.cloud.storage` / `azure.storage.blob`) MUST be imported conditionally via the `_CLOUD` guard above — never import all three, and never hardcode `import boto3` unconditionally in a multi-cloud script.
+---
+
+## CRITICAL RULES — violations cause immediate runtime failure
+
+### Credentials
+- `cloud_get()` is MANDATORY for all DB credentials. `os.getenv()` is FORBIDDEN for host/user/password/db — it bypasses SSM and returns None in production.
+- Connection strings MUST use double-quoted outer f-strings to avoid `SyntaxError: f-string: unmatched '('`.
+
+### Error Handling
+- `create_engine` AND the extraction loop MUST be in the **SAME** `try` block.
+```python
+# ❌ WRONG — engine unprotected:
+engine = create_engine(connection_string)
+try:
+    for i, chunk in enumerate(...):
+
+# ✅ CORRECT — both protected:
+try:
+    engine = create_engine(connection_string)
+    for i, chunk in enumerate(...):
+```
+
+### Business Rules
+- Every `quality_standards` entry from the pipeline config MUST be translated to real pandas code.
+- **`chunk['is_suspicious'] = False` is a COMPLIANCE VIOLATION** — it is a placeholder, not an implementation.
+- `FLAG_AS_SUSPICIOUS` sets `chunk['is_suspicious'] = ~condition`. Do NOT add a filter after — suspicious rows must be retained.
+
+### Storage
+- `storage_options={}` is MANDATORY in every `to_parquet()` call — omitting it causes `TypeError` on cloud storage writes.
+- `run_date` MUST NOT be added as a DataFrame column — it is a Hive partition key derived from the S3/GCS/ABFS path.
+- Partition path format is always `run_date=YYYY-MM-DD/` — any other format breaks Trino partition discovery.
+
+### Type Casting
+- Cast `float64` → `Int64` for quantity/count columns before every `to_parquet()` call — pandas defaults NULLable integers to float64, causing Trino to read `double` instead of `BIGINT`.
+
+### Cloud SDK
+- The cloud storage SDK (`boto3` / `gcs` / `BlobServiceClient`) MUST be used inside `if _CLOUD == "..."` guards — never called unconditionally after a conditional import.
 
 ---
 
-## Connectivity
-Use `sqlalchemy.create_engine`. Avoid raw DB-API drivers.
+## Storage URI by Cloud
+| Cloud | Protocol | Example |
+|---|---|---|
+| AWS | `s3://` | `s3://eu-sales-insights-data/processed/` |
+| GCP | `gs://` | `gs://global-marketing-insights-data/processed/` |
+| Azure | `abfss://` | `abfss://container@account.dfs.core.windows.net/processed/` |
 
-**Cloud-agnostic credential retrieval via `cloud_get()`** — reads from SSM first, then `.bootstrap_outputs.json`, then env vars. Never use `os.getenv()` directly for DB credentials:
-
-```python
-# PostgreSQL (AWS RDS)
-host = cloud_get("aws", "rds_host")
-port = cloud_get("aws", "rds_port") or "5432"
-user = cloud_get("aws", "rds_username")
-pw   = cloud_get("aws", "rds_password")
-db   = cloud_get("aws", "rds_db_name")
-connection_string = (
-    f"postgresql+psycopg2://{user}:{pw}"
-    f"@{host}:{port}/{db}"
-)
-
-# MySQL (GCP Cloud SQL)
-host = cloud_get("gcp", "db_host")
-port = cloud_get("gcp", "db_port") or "3306"
-user = cloud_get("gcp", "db_user")
-pw   = cloud_get("gcp", "db_password")
-db   = cloud_get("gcp", "db_name")
-connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
-```
-
-The connection string MUST use **double quotes** for the outer f-string so that inner single-quoted calls do not cause a `SyntaxError: f-string: unmatched '('`. Never write `f'...{cloud_get('aws', 'key')}...'`.
-
-- **Data Handling**: Use `pandas` for transformations.
-- **Date Columns**: Always convert date/timestamp columns with `pd.to_datetime()` before any comparison. Database drivers often return date columns as strings. Always do: `chunk['col'] = pd.to_datetime(chunk['col'])` before filtering on dates.
-- **Memory Management**: Always use `chunksize` in `pd.read_sql_query`. Always iterate with `enumerate()`: `for i, chunk in enumerate(pd.read_sql_query(..., chunksize=1000))`. This guarantees unique filenames (`part_{i}.parquet`) and index-aware logging.
-- **Type Casting Before Write**: Before calling `to_parquet()`, cast integer/count/quantity columns from `float64` to `Int64` (nullable integer). Failing to do this causes Trino to read `double` instead of `BIGINT`:
-```python
-int_columns = [col for col in chunk.select_dtypes(include='float64').columns
-               if any(kw in col.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
-for col in int_columns:
-    chunk[col] = chunk[col].astype('Int64')
-```
+Hidden runtime dependencies (never imported directly):
+- `s3fs` for `s3://`, `gcsfs` for `gs://`, `adlfs` for `abfss://`
+- `pyarrow` for `to_parquet()`
+- `psycopg2-binary` for PostgreSQL via SQLAlchemy
 
 ---
-
-## Storage
-Use `pandas.to_parquet()` with **Hive-style date partitioning**. The subdirectory name MUST follow `run_date=YYYY-MM-DD` exactly — any other format will NOT be recognized as a partition by Trino:
-
-```python
-run_date = datetime.date.today().isoformat()
-partition_uri = f"{destination_uri}run_date={run_date}/"
-
-# CORRECT:  s3://bucket/processed/run_date=2026-05-05/
-# WRONG:    s3://bucket/processed/2026-05-05/          ← ❌
-# WRONG:    s3://bucket/processed/date=2026-05-05/     ← ❌
-
-chunk.to_parquet(
-    f"{partition_uri}part_{i}.parquet",
-    engine="pyarrow",
-    compression="snappy",
-    index=False,
-    storage_options={}
-)
-```
-
-> **CRITICAL:** Do NOT add `run_date` as a column to the DataFrame. It is a Hive partition key derived from the S3 path — adding it inside the Parquet file causes a schema conflict.
-
-> **Hidden dependency:** `s3fs` for `s3://` (AWS), `gcsfs` for `gs://` (GCP), `adlfs` for `abfs://` (Azure) — never imported directly but required at runtime by `pandas.to_parquet()`.
-
-> **Hidden dependency:** `pyarrow` — never imported directly but required as the parquet engine. Omitting it causes `ImportError: pyarrow is required for parquet support`.
-
-> **Hidden dependency:** `psycopg2-binary` for PostgreSQL. Never imported directly but required by SQLAlchemy at runtime.
-
----
-
-## Idempotency Standard
-Always wrap all pipeline logic inside a `run()` function. Check whether the destination partition already exists before writing — use the SDK matching the cloud provider:
-
-```python
-run_date = datetime.date.today().isoformat()
-partition_uri = f"{destination_uri}run_date={run_date}/"
-parsed = urlparse(partition_uri)
-bucket = parsed.netloc
-prefix = parsed.path.lstrip('/')
-```
-
-**AWS (boto3) — `import boto3` is REQUIRED at the top of the file:**
-```python
-s3 = boto3.client('s3')
-response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-if response.get('KeyCount', 0) > 0:
-    logging.info(f"Partition run_date={run_date} already populated. Skipping.")
-    return
-```
-
-**GCP (google-cloud-storage):**
-```python
-from google.cloud import storage
-client = storage.Client()
-blobs = list(client.list_blobs(bucket, prefix=prefix, max_results=1))
-if blobs:
-    logging.info("Destination already populated. Skipping.")
-    return
-```
-
-**Azure (azure-storage-blob):**
-```python
-from azure.storage.blob import BlobServiceClient
-client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))
-container = client.get_container_client(bucket)
-blobs = list(container.list_blobs(name_starts_with=prefix))
-if blobs:
-    logging.info("Destination already populated. Skipping.")
-    return
-```
-
-After the extraction loop, register the new partition with Trino so it is immediately queryable:
-```python
-trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
-catalog, schema, table = "<catalog>", "<schema>", "<table>"  # from CATALOG_AND_MONITORING.trino_metadata
-conn = trino_connect(host=trino_host, port=8080, user="pipeline")
-cursor = conn.cursor()
-cursor.execute(f"CALL {catalog}.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
-cursor.fetchall()
-logging.info(f"Trino partition run_date={run_date} registered.")
-```
-
-> **Explicit dependency:** `trino` MUST be in `requirements.txt`. This is the most commonly omitted dependency — the script will crash with `ModuleNotFoundError` without it.
 
 ## Requirements Standard
-The `requirements.txt` MUST contain exactly these packages (add cloud-specific storage SDK based on `cloud_provider`):
-
 ```
 pandas
 sqlalchemy
-psycopg2-binary
 pyarrow
 trino
 prometheus-client
-# AWS:
-boto3
-s3fs
-# GCP:
-# google-cloud-storage
-# gcsfs
-# Azure:
-# azure-storage-blob
-# adlfs
+# AWS:   boto3, s3fs, psycopg2-binary
+# GCP:   google-cloud-storage, gcsfs, pymysql
+# Azure: azure-storage-blob, adlfs, pyodbc
 ```
-
-`trino` is always required regardless of cloud. `boto3`/`s3fs`, `google-cloud-storage`/`gcsfs`, or `azure-storage-blob`/`adlfs` are included only for the active cloud provider.
-> **Explicit dependency:** `boto3` MUST be in `requirements.txt` for AWS pipelines.
-
----
-
-## Error Handling Standard
-`create_engine` AND the extraction loop MUST be inside the **SAME** `try` block:
-
-```python
-try:
-    engine = create_engine(connection_string)
-    for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
-        # transformations and write
-except Exception as e:
-    logging.error(f"Pipeline failed: {e}")
-    raise
-```
-
-**CRITICAL: Do NOT put `create_engine` in a separate try/except and leave the loop unprotected.**
-
----
-
-## Logging Standard
-`logging.basicConfig` at module level. The start log MUST be the **first statement inside `run()`**, before the idempotency check:
-
-```python
-logging.basicConfig(level=logging.INFO)
-
-def run():
-    logging.info("Pipeline starting: <pipeline_name>")  # ← FIRST line
-
-    total_rows = 0
-    for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
-        # transformations...
-        logging.info(f"Chunk {i}: {len(chunk)} rows processed")
-        total_rows += len(chunk)
-
-    logging.info(f"Pipeline completed. Total rows processed: {total_rows}")
-```
-
----
-
-## Metrics Emission Standard
-Every pipeline script MUST push two Prometheus metrics after the extraction loop. `import time` is REQUIRED at the top of the file — `time.time()` is called here:
-
-```python
-# After logging "Pipeline completed..."
-pushgateway_url = os.getenv("PUSHGATEWAY_URL", "http://pushgateway.monitoring.svc.cluster.local:9091")
-project_id     = os.getenv("PROJECT_ID", "unknown")
-cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")  # "aws", "azure", or "gcp"
-
-registry = CollectorRegistry()
-Gauge('pipeline_rows_processed_total', 'Total rows processed',
-      ['project_id', 'cloud_provider'], registry=registry) \
-    .labels(project_id=project_id, cloud_provider=cloud_provider).set(total_rows)
-Gauge('pipeline_last_success_timestamp', 'Unix timestamp of last successful run',
-      ['project_id', 'cloud_provider'], registry=registry) \
-    .labels(project_id=project_id, cloud_provider=cloud_provider).set(time.time())
-
-push_to_gateway(pushgateway_url, job=project_id, registry=registry)
-logging.info(f"Metrics pushed to Pushgateway: rows={total_rows}, cloud={cloud_provider}")
-```
-
-Metrics MUST include both `project_id` AND `cloud_provider` labels — required for the cross-cloud Grafana dashboard to distinguish pipelines per cloud.
-
-`CLOUD_PROVIDER` is injected by the Kubernetes Job manifest as a static env var. The Infra agent MUST add it to `job.yaml` alongside `PROJECT_ID`.
-
-> **Explicit dependency:** `prometheus-client` MUST be in `requirements.txt`.
-
-**CRITICAL:** Always use a fresh `CollectorRegistry()` — never the default global registry.
-
----
-
-## Business Rule Translation Standard
-Translate each `quality_standards` rule from the pipeline config to pandas code. Use `target_criteria` to identify the correct column(s) from the discovered schema.
-
-| `on_failure_action`  | pandas implementation |
-|----------------------|-----------------------|
-| `DROP_RECORD`        | `df = df[condition]` |
-| `EXCLUDE_AND_LOG`    | `excluded = df[~condition]; logging.warning(f'Excluded {len(excluded)} rows: <reason>'); df = df[condition]` |
-| `DEFAULT_VALUE`      | `df[col] = df[col].where(condition, other=default)` |
-| `FLAG_AS_SUSPICIOUS` | `df['is_suspicious'] = ~condition` |
-
-**CRITICAL for FLAG_AS_SUSPICIOUS:** Do NOT add a filter after flagging — suspicious records must be retained with the flag set.
-
-Apply all rules in sequence before any write. No rule may appear only as a comment.
+`trino` is always required. Include only the packages for the active cloud provider.

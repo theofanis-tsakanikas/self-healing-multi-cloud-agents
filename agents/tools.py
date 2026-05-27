@@ -71,6 +71,45 @@ def get_embedding(text):
 
     
 @tool
+def validate_generated_code(filename: str) -> str:
+    """
+    Runs static analysis (ruff + py_compile) on a generated Python file.
+    Call this immediately after write_project_file for every .py artifact.
+    Returns 'CLEAN' if no issues found, otherwise returns the errors to fix.
+    """
+    if not filename.endswith(".py"):
+        return "CLEAN: not a Python file, no validation needed."
+
+    if not os.path.exists(filename):
+        return f"Error: file '{filename}' does not exist. Did write_project_file succeed?"
+
+    errors = []
+
+    # 1. Syntax check — catches syntax errors and bad imports structurally
+    import py_compile
+    try:
+        py_compile.compile(filename, doraise=True)
+    except py_compile.PyCompileError as e:
+        errors.append(f"SYNTAX ERROR:\n{e}")
+
+    # 2. Ruff static analysis — catches undefined names, unused imports, style
+    ruff_path = shutil.which("ruff")
+    if ruff_path:
+        result = subprocess.run(
+            [ruff_path, "check", "--select", "F,E9", "--no-cache", filename],
+            capture_output=True, text=True
+        )
+        if result.stdout.strip():
+            errors.append(f"RUFF ERRORS:\n{result.stdout.strip()}")
+    else:
+        errors.append("WARNING: ruff not found — only syntax check was performed.")
+
+    if errors:
+        return "VALIDATION FAILED — fix these issues before proceeding:\n\n" + "\n\n".join(errors)
+    return f"CLEAN: '{filename}' passed all static analysis checks."
+
+
+@tool
 def write_project_file(filename: str, content: str):
     """
     Writes project files. 
