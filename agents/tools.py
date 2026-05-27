@@ -73,40 +73,87 @@ def get_embedding(text):
 @tool
 def validate_generated_code(filename: str) -> str:
     """
-    Runs static analysis (ruff + py_compile) on a generated Python file.
-    Call this immediately after write_project_file for every .py artifact.
-    Returns 'CLEAN' if no issues found, otherwise returns the errors to fix.
+    Validates a generated artifact before it reaches the cluster.
+    Supports .py (ruff + py_compile), .json (syntax), .sql (basic checks),
+    requirements.txt (format). Call immediately after write_project_file.
+    Returns 'CLEAN' or a list of errors to fix before proceeding.
     """
-    if not filename.endswith(".py"):
-        return "CLEAN: not a Python file, no validation needed."
+    import py_compile
+    import json as _json
 
     if not os.path.exists(filename):
         return f"Error: file '{filename}' does not exist. Did write_project_file succeed?"
 
     errors = []
+    ext = Path(filename).suffix.lower()
+    base = Path(filename).name.lower()
 
-    # 1. Syntax check — catches syntax errors and bad imports structurally
-    import py_compile
-    try:
-        py_compile.compile(filename, doraise=True)
-    except py_compile.PyCompileError as e:
-        errors.append(f"SYNTAX ERROR:\n{e}")
+    # ── Python ────────────────────────────────────────────────────────────────
+    if ext == ".py":
+        # 1. Syntax / compile check
+        try:
+            py_compile.compile(filename, doraise=True)
+        except py_compile.PyCompileError as e:
+            errors.append(f"SYNTAX ERROR:\n{e}")
 
-    # 2. Ruff static analysis — catches undefined names, unused imports, style
-    ruff_path = shutil.which("ruff")
-    if ruff_path:
-        result = subprocess.run(
-            [ruff_path, "check", "--select", "F,E9", "--no-cache", filename],
-            capture_output=True, text=True
-        )
-        if result.stdout.strip():
-            errors.append(f"RUFF ERRORS:\n{result.stdout.strip()}")
+        # 2. Ruff — undefined names (F821), syntax errors (E9), missing imports (F401)
+        ruff_path = shutil.which("ruff")
+        if ruff_path:
+            result = subprocess.run(
+                [ruff_path, "check", "--select", "F,E9", "--no-cache", filename],
+                capture_output=True, text=True
+            )
+            if result.stdout.strip():
+                errors.append(f"RUFF:\n{result.stdout.strip()}")
+        else:
+            errors.append("WARNING: ruff not installed — only py_compile ran.")
+
+    # ── JSON (Grafana dashboard) ──────────────────────────────────────────────
+    elif ext == ".json":
+        try:
+            with open(filename, encoding="utf-8") as f:
+                data = _json.load(f)
+            # Grafana-specific mandatory fields
+            missing = [k for k in ("uid", "title", "schemaVersion", "panels") if k not in data]
+            if missing:
+                errors.append(f"GRAFANA: missing mandatory fields: {missing}")
+            if not isinstance(data.get("panels"), list) or len(data.get("panels", [])) == 0:
+                errors.append("GRAFANA: 'panels' must be a non-empty list.")
+        except _json.JSONDecodeError as e:
+            errors.append(f"JSON SYNTAX ERROR: {e}")
+
+    # ── SQL (Trino DDL) ───────────────────────────────────────────────────────
+    elif ext == ".sql":
+        with open(filename, encoding="utf-8") as f:
+            content = f.read().upper()
+        if "CREATE TABLE" not in content:
+            errors.append("SQL: missing CREATE TABLE statement.")
+        if "EXTERNAL_LOCATION" not in content:
+            errors.append("SQL: missing EXTERNAL_LOCATION in WITH clause.")
+        if "PARTITIONED_BY" not in content:
+            errors.append("SQL: missing PARTITIONED_BY = ARRAY['run_date'].")
+        if "FORMAT" not in content:
+            errors.append("SQL: missing FORMAT = 'PARQUET' in WITH clause.")
+        if "S3A://" in content:
+            errors.append("SQL: invalid protocol s3a:// — use s3:// for AWS Trino.")
+        if "CREATE EXTERNAL TABLE" in content:
+            errors.append("SQL: 'CREATE EXTERNAL TABLE' is Hive/HQL syntax — use plain 'CREATE TABLE' in Trino.")
+
+    # ── requirements.txt ─────────────────────────────────────────────────────
+    elif base == "requirements.txt":
+        with open(filename, encoding="utf-8") as f:
+            lines = [l.strip() for l in f if l.strip() and not l.strip().startswith("#")]
+        mandatory = ["pandas", "sqlalchemy", "pyarrow", "trino", "prometheus-client"]
+        missing = [p for p in mandatory if not any(p in l.lower() for l in lines)]
+        if missing:
+            errors.append(f"REQUIREMENTS: missing mandatory packages: {missing}")
+
     else:
-        errors.append("WARNING: ruff not found — only syntax check was performed.")
+        return f"CLEAN: '{filename}' — no validator for this file type."
 
     if errors:
-        return "VALIDATION FAILED — fix these issues before proceeding:\n\n" + "\n\n".join(errors)
-    return f"CLEAN: '{filename}' passed all static analysis checks."
+        return "VALIDATION FAILED — fix before proceeding:\n\n" + "\n\n".join(errors)
+    return f"CLEAN: '{filename}' passed all validation checks."
 
 
 @tool
