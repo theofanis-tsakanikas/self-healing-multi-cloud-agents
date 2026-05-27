@@ -53,7 +53,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 4.0"
+      version = "~> 5.0"
     }
   }
 
@@ -72,7 +72,7 @@ provider "aws" {
 
 ---
 
-## 2. S3 BUCKET PROVISIONING (AWS PROVIDER 4+)
+## 2. S3 BUCKET PROVISIONING (AWS PROVIDER 5+)
 To avoid `AccessControlListNotSupported` and deprecation warnings, follow the "Resource Splitting" pattern:
 
 ### 2.1 Core Bucket Resource
@@ -101,7 +101,16 @@ resource "aws_s3_bucket_ownership_controls" "ownership_controls" {
   }
 }
 ```
-- **Public Access Block:** Always implement `aws_s3_bucket_public_access_block` setting all four block flags to `true`.
+- **Public Access Block:** Always implement `aws_s3_bucket_public_access_block` setting all four block flags to `true`. **Resource name is FIXED: always `public_access_block`** — renaming it causes Terraform to plan a destroy+create cycle on the existing resource, which triggers unnecessary AWS API calls:
+```hcl
+resource "aws_s3_bucket_public_access_block" "public_access_block" {
+  bucket                  = aws_s3_bucket.data_bucket.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+```
 
 ### 2.3 Separate Service Resources
 Link these resources to the main bucket using `bucket = aws_s3_bucket.<name>.id`:
@@ -145,6 +154,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
 - **Scope:** - Statement 1: `s3:ListBucket` on the **Bucket ARN**.
     - Statement 2: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on the **Bucket ARN + /***.
 - **Least Privilege:** Restrict resources to the `processed/{{project_id}}/*` prefix where possible.
+- **CRITICAL — `description` is mandatory and forces replacement if removed:** AWS treats `aws_iam_policy.description` as an immutable attribute — removing it from the config after initial creation causes Terraform to destroy and recreate the policy with a new ARN, breaking any IAM role attachments. Always include `description` AND add `lifecycle { ignore_changes = [description, tags] }`:
+```hcl
+resource "aws_iam_policy" "s3_access_policy" {
+  name        = "${var.project_id}-s3-access-policy"
+  description = "Scoped S3 access policy for ${var.project_id}"
+  policy      = jsonencode({ ... })
+  lifecycle {
+    ignore_changes = [description, tags]
+  }
+}
+```
 
 ---
 
