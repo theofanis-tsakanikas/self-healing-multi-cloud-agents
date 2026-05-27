@@ -50,6 +50,7 @@ vertexai = ["langchain-google-vertexai>=2.0.0"]
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",
+    "ruff>=0.15.14",
 ]
 
 [tool.pytest.ini_options]
