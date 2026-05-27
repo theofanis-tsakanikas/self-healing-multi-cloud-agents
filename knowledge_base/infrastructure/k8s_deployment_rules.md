@@ -1,6 +1,8 @@
 # STANDARD: KUBERNETES DEPLOYMENT & ORCHESTRATION
 This standard defines the mandatory structure and security protocols for deploying the Data Fabric stack (Trino, Grafana, and Data Jobs).
 
+**VALIDATION REQUIREMENT:** After generating each manifest file, you MUST call `validate_generated_code` on it immediately. If validation returns errors, fix them before proceeding to the next file. An unvalidated manifest MUST NOT be considered complete.
+
 ---
 
 ## 1. MANDATORY MANIFEST STRUCTURE

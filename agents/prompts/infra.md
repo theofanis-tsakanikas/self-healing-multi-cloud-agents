@@ -40,7 +40,8 @@ The following structured context defines your infrastructure mission. All resour
 
 ### 3. CONTAINERIZATION & ORCHESTRATION
 - **Dockerfile:** Build a `python:3.11-slim` image following the dockerfile standard.
-- **K8s Manifest Stack:** Generate in `/k8s`:
+    - **MANDATORY:** After generating the Dockerfile, immediately call `validate_generated_code` on it. Fix any errors before proceeding.
+- **K8s Manifest Stack:** Generate in `/k8s`. **After each manifest, immediately call `validate_generated_code` on it — do not proceed to the next file if validation fails:**
     - `00_namespaces.yaml` — two namespaces (analytics, monitoring) + cloud-specific ServiceAccount:
         - AWS IRSA: `eks.amazonaws.com/role-arn` annotation
         - Azure Workload Identity: `azure.workload.identity/client-id` annotation + `azure.workload.identity/use: "true"` label
@@ -55,6 +56,7 @@ The following structured context defines your infrastructure mission. All resour
     - `job.yaml` — with initContainer for Trino DDL setup
 
 ### 4. CI/CD WORKFLOW (GITHUB ACTIONS)
+- **MANDATORY:** After calling `generate_github_action`, immediately call `validate_generated_code` on the generated file path (`.github/workflows/{{project_id}}_pipeline.yml`). If it reports unresolved placeholders (e.g. `<AWS_ACCOUNT_ID>`), rewrite the workflow with the actual values from context before proceeding to `push_to_github`.
 - **File Location:** `/.github/workflows/{{project_id}}_pipeline.yml`
 - **Cloud-Specific Auth:** Use the correct module from `infra_standard_cicd`:
     - AWS: `aws-actions/configure-aws-credentials@v4` + ECR login + `aws eks update-kubeconfig`

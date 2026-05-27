@@ -14,7 +14,8 @@ from utils.config_utils import build_infra_context, build_databricks_infra_conte
 # Import infrastructure automation tools
 from agents.tools import (
     write_terraform_config, execute_terraform, generate_dockerfile,
-    generate_k8s_manifest, generate_github_action, push_to_github, query_vector_store
+    generate_k8s_manifest, generate_github_action, push_to_github, query_vector_store,
+    validate_generated_code
 )
 
 from agents.constants import (
@@ -81,7 +82,8 @@ def infra_node(state: AgentState):
         "generate_k8s_manifest": generate_k8s_manifest,
         "generate_github_action": generate_github_action,
         "push_to_github": push_to_github,
-        "query_vector_store": query_vector_store
+        "query_vector_store": query_vector_store,
+        "validate_generated_code": validate_generated_code,
     }
 
     # 4. PHASE-GATE LOGIC (PROGRESSIVE TOOL LOCKING)
@@ -189,6 +191,9 @@ def infra_node(state: AgentState):
                 # are fully ready — the workflow references these artifacts.
                 if (k8s_ready and docker_ready and not github_ready) or medic_triggered_fix:
                     selected_keys.append("generate_github_action")
+                # validate_generated_code is always available in orchestration so the LLM
+                # can self-check Dockerfiles and K8s manifests immediately after generation.
+                selected_keys.append("validate_generated_code")
             else:
                 missing_orchestration = []
                 orchestration_phase_instruction = None
@@ -211,7 +216,9 @@ def infra_node(state: AgentState):
             selected_keys.append("query_vector_store")
         if "push_to_github" not in selected_keys:
             selected_keys.append("push_to_github")
-        logger.info("🔧 MEDIC BYPASS: Re-enabling query_vector_store + push_to_github for error-driven fix.")
+        if "validate_generated_code" not in selected_keys:
+            selected_keys.append("validate_generated_code")
+        logger.info("🔧 MEDIC BYPASS: Re-enabling query_vector_store + push_to_github + validate_generated_code for error-driven fix.")
 
     # 5. EARLY EXIT GATE
     # If all files exist, all actions are done, and standards are met, signal completion.

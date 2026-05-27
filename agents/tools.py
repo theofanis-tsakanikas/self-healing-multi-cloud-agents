@@ -44,7 +44,22 @@ load_dotenv()
 # Setting stable base paths (independent of runtime cwd)
 TOOLS_FILE = Path(__file__).resolve()
 PROJECT_ROOT = TOOLS_FILE.parent.parent
-REPO_ROOT = PROJECT_ROOT.parent.parent
+
+def _find_git_root(start: Path) -> Path:
+    """
+    Walk up from `start` until a .git directory is found.
+    Returns that directory as the repository root.
+    Falls back to `start` if no .git is found (git commands will fail
+    with a clear 'not a git repository' error rather than a cryptic exit-128).
+    """
+    current = start.resolve()
+    while current != current.parent:
+        if (current / ".git").exists():
+            return current
+        current = current.parent
+    return start  # fallback: no .git found
+
+REPO_ROOT = _find_git_root(PROJECT_ROOT)
 
 # --- INITIALIZE CLIENTS ---
 try:
@@ -73,9 +88,21 @@ def get_embedding(text):
 @tool
 def validate_generated_code(filename: str) -> str:
     """
-    Validates a generated artifact before it reaches the cluster.
-    Supports .py (ruff + py_compile), .json (syntax), .sql (basic checks),
-    requirements.txt (format). Call immediately after write_project_file.
+    Validates generated artifacts using real linting tools + minimal project-specific policy checks.
+
+    Tool chain per file type:
+    - .py            → ruff + py_compile (syntax, undefined names, missing imports)
+    - .json          → json.loads + Grafana mandatory fields
+    - .sql           → structural checks (no standard linter exists for Trino DDL)
+    - requirements.txt → mandatory package presence
+    - Dockerfile     → hadolint (general best practices) + COPY utils/ project policy
+    - .yaml / .yml   → kubectl apply --dry-run=client (K8s schema) + project policy checks
+
+    Project-specific checks cover only what linting tools cannot know:
+    our architecture's required ConfigMaps, env vars, and security policies.
+    All general best practices (image pinning style, non-root user, etc.) are
+    delegated to hadolint / kubectl — not duplicated here.
+
     Returns 'CLEAN' or a list of errors to fix before proceeding.
     """
     import py_compile
@@ -90,13 +117,11 @@ def validate_generated_code(filename: str) -> str:
 
     # ── Python ────────────────────────────────────────────────────────────────
     if ext == ".py":
-        # 1. Syntax / compile check
         try:
             py_compile.compile(filename, doraise=True)
         except py_compile.PyCompileError as e:
             errors.append(f"SYNTAX ERROR:\n{e}")
 
-        # 2. Ruff — undefined names (F821), syntax errors (E9), missing imports (F401)
         ruff_path = shutil.which("ruff")
         if ruff_path:
             result = subprocess.run(
@@ -113,7 +138,6 @@ def validate_generated_code(filename: str) -> str:
         try:
             with open(filename, encoding="utf-8") as f:
                 data = _json.load(f)
-            # Grafana-specific mandatory fields
             missing = [k for k in ("uid", "title", "schemaVersion", "panels") if k not in data]
             if missing:
                 errors.append(f"GRAFANA: missing mandatory fields: {missing}")
@@ -126,7 +150,6 @@ def validate_generated_code(filename: str) -> str:
     elif ext == ".sql":
         with open(filename, encoding="utf-8") as f:
             content = f.read().upper()
-        # Structural checks — apply to all clouds (Trino is the query engine everywhere)
         if "CREATE TABLE" not in content:
             errors.append("SQL: missing CREATE TABLE statement.")
         if "EXTERNAL_LOCATION" not in content:
@@ -137,17 +160,15 @@ def validate_generated_code(filename: str) -> str:
             errors.append("SQL: missing FORMAT = 'PARQUET' in WITH clause.")
         if "CREATE EXTERNAL TABLE" in content:
             errors.append("SQL: 'CREATE EXTERNAL TABLE' is Hive/HQL syntax — use plain 'CREATE TABLE' in Trino.")
-        # Protocol cross-cloud check: s3a:// is Hadoop/Spark — never valid in Trino on any cloud
         if "S3A://" in content:
-            errors.append("SQL: protocol s3a:// is Hadoop/Spark only — Trino uses s3:// (AWS), gs:// (GCP), abfss:// (Azure).")
-        # Cross-cloud protocol mismatch: catch using wrong cloud's protocol
+            errors.append("SQL: s3a:// is Hadoop/Spark only — Trino uses s3:// (AWS), gs:// (GCP), abfss:// (Azure).")
         cloud = os.getenv("CLOUD_PROVIDER", "").lower()
         if cloud == "aws" and ("GS://" in content or "ABFSS://" in content):
-            errors.append("SQL: GCS/Azure protocol detected in an AWS pipeline — use s3:// for external_location.")
+            errors.append("SQL: GCS/Azure protocol in an AWS pipeline — use s3://.")
         elif cloud == "gcp" and ("S3://" in content or "ABFSS://" in content):
-            errors.append("SQL: S3/Azure protocol detected in a GCP pipeline — use gs:// for external_location.")
+            errors.append("SQL: S3/Azure protocol in a GCP pipeline — use gs://.")
         elif cloud == "azure" and ("S3://" in content or "GS://" in content):
-            errors.append("SQL: S3/GCS protocol detected in an Azure pipeline — use abfss:// for external_location.")
+            errors.append("SQL: S3/GCS protocol in an Azure pipeline — use abfss://.")
 
     # ── requirements.txt ─────────────────────────────────────────────────────
     elif base == "requirements.txt":
@@ -157,6 +178,149 @@ def validate_generated_code(filename: str) -> str:
         missing = [p for p in mandatory if not any(p in l.lower() for l in lines)]
         if missing:
             errors.append(f"REQUIREMENTS: missing mandatory packages: {missing}")
+
+    # ── Dockerfile ───────────────────────────────────────────────────────────
+    # hadolint covers: base image tag, COPY . ., non-root user, pip flags, layer hygiene.
+    # We add only the ONE rule hadolint cannot know: our project requires utils/.
+    elif base == "dockerfile":
+        hadolint = shutil.which("hadolint")
+        if hadolint:
+            result = subprocess.run(
+                [hadolint, filename],
+                capture_output=True, text=True
+            )
+            output = (result.stdout + result.stderr).strip()
+            if output:
+                errors.append(f"HADOLINT:\n{output}")
+        else:
+            errors.append(
+                "WARNING: hadolint not installed — Dockerfile not linted. "
+                "Install with: brew install hadolint (macOS) or apt-get install hadolint (Linux)."
+            )
+
+        # Project-specific: utils/ is OUR module tree — hadolint cannot know this is required.
+        with open(filename, encoding="utf-8") as f:
+            content_lower = f.read().lower()
+        if "copy utils/" not in content_lower:
+            errors.append(
+                "DOCKERFILE [project policy]: missing 'COPY utils/ utils/' — "
+                "pipeline scripts import 'from utils.cloud_config import cloud_get'. "
+                "Omitting this causes ModuleNotFoundError at container startup."
+            )
+
+    # ── YAML files — two distinct types require different validation ─────────────
+    elif ext in (".yaml", ".yml"):
+        import re as _re
+
+        with open(filename, encoding="utf-8") as f:
+            raw = f.read()
+        content_upper = raw.upper()
+        fpath = filename.replace("\\", "/").lower()
+        fname = Path(filename).name.lower()
+
+        # Detect GitHub Actions workflows by path — they must NOT go through kubectl.
+        is_gha_workflow = ".github/workflows" in fpath
+
+        if is_gha_workflow:
+            # ── GitHub Actions Workflow ───────────────────────────────────────
+            # Parse YAML syntax, check structure, and catch unresolved placeholders.
+            # kubectl --dry-run would reject these files (wrong resource type).
+            try:
+                yaml.safe_load(raw)
+            except yaml.YAMLError as e:
+                errors.append(f"GHA YAML SYNTAX ERROR:\n{e}")
+
+            # Minimal structure check: every valid workflow needs 'on:' and 'jobs:'
+            if "on:" not in raw and "\"on\":" not in raw:
+                errors.append("GHA: missing 'on:' trigger — GitHub Actions workflow must define when it runs.")
+            if "jobs:" not in raw:
+                errors.append("GHA: missing 'jobs:' — workflow has no jobs defined.")
+
+            # Unresolved placeholders in CI scripts cause silent failures or wrong deployments.
+            placeholders = _re.findall(r"<[A-Z_]{3,}>", raw)
+            if placeholders:
+                errors.append(
+                    f"GHA: unresolved placeholder(s) {list(set(placeholders))} — "
+                    "replace every <...> token with its actual value from context "
+                    "(e.g. <AWS_ACCOUNT_ID> → the 12-digit account ID from Terraform outputs)."
+                )
+
+        else:
+            # ── Kubernetes Manifests ──────────────────────────────────────────
+            # kubectl --dry-run=client validates the full K8s schema (apiVersion, kinds,
+            # required fields, type mismatches) without touching the cluster.
+            # We add only project-specific POLICY checks: architecture decisions that
+            # kubectl cannot enforce (which ConfigMaps exist, which env vars the app needs, etc.)
+            kubectl = shutil.which("kubectl")
+            if kubectl:
+                result = subprocess.run(
+                    [kubectl, "apply", "--dry-run=client", "-f", filename],
+                    capture_output=True, text=True
+                )
+                if result.returncode != 0:
+                    errors.append(f"KUBECTL DRY-RUN:\n{result.stderr.strip()}")
+            else:
+                errors.append(
+                    "WARNING: kubectl not installed — K8s schema not validated. "
+                    "Install kubectl to enable schema validation."
+                )
+
+            # ── Universal policy checks (apply to every K8s manifest) ─────────
+            # Unresolved template placeholders break deployments silently.
+            placeholders = _re.findall(r"<[A-Z_]{3,}>", raw)
+            if placeholders:
+                errors.append(
+                    f"K8S: unresolved placeholder(s) {list(set(placeholders))} — "
+                    "replace every <...> token with its actual value from context before applying."
+                )
+
+            # :latest tags are policy violations — kubectl allows them but we forbid them.
+            latest_matches = _re.findall(r"image:\s*\S+:latest", raw, _re.IGNORECASE)
+            if latest_matches:
+                errors.append(
+                    f"K8S: ':latest' image tag(s) found {latest_matches} — "
+                    "pin to a specific version per the pinned versions in k8s_deployment_rules.md."
+                )
+
+            # ── Per-file project policy checks ────────────────────────────────
+            if fname == "job.yaml":
+                # backoffLimit=0 is our policy: jobs are idempotent via partition check,
+                # so retrying a failed pod masks bugs instead of surfacing them.
+                if "backofflimit: 0" not in content_upper.replace(" ", ""):
+                    errors.append("K8S job.yaml [project policy]: backoffLimit must be 0 — jobs are idempotent; retries mask failures.")
+                # envFrom: secretRef is our security policy — DB creds must never appear in env[].
+                if "envfrom" not in content_upper:
+                    errors.append("K8S job.yaml [project policy]: missing envFrom: secretRef — DB credentials must be injected via K8s Secret, never in env[].")
+                # These env vars are consumed by our pipeline script and Prometheus metrics.
+                for env_var in ["PROJECT_ID", "CLOUD_PROVIDER", "TRINO_HOST", "PUSHGATEWAY_URL"]:
+                    if env_var not in raw:
+                        errors.append(f"K8S job.yaml [project policy]: missing env var '{env_var}' — required by the pipeline script.")
+
+            elif fname == "configmaps.yaml":
+                # These 5 names are our architecture — no tool knows they're all required.
+                required_cms = [
+                    "trino-sql-config", "hive-catalog-config",
+                    "grafana-dash-config", "grafana-datasource-config", "prometheus-config"
+                ]
+                missing_cms = [cm for cm in required_cms if cm not in raw.lower()]
+                if missing_cms:
+                    errors.append(
+                        f"K8S configmaps.yaml [project policy]: missing ConfigMap(s) {missing_cms} — "
+                        "all 5 are required per k8s_deployment_rules.md Section 2."
+                    )
+                # Prometheus must scrape Pushgateway, not Trino — common LLM mistake.
+                if "pushgateway.monitoring.svc.cluster.local:9091" not in raw:
+                    errors.append(
+                        "K8S configmaps.yaml [project policy]: prometheus-config scrape target must be "
+                        "'pushgateway.monitoring.svc.cluster.local:9091'. "
+                        "The pipeline pushes metrics to Pushgateway — Prometheus scrapes Pushgateway, not Trino."
+                    )
+                # Placeholder content means the LLM didn't embed the actual SQL/JSON.
+                if any(phrase in raw.lower() for phrase in ["-- sql setup", "sql setup commands", "placeholder"]):
+                    errors.append(
+                        "K8S configmaps.yaml [project policy]: placeholder content detected — "
+                        "embed the actual content of sql/setup_trino.sql and dashboards/monitoring_specs.json verbatim."
+                    )
 
     else:
         return f"CLEAN: '{filename}' — no validator for this file type."
