@@ -138,73 +138,49 @@ def validate_generated_code(filename: str) -> str:
         # os.getenv() bypasses SSM and .bootstrap_outputs.json, breaking production.
         # Infrastructure endpoints (TRINO_HOST, PUSHGATEWAY_URL etc.) are exempt.
         #
-        # Replacement keys per provider — mirrors utils/cloud_config.py _ENV_FALLBACKS.
-        # Structured as {provider: {env_var: cloud_key}} so we can detect the cloud
-        # from the file itself and show the correct cloud_get() call.
-        _PROVIDER_CRED_MAP = {
-            "aws": {
-                "POSTGRES_DB_HOST":     "rds_host",
-                "POSTGRES_DB_PORT":     "rds_port",
-                "POSTGRES_DB_USER":     "rds_username",
-                "POSTGRES_DB_PASSWORD": "rds_password",
-                "POSTGRES_DB_NAME":     "rds_db_name",
-                "MYSQL_DB_HOST":        "rds_host",
-                "MYSQL_DB_PORT":        "rds_port",
-                "MYSQL_DB_USER":        "rds_username",
-                "MYSQL_DB_PASSWORD":    "rds_password",
-                "MYSQL_DB_NAME":        "rds_db_name",
-            },
-            "gcp": {
-                "POSTGRES_DB_HOST":     "db_host",
-                "POSTGRES_DB_PORT":     "db_port",
-                "POSTGRES_DB_USER":     "db_user",
-                "POSTGRES_DB_PASSWORD": "db_password",
-                "POSTGRES_DB_NAME":     "db_name",
-                "MYSQL_DB_HOST":        "db_host",
-                "MYSQL_DB_PORT":        "db_port",
-                "MYSQL_DB_USER":        "db_user",
-                "MYSQL_DB_PASSWORD":    "db_password",
-                "MYSQL_DB_NAME":        "db_name",
-            },
-            "azure": {
-                "POSTGRES_DB_HOST":     "db_host",
-                "POSTGRES_DB_PORT":     "db_port",
-                "POSTGRES_DB_USER":     "db_user",
-                "POSTGRES_DB_PASSWORD": "db_password",
-                "POSTGRES_DB_NAME":     "db_name",
-                "MYSQL_DB_HOST":        "db_host",
-                "MYSQL_DB_PORT":        "db_port",
-                "MYSQL_DB_USER":        "db_user",
-                "MYSQL_DB_PASSWORD":    "db_password",
-                "MYSQL_DB_NAME":        "db_name",
-            },
+        # Keys are GENERIC (db_host, db_port, db_user, db_password, db_name) —
+        # the same API regardless of cloud provider or DB engine.
+        # cloud_config.py handles the env-var fallback for each combination.
+        _CRED_ENVVARS = frozenset({
+            "POSTGRES_DB_HOST", "POSTGRES_DB_PORT", "POSTGRES_DB_USER",
+            "POSTGRES_DB_PASSWORD", "POSTGRES_DB_NAME",
+            "MYSQL_DB_HOST", "MYSQL_DB_PORT", "MYSQL_DB_USER",
+            "MYSQL_DB_PASSWORD", "MYSQL_DB_NAME",
+        })
+        # env-var name → generic cloud_get() key (same for every provider/engine)
+        _ENVVAR_TO_GENERIC_KEY = {
+            "POSTGRES_DB_HOST":     "db_host",
+            "POSTGRES_DB_PORT":     "db_port",
+            "POSTGRES_DB_USER":     "db_user",
+            "POSTGRES_DB_PASSWORD": "db_password",
+            "POSTGRES_DB_NAME":     "db_name",
+            "MYSQL_DB_HOST":        "db_host",
+            "MYSQL_DB_PORT":        "db_port",
+            "MYSQL_DB_USER":        "db_user",
+            "MYSQL_DB_PASSWORD":    "db_password",
+            "MYSQL_DB_NAME":        "db_name",
         }
-        _ALL_CRED_ENVVARS = frozenset(
-            k for creds in _PROVIDER_CRED_MAP.values() for k in creds
-        )
 
         with open(filename, encoding="utf-8") as f:
             py_content = f.read()
 
-        # Detect the cloud provider the LLM declared in the file.
-        # Looks for patterns like: _CLOUD = os.getenv("CLOUD_PROVIDER", "aws")
-        # or CLOUD_PROVIDER = "gcp", falling back to "aws".
+        # Detect the cloud provider declared in the file.
+        # Matches: _CLOUD = os.getenv("CLOUD_PROVIDER", "aws") or _CLOUD = "gcp"
         _cloud_detect = re.search(
             r'(?:_CLOUD|CLOUD_PROVIDER)\s*=\s*[^\n]*["\'](\w+)["\']',
             py_content,
         )
         detected_provider = _cloud_detect.group(1).lower() if _cloud_detect else "aws"
-        cred_map = _PROVIDER_CRED_MAP.get(detected_provider, _PROVIDER_CRED_MAP["aws"])
 
         getenv_scan = re.compile(r'os\.getenv\s*\(\s*["\']([^"\']+)["\']', re.IGNORECASE)
         found_cred_violations = [
             (m.group(1).upper(), m.group(0))
             for m in getenv_scan.finditer(py_content)
-            if m.group(1).upper() in _ALL_CRED_ENVVARS
+            if m.group(1).upper() in _CRED_ENVVARS
         ]
         if found_cred_violations:
             replacements = "\n".join(
-                f'  {original}  →  cloud_get("{detected_provider}", "{cred_map.get(env_var, "<key>")}")'
+                f'  {original}  →  cloud_get("{detected_provider}", "{_ENVVAR_TO_GENERIC_KEY.get(env_var, "db_host")}")'
                 for env_var, original in found_cred_violations
             )
             errors.append(

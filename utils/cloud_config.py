@@ -8,13 +8,21 @@ Priority chain (highest → lowest):
 
 Convention for SSM parameter names:
   /multi-cloud-self-healing-agent/<cloud>/<key>
-  e.g.  /multi-cloud-self-healing-agent/aws/rds_host
+  e.g.  /multi-cloud-self-healing-agent/aws/db_host
 
-Usage:
-    from utils.cloud_config import cloud_get
+Keys are GENERIC and DB-engine-agnostic: db_host, db_port, db_user, db_password, db_name.
+The same API works for any combination of cloud provider and database engine:
 
-    host = cloud_get("aws", "rds_host")        # returns str or None
-    pw   = cloud_get("aws", "rds_password")    # decrypts SecureString transparently
+    cloud_get("aws",   "db_host")   # PostgreSQL or MySQL on AWS RDS
+    cloud_get("gcp",   "db_host")   # PostgreSQL or MySQL on GCP Cloud SQL
+    cloud_get("azure", "db_host")   # PostgreSQL or MySQL on Azure Database
+
+For the env-var fallback (tier 3), both POSTGRES_DB_* and MYSQL_DB_* are tried
+in order, so whichever the operator has set in their environment will be found.
+
+Backward-compatibility aliases (rds_host etc.) are retained so existing
+.bootstrap_outputs.json files and SSM parameters written before this refactor
+keep working — cloud_get() checks the alias automatically.
 """
 
 import json
@@ -31,20 +39,40 @@ _BOOTSTRAP_FILE = _PROJECT_ROOT / ".bootstrap_outputs.json"
 _SSM_PREFIX = "/multi-cloud-self-healing-agent"
 
 # ── Env-var fallback table ────────────────────────────────────────────────────
-# Maps (cloud, key) → environment variable name used as last resort.
-_ENV_FALLBACKS: dict[tuple[str, str], str] = {
-    # AWS / RDS (PostgreSQL)
-    ("aws", "rds_host"):      "POSTGRES_DB_HOST",
-    ("aws", "rds_port"):      "POSTGRES_DB_PORT",
-    ("aws", "rds_username"):  "POSTGRES_DB_USER",
-    ("aws", "rds_password"):  "POSTGRES_DB_PASSWORD",
-    ("aws", "rds_db_name"):   "POSTGRES_DB_NAME",
-    # GCP / Cloud SQL (MySQL)
-    ("gcp", "db_host"):       "MYSQL_DB_HOST",
-    ("gcp", "db_port"):       "MYSQL_DB_PORT",
-    ("gcp", "db_user"):       "MYSQL_DB_USER",
-    ("gcp", "db_password"):   "MYSQL_DB_PASSWORD",
-    ("gcp", "db_name"):       "MYSQL_DB_NAME",
+# Maps (cloud, generic_key) → list of env-var names tried in order.
+# Both POSTGRES_DB_* and MYSQL_DB_* are listed so the function works regardless
+# of which DB engine the operator has configured.
+_ENV_FALLBACKS: dict[tuple[str, str], list[str]] = {
+    # ── AWS (RDS: PostgreSQL, MySQL, or any other engine) ────────────────────
+    ("aws", "db_host"):     ["POSTGRES_DB_HOST",     "MYSQL_DB_HOST"],
+    ("aws", "db_port"):     ["POSTGRES_DB_PORT",     "MYSQL_DB_PORT"],
+    ("aws", "db_user"):     ["POSTGRES_DB_USER",     "MYSQL_DB_USER"],
+    ("aws", "db_password"): ["POSTGRES_DB_PASSWORD", "MYSQL_DB_PASSWORD"],
+    ("aws", "db_name"):     ["POSTGRES_DB_NAME",     "MYSQL_DB_NAME"],
+    # ── GCP (Cloud SQL: PostgreSQL or MySQL) ──────────────────────────────────
+    ("gcp", "db_host"):     ["POSTGRES_DB_HOST",     "MYSQL_DB_HOST"],
+    ("gcp", "db_port"):     ["POSTGRES_DB_PORT",     "MYSQL_DB_PORT"],
+    ("gcp", "db_user"):     ["POSTGRES_DB_USER",     "MYSQL_DB_USER"],
+    ("gcp", "db_password"): ["POSTGRES_DB_PASSWORD", "MYSQL_DB_PASSWORD"],
+    ("gcp", "db_name"):     ["POSTGRES_DB_NAME",     "MYSQL_DB_NAME"],
+    # ── Azure (Azure Database for PostgreSQL / MySQL) ─────────────────────────
+    ("azure", "db_host"):     ["POSTGRES_DB_HOST",     "MYSQL_DB_HOST"],
+    ("azure", "db_port"):     ["POSTGRES_DB_PORT",     "MYSQL_DB_PORT"],
+    ("azure", "db_user"):     ["POSTGRES_DB_USER",     "MYSQL_DB_USER"],
+    ("azure", "db_password"): ["POSTGRES_DB_PASSWORD", "MYSQL_DB_PASSWORD"],
+    ("azure", "db_name"):     ["POSTGRES_DB_NAME",     "MYSQL_DB_NAME"],
+}
+
+# ── Backward-compatibility aliases ────────────────────────────────────────────
+# Old keys written by bootstrap scripts or stored in SSM before the generic
+# naming convention was introduced.  cloud_get() resolves these transparently.
+_LEGACY_ALIASES: dict[tuple[str, str], tuple[str, str]] = {
+    ("aws", "rds_host"):     ("aws", "db_host"),
+    ("aws", "rds_port"):     ("aws", "db_port"),
+    ("aws", "rds_username"): ("aws", "db_user"),
+    ("aws", "rds_password"): ("aws", "db_password"),
+    ("aws", "rds_db_name"):  ("aws", "db_name"),
+    ("gcp", "db_user"):      ("gcp", "db_user"),   # already generic, no-op
 }
 
 
@@ -73,7 +101,6 @@ def _try_ssm(cloud: str, key: str) -> Optional[str]:
     """
     try:
         import boto3
-        from botocore.exceptions import ClientError, NoCredentialsError, NoRegionError
 
         region = os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
         ssm = boto3.client("ssm", region_name=region)
@@ -85,7 +112,6 @@ def _try_ssm(cloud: str, key: str) -> Optional[str]:
         logger.debug("boto3 not installed — SSM lookup skipped.")
         return None
     except Exception as exc:
-        # NoCredentialsError, ClientError (ParameterNotFound), etc.
         logger.debug(f"SSM lookup skipped for {cloud}/{key}: {exc}")
         return None
 
@@ -98,12 +124,17 @@ def cloud_get(cloud: str, key: str, *, use_ssm: bool = True) -> Optional[str]:
 
     Args:
         cloud:    "aws" | "gcp" | "azure"
-        key:      Key as it appears in bootstrap_outputs.json (e.g. "rds_host")
+        key:      Generic key — db_host | db_port | db_user | db_password | db_name.
+                  Legacy RDS-specific keys (rds_host, rds_username, rds_db_name) are
+                  transparently resolved via _LEGACY_ALIASES for backward compatibility.
         use_ssm:  Set False in unit tests to skip the live SSM call.
 
     Returns:
         The config value as a string, or None if not found anywhere.
     """
+    # Resolve legacy key aliases transparently
+    cloud, key = _LEGACY_ALIASES.get((cloud, key), (cloud, key))
+
     # ── 1. SSM (AWS only) ─────────────────────────────────────────────────────
     if use_ssm and cloud == "aws":
         value = _try_ssm(cloud, key)
@@ -118,9 +149,8 @@ def cloud_get(cloud: str, key: str, *, use_ssm: bool = True) -> Optional[str]:
         logger.debug(f"📄 bootstrap_outputs: {cloud}/{key}")
         return str(value)
 
-    # ── 3. Environment variable ───────────────────────────────────────────────
-    env_var = _ENV_FALLBACKS.get((cloud, key))
-    if env_var:
+    # ── 3. Environment variables (try each candidate in order) ────────────────
+    for env_var in _ENV_FALLBACKS.get((cloud, key), []):
         value = os.getenv(env_var)
         if value:
             logger.debug(f"🔑 env var: {env_var}")
