@@ -85,7 +85,10 @@ def infra_node(state: AgentState):
     }
 
     # 4. PHASE-GATE LOGIC (PROGRESSIVE TOOL LOCKING)
-    required_standards = ["infra_standard_iac", "infra_standard_k8s", "infra_standard_cicd", "infra_standard_dockerfile", "infra_standard_service_account"]
+    # infra_standard_service_account is NOT a separate required key —
+    # k8s_deployment_rules.md (Section 8) already contains the cloud-specific
+    # ServiceAccount / IRSA / Workload Identity spec inside infra_standard_k8s.
+    required_standards = ["infra_standard_iac", "infra_standard_k8s", "infra_standard_cicd", "infra_standard_dockerfile"]
     has_all_standards = all(key in collected_specs for key in required_standards)
 
     selected_keys = []

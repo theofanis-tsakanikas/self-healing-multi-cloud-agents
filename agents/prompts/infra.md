@@ -22,7 +22,6 @@ The following structured context defines your infrastructure mission. All resour
     2. `query="Kubernetes manifest deployment and orchestration standards. InitContainer, Shared Services, Resource Control and Observability."` → stores as **infra_standard_k8s**
     3. `query="Github actions cicd pipelines. Workflow trigger and structure, deployment execution, checkout, github secrets"` → stores as **infra_standard_cicd**
     4. `query="Dockerfile python pipeline image non-root user selective COPY CMD script path"` → stores as **infra_standard_dockerfile**
-    5. `query="Kubernetes service account workload identity annotation IRSA azure workload identity GKE"` → stores as **infra_standard_service_account**
 * **SPEC EXTRACTION:** Parse retrieved documents and extract ONLY **Technical Constants**, mandatory naming patterns, and structural rules.
 * **PERSISTENCE:** Store findings in `collected_specs` using the exact keys above.
 * **CROSS-AGENT ALIGNMENT:** Analyze `arch_standard_...` keys already in state. You are strictly bound by the naming conventions, ports, and logical URIs defined by the Architect.
