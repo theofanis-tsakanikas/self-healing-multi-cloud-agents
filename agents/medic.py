@@ -36,8 +36,11 @@ def medic_node(state: AgentState):
     """
     logger.info("--- STARTING MEDIC (DIAGNOSTIC) NODE ---")
 
-    # 1. Basic tools that the Medic always has
-    tools = [request_fix, query_vector_store, store_architectural_insight]
+    # 1. Basic tools that the Medic always has.
+    # store_architectural_insight is intentionally excluded — it is called
+    # programmatically only after verification_successful=True, never by the LLM.
+    # Giving the LLM access to it causes premature storage before the fix is verified.
+    tools = [request_fix, query_vector_store]
     
     # 2. Security filter: Add the fetch_github_action_logs ONLY if the push was successful
     # Check if the Infra finished successfully
