@@ -41,9 +41,30 @@ If any of these is missing, the configuration is incomplete.
 - **Mandatory S3 Backend:** Use the S3 backend for state storage.
 - **Literal Value Constraint:** In the `terraform { backend "s3" { ... } }` block, you MUST use concrete string literals for `bucket`, `key`, `region`, and `dynamodb_table`. Variables (`var.*`) are NOT permitted in the backend block.
 - **Locking:** DynamoDB locking is mandatory. The DynamoDB table must have a primary key named `LockID` (string).
-- **Provider Block:** `providers.tf` MUST also include a `provider "aws"` block using `var.region` — this is separate from the backend region and controls where AWS resources are created:
+- **Version Pinning:** `required_version` and `required_providers` are MANDATORY — without them `terraform init` downloads the latest provider version which may introduce breaking changes silently.
+- **Provider Block:** `providers.tf` MUST also include a `provider "aws"` block using `var.region` — this is separate from the backend region and controls where AWS resources are created.
+
+The complete `providers.tf` MUST look exactly like this:
 
 ```hcl
+terraform {
+  required_version = ">= 1.6"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+
+  backend "s3" {
+    bucket         = "<concrete-bucket-name>"
+    key            = "terraform/<pipeline-name>/terraform.tfstate"
+    region         = "<concrete-region>"
+    dynamodb_table = "terraform-state-lock"
+  }
+}
+
 provider "aws" {
   region = var.region
 }
