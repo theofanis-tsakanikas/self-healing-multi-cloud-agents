@@ -191,9 +191,9 @@ def infra_node(state: AgentState):
                 # are fully ready — the workflow references these artifacts.
                 if (k8s_ready and docker_ready and not github_ready) or medic_triggered_fix:
                     selected_keys.append("generate_github_action")
-                # validate_generated_code is always available in orchestration so the LLM
-                # can self-check Dockerfiles and K8s manifests immediately after generation.
-                selected_keys.append("validate_generated_code")
+                # NOTE: validate_generated_code is NOT added to selected_keys —
+                # it runs automatically in Python after every generate_* call (see
+                # auto-validation block in the tool execution loop below).
             else:
                 missing_orchestration = []
                 orchestration_phase_instruction = None
@@ -216,9 +216,7 @@ def infra_node(state: AgentState):
             selected_keys.append("query_vector_store")
         if "push_to_github" not in selected_keys:
             selected_keys.append("push_to_github")
-        if "validate_generated_code" not in selected_keys:
-            selected_keys.append("validate_generated_code")
-        logger.info("🔧 MEDIC BYPASS: Re-enabling query_vector_store + push_to_github + validate_generated_code for error-driven fix.")
+        logger.info("🔧 MEDIC BYPASS: Re-enabling query_vector_store + push_to_github for error-driven fix.")
 
     # 5. EARLY EXIT GATE
     # If all files exist, all actions are done, and standards are met, signal completion.
@@ -417,24 +415,34 @@ def infra_node(state: AgentState):
                         else:
                             collected_specs[f"infra_spec_{q[:10]}"] = result_str
 
-                # B. File Tracking — explicit from args to avoid brittle string parsing.
+                # B. File Tracking + AUTO-VALIDATE for generated artifacts.
                 # write_terraform_config returns "written to" (not "saved to"), so
                 # string detection would silently miss all terraform files.
+                # Auto-validation runs in Python — does not depend on the LLM calling
+                # validate_generated_code. Result is appended to result_str so the LLM
+                # sees any errors in the same ToolMessage and fixes them immediately.
                 if "error" not in result_str.lower():
+                    auto_validate_path = None
+
                     if t_name == "write_terraform_config":
                         raw = t_args.get("filename", "")
                         tracked = ("terraform/" + Path(raw).name).replace("\\", "/")
                         if tracked not in updated_files:
                             updated_files.append(tracked)
+
                     elif t_name == "generate_dockerfile":
                         if "Dockerfile" not in updated_files:
                             updated_files.append("Dockerfile")
+                        auto_validate_path = "Dockerfile"
+
                     elif t_name == "generate_k8s_manifest":
                         raw = os.path.basename(t_args.get("filename", ""))
                         clean = raw.replace(".yaml", "").replace(".yml", "")
                         tracked = f"k8s/{clean}.yaml".replace("\\", "/")
                         if tracked not in updated_files:
                             updated_files.append(tracked)
+                        auto_validate_path = tracked
+
                     elif t_name == "generate_github_action":
                         raw = t_args.get("workflow_name", "")
                         if not raw.endswith((".yaml", ".yml")):
@@ -442,6 +450,24 @@ def infra_node(state: AgentState):
                         tracked = f".github/workflows/{raw}".replace("\\", "/")
                         if tracked not in updated_files:
                             updated_files.append(tracked)
+                        gha_path = os.path.join(str(REPO_ROOT), ".github", "workflows", raw)
+                        auto_validate_path = gha_path
+
+                    # Trigger auto-validation for files that have a validator
+                    if auto_validate_path and os.path.exists(auto_validate_path):
+                        from agents.tools import validate_generated_code as _validate
+                        validation_result = str(_validate.invoke({"filename": auto_validate_path}))
+                        if "VALIDATION FAILED" in validation_result:
+                            any_tool_error = True
+                            logger.warning(f"⚠️ AUTO-VALIDATION FAILED: {auto_validate_path}")
+                            result_str = (
+                                f"{result_str}\n\n"
+                                f"AUTO-VALIDATION FAILED — fix these errors and regenerate '{auto_validate_path}':\n"
+                                f"{validation_result}"
+                            )
+                        else:
+                            logger.info(f"✅ AUTO-VALIDATION PASSED: {auto_validate_path}")
+                            result_str = f"{result_str}\nAUTO-VALIDATION: CLEAN ✓"
 
                 # C. Execution Tracking & Action Locking (Searching for STATUS: SUCCESS)
                 # This prevents the LLM from looping on the same command.

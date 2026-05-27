@@ -179,8 +179,10 @@ def architect_node(state: AgentState):
         phase_instruction = f"CURRENT PHASE: SCHEMA DISCOVERY. Call read_data_schema EXACTLY ONCE with table_name='{table_name}'. Do not call it with any other value."
         logger.info("⚠️ GATE: Schema not yet discovered. Forcing Schema Phase.")
     else:
-        # Phase 3 — Implementation: write all artifacts, then validate .py files
-        allowed_tool_names = ["write_project_file", "validate_generated_code"]
+        # Phase 3 — Implementation: write all artifacts.
+        # validate_generated_code is NOT in the LLM's tool list — it runs automatically
+        # in Python after every write_project_file call (see auto-validation block below).
+        allowed_tool_names = ["write_project_file"]
 
         # Compute missing artifacts using exact filenames/paths so the LLM
         # passes the correct `filename` argument without ambiguity.
@@ -333,6 +335,33 @@ def architect_node(state: AgentState):
                             if filename.endswith(".py"):
                                 last_generated_code = tool_args.get("content", "")
                             all_skipped_this_iter = False
+
+                            # AUTO-VALIDATE immediately after every successful write.
+                            # Deterministic — does not depend on LLM deciding to call
+                            # validate_generated_code. The result is appended to the
+                            # same ToolMessage so the LLM sees errors and fixes them
+                            # in the next iteration without a separate round-trip.
+                            if "error" not in str(result).lower():
+                                import re as _re
+                                path_match = _re.search(
+                                    r"saved successfully to (.+)$",
+                                    str(result), _re.IGNORECASE
+                                )
+                                actual_path = path_match.group(1).strip() if path_match else filename
+                                validation_result = str(
+                                    validate_generated_code.invoke({"filename": actual_path})
+                                )
+                                if "VALIDATION FAILED" in validation_result:
+                                    any_tool_error = True
+                                    logger.warning(f"⚠️ AUTO-VALIDATION FAILED: {actual_path}")
+                                    result = (
+                                        f"{result}\n\n"
+                                        f"AUTO-VALIDATION FAILED — fix these errors and rewrite '{filename}':\n"
+                                        f"{validation_result}"
+                                    )
+                                else:
+                                    logger.info(f"✅ AUTO-VALIDATION PASSED: {actual_path}")
+                                    result = f"{result}\nAUTO-VALIDATION: CLEAN ✓"
 
                     # Logic for Schema Reading (Phase 2)
                     elif tool_name == "read_data_schema":
