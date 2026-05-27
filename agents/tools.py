@@ -126,6 +126,7 @@ def validate_generated_code(filename: str) -> str:
     elif ext == ".sql":
         with open(filename, encoding="utf-8") as f:
             content = f.read().upper()
+        # Structural checks — apply to all clouds (Trino is the query engine everywhere)
         if "CREATE TABLE" not in content:
             errors.append("SQL: missing CREATE TABLE statement.")
         if "EXTERNAL_LOCATION" not in content:
@@ -134,10 +135,19 @@ def validate_generated_code(filename: str) -> str:
             errors.append("SQL: missing PARTITIONED_BY = ARRAY['run_date'].")
         if "FORMAT" not in content:
             errors.append("SQL: missing FORMAT = 'PARQUET' in WITH clause.")
-        if "S3A://" in content:
-            errors.append("SQL: invalid protocol s3a:// — use s3:// for AWS Trino.")
         if "CREATE EXTERNAL TABLE" in content:
             errors.append("SQL: 'CREATE EXTERNAL TABLE' is Hive/HQL syntax — use plain 'CREATE TABLE' in Trino.")
+        # Protocol cross-cloud check: s3a:// is Hadoop/Spark — never valid in Trino on any cloud
+        if "S3A://" in content:
+            errors.append("SQL: protocol s3a:// is Hadoop/Spark only — Trino uses s3:// (AWS), gs:// (GCP), abfss:// (Azure).")
+        # Cross-cloud protocol mismatch: catch using wrong cloud's protocol
+        cloud = os.getenv("CLOUD_PROVIDER", "").lower()
+        if cloud == "aws" and ("GS://" in content or "ABFSS://" in content):
+            errors.append("SQL: GCS/Azure protocol detected in an AWS pipeline — use s3:// for external_location.")
+        elif cloud == "gcp" and ("S3://" in content or "ABFSS://" in content):
+            errors.append("SQL: S3/Azure protocol detected in a GCP pipeline — use gs:// for external_location.")
+        elif cloud == "azure" and ("S3://" in content or "GS://" in content):
+            errors.append("SQL: S3/GCS protocol detected in an Azure pipeline — use abfss:// for external_location.")
 
     # ── requirements.txt ─────────────────────────────────────────────────────
     elif base == "requirements.txt":
