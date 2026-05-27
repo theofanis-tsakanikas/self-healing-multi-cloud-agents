@@ -36,19 +36,21 @@ def medic_node(state: AgentState):
     """
     logger.info("--- STARTING MEDIC (DIAGNOSTIC) NODE ---")
 
-    # 1. Basic tools that the Medic always has.
-    # store_architectural_insight is intentionally excluded — it is called
-    # programmatically only after verification_successful=True, never by the LLM.
-    # Giving the LLM access to it causes premature storage before the fix is verified.
+    # Phase-gated tool binding:
+    # DIAGNOSIS phase  (infra not yet complete): request_fix + query_vector_store only.
+    #   → The fix hasn't been applied yet — storing an insight now would pollute
+    #     dynamic-experience with unverified solutions.
+    # VERIFICATION phase (infra completed, CI logs available): adds fetch_github_action_logs
+    #   + store_architectural_insight so the LLM can confirm success and immediately
+    #   persist the validated fix as institutional knowledge.
     tools = [request_fix, query_vector_store]
-    
-    # 2. Security filter: Add the fetch_github_action_logs ONLY if the push was successful
-    # Check if the Infra finished successfully
+
     if state.get("infra_status") == "completed":
         tools.append(fetch_github_action_logs)
-        logger.info("🔓 GitHub Logs tool UNLOCKED (Infra is completed)")
+        tools.append(store_architectural_insight)
+        logger.info("🔓 VERIFICATION phase: GitHub Logs + store_architectural_insight UNLOCKED")
     else:
-        logger.info("🔒 GitHub Logs tool LOCKED (Infra still pending/failed locally)")
+        logger.info("🔒 DIAGNOSIS phase: store_architectural_insight locked until fix is verified")
 
     llm = get_llm(temperature=TEMPERATURE)
     llm_with_tools = llm.bind_tools(tools)
