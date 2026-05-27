@@ -84,16 +84,27 @@ _ENV_FALLBACKS: dict[tuple[str, str, str], str] = {
     ("azure", "mysql",    "db_name"):     "MYSQL_DB_NAME",
 }
 
-# ── Backward-compatibility aliases ────────────────────────────────────────────
-# Old keys written by bootstrap scripts or stored in SSM before the generic
-# naming convention was introduced.  cloud_get() resolves these transparently.
-_LEGACY_ALIASES: dict[tuple[str, str], tuple[str, str]] = {
-    ("aws", "rds_host"):     ("aws", "db_host"),
-    ("aws", "rds_port"):     ("aws", "db_port"),
-    ("aws", "rds_username"): ("aws", "db_user"),
-    ("aws", "rds_password"): ("aws", "db_password"),
-    ("aws", "rds_db_name"):  ("aws", "db_name"),
-    ("gcp", "db_user"):      ("gcp", "db_user"),   # already generic, no-op
+# ── Backward-compatibility ────────────────────────────────────────────────────
+# Maps old caller-facing key names to the new generic key (for API callers
+# that still pass rds_host etc.).  Applied ONLY for env-var lookup so it
+# does NOT change the SSM parameter path — old SSM params stay reachable.
+_LEGACY_KEY_MAP: dict[str, str] = {
+    "rds_host":     "db_host",
+    "rds_port":     "db_port",
+    "rds_username": "db_user",
+    "rds_password": "db_password",
+    "rds_db_name":  "db_name",
+}
+
+# SSM parameter name candidates for each generic key, tried in order.
+# Allows reading params that were written under the old naming convention
+# (rds_host, rds_username …) without migrating them.
+_SSM_KEY_CANDIDATES: dict[str, list[str]] = {
+    "db_host":     ["db_host",     "rds_host"],
+    "db_port":     ["db_port",     "rds_port"],
+    "db_user":     ["db_user",     "rds_username"],
+    "db_password": ["db_password", "rds_password"],
+    "db_name":     ["db_name",     "rds_db_name"],
 }
 
 
@@ -155,27 +166,32 @@ def cloud_get(cloud: str, key: str, db_type: str = "postgres", *, use_ssm: bool 
     Returns:
         The config value as a string, or None if not found anywhere.
     """
-    # Resolve legacy key aliases transparently
-    cloud, key = _LEGACY_ALIASES.get((cloud, key), (cloud, key))
+    # Normalise legacy caller-facing key names to the generic equivalent.
+    generic_key = _LEGACY_KEY_MAP.get(key, key)
 
     # ── 1. SSM (AWS only) ─────────────────────────────────────────────────────
+    # Try generic key first (new style), then legacy names — so existing SSM
+    # parameters written as /aws/rds_host still work without migration.
     if use_ssm and cloud == "aws":
-        value = _try_ssm(cloud, key)
-        if value is not None:
-            logger.debug(f"📦 SSM: {cloud}/{key}")
-            return value
+        for ssm_key in _SSM_KEY_CANDIDATES.get(generic_key, [generic_key]):
+            value = _try_ssm(cloud, ssm_key)
+            if value is not None:
+                logger.debug(f"📦 SSM: {cloud}/{ssm_key}")
+                return value
 
     # ── 2. .bootstrap_outputs.json ────────────────────────────────────────────
+    # Try generic key first, then the original key (covers old bootstrap files).
     outputs = _load_bootstrap_outputs()
-    value = outputs.get(cloud, {}).get(key)
-    if value is not None:
-        logger.debug(f"📄 bootstrap_outputs: {cloud}/{key}")
-        return str(value)
+    for bk in ([generic_key] if generic_key == key else [generic_key, key]):
+        value = outputs.get(cloud, {}).get(bk)
+        if value is not None:
+            logger.debug(f"📄 bootstrap_outputs: {cloud}/{bk}")
+            return str(value)
 
     # ── 3. Environment variable ───────────────────────────────────────────────
-    # Use the (cloud, db_type, key) triple so postgres and mysql credentials
-    # are never confused — e.g. MYSQL_DB_HOST is never returned for a postgres lookup.
-    env_var = _ENV_FALLBACKS.get((cloud, db_type, key))
+    # Use the (cloud, db_type, generic_key) triple so postgres and mysql
+    # credentials are never confused.
+    env_var = _ENV_FALLBACKS.get((cloud, db_type, generic_key))
     if env_var:
         value = os.getenv(env_var)
         if value:
