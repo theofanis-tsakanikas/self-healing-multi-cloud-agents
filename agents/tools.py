@@ -129,7 +129,7 @@ def validate_generated_code(filename: str) -> str:
                 [ruff_path, "check", "--select", "F,E9", "--no-cache", filename],
                 capture_output=True, text=True
             )
-            if result.stdout.strip():
+            if result.returncode != 0 and result.stdout.strip():
                 errors.append(f"RUFF:\n{result.stdout.strip()}")
         else:
             warnings.append("ruff not installed — only py_compile ran (syntax check only).")
