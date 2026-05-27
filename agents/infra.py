@@ -225,7 +225,13 @@ def infra_node(state: AgentState):
     # parallel_tool_calls=False prevents OpenAI from wrapping calls in multi_tool_use.parallel,
     # which LangChain can misparse and corrupt tool arguments with JSON fragments.
     current_tools = {k: v for k, v in full_tools_map.items() if k in selected_keys}
-    llm_with_tools = llm.bind_tools(list(current_tools.values()))
+
+    # Force tool_choice="required" in discovery phase so the LLM cannot skip
+    # tool calls and reply with plain text (which triggers false Medic routing).
+    if not has_all_standards and not medic_triggered_fix:
+        llm_with_tools = llm.bind_tools(list(current_tools.values()), tool_choice="required")
+    else:
+        llm_with_tools = llm.bind_tools(list(current_tools.values()))
 
     # 7. PROMPT PREPARATION
     try:
@@ -370,18 +376,36 @@ def infra_node(state: AgentState):
                 # A. Standard Capture (Smart Mapping)
                 if t_name == "query_vector_store":
                     q = t_args.get("query", "").lower()
-                    if any(x in q for x in ["terraform", "iac", "backend"]):
+                    res_lower = result_str.lower()
+                    matched = False
+                    if any(x in q for x in ["terraform", "iac", "backend", "s3 bucket", "storage account", "gcs"]):
                         collected_specs["infra_standard_iac"] = result_str
-                    elif any(x in q for x in ["kubernetes", "k8s", "manifest"]):
+                        matched = True
+                    if any(x in q for x in ["kubernetes", "k8s", "manifest", "deployment", "orchestration"]):
                         collected_specs["infra_standard_k8s"] = result_str
-                    elif any(x in q for x in ["github", "actions", "cicd"]):
+                        matched = True
+                    if any(x in q for x in ["github", "actions", "cicd", "workflow", "pipeline"]):
                         collected_specs["infra_standard_cicd"] = result_str
-                    elif any(x in q for x in ["dockerfile", "docker", "non-root", "selective copy"]):
+                        matched = True
+                    if any(x in q for x in ["dockerfile", "docker", "non-root", "selective copy", "python image"]):
                         collected_specs["infra_standard_dockerfile"] = result_str
-                    elif any(x in q for x in ["service account", "workload identity", "irsa", "iam.gke", "azure.workload"]):
+                        matched = True
+                    if any(x in q for x in ["service account", "workload identity", "irsa", "iam.gke", "azure.workload", "serviceaccount"]):
                         collected_specs["infra_standard_service_account"] = result_str
-                    else:
-                        collected_specs[f"infra_spec_{q[:10]}"] = result_str
+                        matched = True
+
+                    # Fallback: prevent infinite discovery loops when the LLM rephrases a query
+                    # and none of the keyword conditions match. Store result for the first
+                    # still-missing key so the agent always makes forward progress.
+                    if not matched:
+                        no_relevant = "no relevant guidelines found" in res_lower
+                        still_missing = [k for k in required_standards if k not in collected_specs]
+                        if still_missing and not no_relevant and result_str.strip():
+                            target_key = still_missing[0]
+                            collected_specs[target_key] = result_str
+                            logger.info(f"🎯 Fallback Mapping: {target_key} secured from query result.")
+                        else:
+                            collected_specs[f"infra_spec_{q[:10]}"] = result_str
 
                 # B. File Tracking — explicit from args to avoid brittle string parsing.
                 # write_terraform_config returns "written to" (not "saved to"), so
