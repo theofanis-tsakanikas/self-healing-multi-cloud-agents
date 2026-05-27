@@ -11,7 +11,6 @@ import datetime
 import logging
 from urllib.parse import urlparse
 
-import boto3                          # AWS only — swap for google.cloud.storage / azure.storage.blob on other clouds
 import pandas as pd
 from sqlalchemy import create_engine
 from trino.dbapi import connect as trino_connect
@@ -19,13 +18,23 @@ from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
 from utils.cloud_config import cloud_get  # SSM → bootstrap_outputs → env fallback
 
+# Cloud-specific storage SDK — import ONLY the one matching CLOUD_PROVIDER.
+# Never import all three; unused cloud SDKs are not installed in the image.
+_CLOUD = os.getenv("CLOUD_PROVIDER", "aws")
+if _CLOUD == "aws":
+    import boto3
+elif _CLOUD == "gcp":
+    from google.cloud import storage as gcs
+elif _CLOUD == "azure":
+    from azure.storage.blob import BlobServiceClient
+
 logging.basicConfig(level=logging.INFO)
 
 
 def run():
     logging.info("Pipeline starting: <pipeline_name>")  # ← FIRST line, before everything
 
-    # 1. Idempotency check
+    # 1. Idempotency check  (cloud-specific SDK selected above)
     # 2. DB engine + extraction loop (SAME try block)
     # 3. Trino partition registration
     # 4. Metrics emission
@@ -35,7 +44,7 @@ if __name__ == "__main__":
     run()
 ```
 
-> **CRITICAL:** `import boto3`, `import time`, and `from utils.cloud_config import cloud_get` are ALWAYS required. Missing any of these causes an immediate `NameError` at runtime. Do not omit them.
+> **CRITICAL:** `import time` and `from utils.cloud_config import cloud_get` are ALWAYS required regardless of cloud. The cloud storage SDK (`boto3` / `google.cloud.storage` / `azure.storage.blob`) MUST be imported conditionally via the `_CLOUD` guard above — never import all three, and never hardcode `import boto3` unconditionally in a multi-cloud script.
 
 ---
 
