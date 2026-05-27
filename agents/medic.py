@@ -127,11 +127,16 @@ def medic_node(state: AgentState):
                 if "arch" in target: reset_architect = True
                 if "infra" in target: reset_infra = True
                 fix_requested = True
-                # Extract healing_instructions from the JSON payload so the next agent
-                # receives them via the system prompt — not buried in message history.
+                # Build healing_context from BOTH diagnosis and healing_instructions.
+                # diagnosis contains the filename (needed by architect.py for the
+                # is_fix_target check); healing_instructions contains the exact fix.
+                # Combining both ensures the target file is identifiable AND the
+                # instructions are precise.
                 try:
                     payload = json.loads(result_str)
-                    healing_context = payload.get("healing_instructions", "")
+                    diagnosis    = payload.get("diagnosis", "")
+                    instructions = payload.get("healing_instructions", "")
+                    healing_context = "\n".join(filter(None, [diagnosis, instructions]))
                 except (json.JSONDecodeError, AttributeError):
                     pass
 
