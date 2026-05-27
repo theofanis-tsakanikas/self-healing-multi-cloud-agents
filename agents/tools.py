@@ -635,7 +635,7 @@ def query_vector_store(query: str):
             
             for match in res['matches']:
                 score = match['score']
-                if score < 0.3:
+                if score < 0.5:
                     continue
 
                 content = match['metadata'].get('content', 'No content')

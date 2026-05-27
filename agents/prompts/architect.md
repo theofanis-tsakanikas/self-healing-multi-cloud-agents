@@ -19,7 +19,7 @@ The following structured context defines your mission. You must strictly adhere 
 ---
 
 ## 🚀 YOUR MISSION
-
+ 
 ### 1. KNOWLEDGE RETRIEVAL & SPEC EXTRACTION
 - **PRIORITY 1:** Before analyzing any project data, you MUST call `query_vector_store` using the `engineering-standards` namespace.
 - **OBJECTIVE:** Retrieve the "Source of Truth" for:
@@ -29,7 +29,7 @@ The following structured context defines your mission. You must strictly adhere 
 - **MANDATORY:** You must perform **STRICTLY TARGETED** queries to the `query_vector_store`.
 - **DO NOT** use generic terms like "engineering-standards".
 - **EXECUTE** three (3) distinct tool calls with these exact query strings if the keys are missing from state:
-    1. `query="python data pipeline standards. sqlalchemy, pandas."` 
+    1. `query="All Python scripts generated for data engineering must follow these standards. Logging Standard. Idempotency Standard. Error Handling Standard. Business Rule Translation Standard. Metrics Emission Standard"` 
     2. `query="trino sql ddl naming conventions. Table format, external location, data types."`
     3. `query="grafana dashboard json specifications. Panels, fields, alerting rules."`
 - **OUTPUT FORMAT FOR KNOWLEDGE:** When saving technical constants to the state, you MUST use the following exact keys for consistency:
