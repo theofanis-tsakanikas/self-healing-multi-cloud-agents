@@ -797,16 +797,17 @@ def store_architectural_insight(error_summary: str, solution: str, cloud_provide
     Stores a successful technical solution in the long-term memory (Pinecone).
     Use this ONLY when a fix is verified and should be remembered for the future.
     """
-    if index is None:
-        return "Pinecone not initialized. Check PINECONE_API_KEY and PINECONE_INDEX_NAME."
     import uuid
-    import os
-    from pinecone import Pinecone
-    
-    # 1. Initialize Pinecone
-    pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-    index_name = os.getenv("PINECONE_INDEX_NAME", "unified-intelligence-fabric")
-    index = pc.Index(index_name)
+
+    # 1. Initialize Pinecone — use local variables (_pc, _idx) to avoid
+    # shadowing the module-level 'index', which causes UnboundLocalError:
+    # Python sees the assignment 'index = ...' and treats 'index' as local
+    # throughout the entire function, even before the assignment line.
+    if not os.getenv("PINECONE_API_KEY"):
+        return "Pinecone not initialized. Check PINECONE_API_KEY and PINECONE_INDEX_NAME."
+    _pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+    _index_name = os.getenv("PINECONE_INDEX_NAME", "unified-intelligence-fabric")
+    _idx = _pc.Index(_index_name)
     
     # 2. Prepare the text for embedding
     insight_text = f"ISSUE: {error_summary}\nFIX: {solution}\nPROVIDER: {cloud_provider}"
@@ -816,7 +817,7 @@ def store_architectural_insight(error_summary: str, solution: str, cloud_provide
     
     if vector:
         # 4. Upsert to Pinecone in the 'dynamic-experience' namespace
-        index.upsert(
+        _idx.upsert(
             vectors=[(
                 f"fix-{uuid.uuid4()}", 
                 vector, 
