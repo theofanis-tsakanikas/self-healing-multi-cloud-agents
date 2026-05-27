@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from dotenv import load_dotenv
 from langchain_core.messages import ToolMessage
+from langchain_core.runnables import RunnableConfig
 from agents.llm_factory import get_llm
 
 # 1. INTERNAL IMPORTS
@@ -93,11 +94,15 @@ def _resolve_artifacts(pipe_conf: dict, written_files: list[str]) -> list[str]:
     return missing
 
 
-def architect_node(state: AgentState):
+def architect_node(state: AgentState, config: RunnableConfig = None):
     """
     Architect node: Handles pipeline logic design using a Phase-Gate approach.
     Phase 1: Discovery (Vector Store lookup only).
     Phase 2: Implementation (Writing code/DDL based on retrieved standards).
+
+    config: LangGraph injects the RunnableConfig (with LangSmith callbacks) automatically
+    when the function signature declares it. Passing it to tool .invoke() calls ensures
+    validate_generated_code appears as a distinct ToolRun in LangSmith traces.
     """
     logger.info("--- STARTING ARCHITECT NODE ---")
     
@@ -337,10 +342,9 @@ def architect_node(state: AgentState):
                             all_skipped_this_iter = False
 
                             # AUTO-VALIDATE immediately after every successful write.
-                            # Deterministic — does not depend on LLM deciding to call
-                            # validate_generated_code. The result is appended to the
-                            # same ToolMessage so the LLM sees errors and fixes them
-                            # in the next iteration without a separate round-trip.
+                            # Passing `config` (with LangSmith callbacks) to .invoke() ensures
+                            # this appears as a distinct ToolRun in LangSmith — not hidden inside
+                            # the write_project_file result, but as a visible, separate trace span.
                             if "error" not in str(result).lower():
                                 import re as _re
                                 path_match = _re.search(
@@ -349,7 +353,9 @@ def architect_node(state: AgentState):
                                 )
                                 actual_path = path_match.group(1).strip() if path_match else filename
                                 validation_result = str(
-                                    validate_generated_code.invoke({"filename": actual_path})
+                                    validate_generated_code.invoke(
+                                        {"filename": actual_path}, config=config
+                                    )
                                 )
                                 if "VALIDATION FAILED" in validation_result:
                                     any_tool_error = True

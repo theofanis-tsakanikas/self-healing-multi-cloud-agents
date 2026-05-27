@@ -4,6 +4,7 @@ import logging
 import json
 from pathlib import Path
 from langchain_core.messages import ToolMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 from agents.llm_factory import get_llm
 from agents.state import AgentState
 from utils.prompt_utils import format_prompt
@@ -37,14 +38,18 @@ def files_exist_in_state(target_files: list, written_files: list) -> bool:
     written_files_lower = {f.lower() for f in written_files}
     return set(f.lower() for f in target_files).issubset(written_files_lower)
 
-def infra_node(state: AgentState):
+def infra_node(state: AgentState, config: RunnableConfig = None):
     """
     Infrastructure agent node managing Terraform, Containerization, and CI/CD.
-    
+
     Implements a 3-Phase Gate System:
     1. Discovery Phase: Only query_vector_store is available until standards are retrieved.
     2. Implementation Phase: Unlocks IaC, K8s, and Docker tools progressively.
     3. Action Lock: Permanently removes execution tools (Docker/Push) once SUCCESS is detected.
+
+    config: LangGraph injects RunnableConfig (with LangSmith callbacks) automatically.
+    Passed to validate_generated_code.invoke() so auto-validation appears as a distinct
+    ToolRun in LangSmith, not hidden inside another tool's output.
     """
     logger.info("--- STARTING INFRASTRUCTURE NODE ---")
     llm = get_llm(temperature=TEMPERATURE)
@@ -453,10 +458,14 @@ def infra_node(state: AgentState):
                         gha_path = os.path.join(str(REPO_ROOT), ".github", "workflows", raw)
                         auto_validate_path = gha_path
 
-                    # Trigger auto-validation for files that have a validator
+                    # Trigger auto-validation for files that have a validator.
+                    # Passing `config` ensures this appears as a distinct ToolRun in
+                    # LangSmith (same callbacks as the parent node invocation).
                     if auto_validate_path and os.path.exists(auto_validate_path):
                         from agents.tools import validate_generated_code as _validate
-                        validation_result = str(_validate.invoke({"filename": auto_validate_path}))
+                        validation_result = str(
+                            _validate.invoke({"filename": auto_validate_path}, config=config)
+                        )
                         if "VALIDATION FAILED" in validation_result:
                             any_tool_error = True
                             logger.warning(f"⚠️ AUTO-VALIDATION FAILED: {auto_validate_path}")
