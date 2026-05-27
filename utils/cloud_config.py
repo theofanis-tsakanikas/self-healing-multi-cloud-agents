@@ -39,28 +39,49 @@ _BOOTSTRAP_FILE = _PROJECT_ROOT / ".bootstrap_outputs.json"
 _SSM_PREFIX = "/multi-cloud-self-healing-agent"
 
 # ── Env-var fallback table ────────────────────────────────────────────────────
-# Maps (cloud, generic_key) → list of env-var names tried in order.
-# Both POSTGRES_DB_* and MYSQL_DB_* are listed so the function works regardless
-# of which DB engine the operator has configured.
-_ENV_FALLBACKS: dict[tuple[str, str], list[str]] = {
-    # ── AWS (RDS: PostgreSQL, MySQL, or any other engine) ────────────────────
-    ("aws", "db_host"):     ["POSTGRES_DB_HOST",     "MYSQL_DB_HOST"],
-    ("aws", "db_port"):     ["POSTGRES_DB_PORT",     "MYSQL_DB_PORT"],
-    ("aws", "db_user"):     ["POSTGRES_DB_USER",     "MYSQL_DB_USER"],
-    ("aws", "db_password"): ["POSTGRES_DB_PASSWORD", "MYSQL_DB_PASSWORD"],
-    ("aws", "db_name"):     ["POSTGRES_DB_NAME",     "MYSQL_DB_NAME"],
-    # ── GCP (Cloud SQL: PostgreSQL or MySQL) ──────────────────────────────────
-    ("gcp", "db_host"):     ["POSTGRES_DB_HOST",     "MYSQL_DB_HOST"],
-    ("gcp", "db_port"):     ["POSTGRES_DB_PORT",     "MYSQL_DB_PORT"],
-    ("gcp", "db_user"):     ["POSTGRES_DB_USER",     "MYSQL_DB_USER"],
-    ("gcp", "db_password"): ["POSTGRES_DB_PASSWORD", "MYSQL_DB_PASSWORD"],
-    ("gcp", "db_name"):     ["POSTGRES_DB_NAME",     "MYSQL_DB_NAME"],
-    # ── Azure (Azure Database for PostgreSQL / MySQL) ─────────────────────────
-    ("azure", "db_host"):     ["POSTGRES_DB_HOST",     "MYSQL_DB_HOST"],
-    ("azure", "db_port"):     ["POSTGRES_DB_PORT",     "MYSQL_DB_PORT"],
-    ("azure", "db_user"):     ["POSTGRES_DB_USER",     "MYSQL_DB_USER"],
-    ("azure", "db_password"): ["POSTGRES_DB_PASSWORD", "MYSQL_DB_PASSWORD"],
-    ("azure", "db_name"):     ["POSTGRES_DB_NAME",     "MYSQL_DB_NAME"],
+# Maps (cloud, generic_key) → env-var name.
+# The DB-engine-specific prefix (POSTGRES_ / MYSQL_) encodes the engine so
+# different DB credentials are never mixed up.  Callers choose the right lookup
+# by passing db_type to cloud_get() — see below.
+#
+# Convention:
+#   postgres / any SQL on AWS/Azure → POSTGRES_DB_*
+#   mysql on GCP                    → MYSQL_DB_*
+#   mysql on AWS/Azure              → MYSQL_DB_*   (via db_type="mysql")
+_ENV_FALLBACKS: dict[tuple[str, str, str], str] = {
+    # ── AWS ──────────────────────────────────────────────────────────────────
+    ("aws", "postgres", "db_host"):     "POSTGRES_DB_HOST",
+    ("aws", "postgres", "db_port"):     "POSTGRES_DB_PORT",
+    ("aws", "postgres", "db_user"):     "POSTGRES_DB_USER",
+    ("aws", "postgres", "db_password"): "POSTGRES_DB_PASSWORD",
+    ("aws", "postgres", "db_name"):     "POSTGRES_DB_NAME",
+    ("aws", "mysql",    "db_host"):     "MYSQL_DB_HOST",
+    ("aws", "mysql",    "db_port"):     "MYSQL_DB_PORT",
+    ("aws", "mysql",    "db_user"):     "MYSQL_DB_USER",
+    ("aws", "mysql",    "db_password"): "MYSQL_DB_PASSWORD",
+    ("aws", "mysql",    "db_name"):     "MYSQL_DB_NAME",
+    # ── GCP ──────────────────────────────────────────────────────────────────
+    ("gcp", "postgres", "db_host"):     "POSTGRES_DB_HOST",
+    ("gcp", "postgres", "db_port"):     "POSTGRES_DB_PORT",
+    ("gcp", "postgres", "db_user"):     "POSTGRES_DB_USER",
+    ("gcp", "postgres", "db_password"): "POSTGRES_DB_PASSWORD",
+    ("gcp", "postgres", "db_name"):     "POSTGRES_DB_NAME",
+    ("gcp", "mysql",    "db_host"):     "MYSQL_DB_HOST",
+    ("gcp", "mysql",    "db_port"):     "MYSQL_DB_PORT",
+    ("gcp", "mysql",    "db_user"):     "MYSQL_DB_USER",
+    ("gcp", "mysql",    "db_password"): "MYSQL_DB_PASSWORD",
+    ("gcp", "mysql",    "db_name"):     "MYSQL_DB_NAME",
+    # ── Azure ─────────────────────────────────────────────────────────────────
+    ("azure", "postgres", "db_host"):     "POSTGRES_DB_HOST",
+    ("azure", "postgres", "db_port"):     "POSTGRES_DB_PORT",
+    ("azure", "postgres", "db_user"):     "POSTGRES_DB_USER",
+    ("azure", "postgres", "db_password"): "POSTGRES_DB_PASSWORD",
+    ("azure", "postgres", "db_name"):     "POSTGRES_DB_NAME",
+    ("azure", "mysql",    "db_host"):     "MYSQL_DB_HOST",
+    ("azure", "mysql",    "db_port"):     "MYSQL_DB_PORT",
+    ("azure", "mysql",    "db_user"):     "MYSQL_DB_USER",
+    ("azure", "mysql",    "db_password"): "MYSQL_DB_PASSWORD",
+    ("azure", "mysql",    "db_name"):     "MYSQL_DB_NAME",
 }
 
 # ── Backward-compatibility aliases ────────────────────────────────────────────
@@ -118,7 +139,7 @@ def _try_ssm(cloud: str, key: str) -> Optional[str]:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def cloud_get(cloud: str, key: str, *, use_ssm: bool = True) -> Optional[str]:
+def cloud_get(cloud: str, key: str, db_type: str = "postgres", *, use_ssm: bool = True) -> Optional[str]:
     """
     Retrieve a config value using the three-tier priority chain.
 
@@ -127,6 +148,8 @@ def cloud_get(cloud: str, key: str, *, use_ssm: bool = True) -> Optional[str]:
         key:      Generic key — db_host | db_port | db_user | db_password | db_name.
                   Legacy RDS-specific keys (rds_host, rds_username, rds_db_name) are
                   transparently resolved via _LEGACY_ALIASES for backward compatibility.
+        db_type:  "postgres" | "mysql" — selects the correct env-var fallback so
+                  credentials for different engines are never mixed up.
         use_ssm:  Set False in unit tests to skip the live SSM call.
 
     Returns:
@@ -149,12 +172,15 @@ def cloud_get(cloud: str, key: str, *, use_ssm: bool = True) -> Optional[str]:
         logger.debug(f"📄 bootstrap_outputs: {cloud}/{key}")
         return str(value)
 
-    # ── 3. Environment variables (try each candidate in order) ────────────────
-    for env_var in _ENV_FALLBACKS.get((cloud, key), []):
+    # ── 3. Environment variable ───────────────────────────────────────────────
+    # Use the (cloud, db_type, key) triple so postgres and mysql credentials
+    # are never confused — e.g. MYSQL_DB_HOST is never returned for a postgres lookup.
+    env_var = _ENV_FALLBACKS.get((cloud, db_type, key))
+    if env_var:
         value = os.getenv(env_var)
         if value:
             logger.debug(f"🔑 env var: {env_var}")
             return value
 
-    logger.warning(f"⚠️  No value found for {cloud}/{key}")
+    logger.warning(f"⚠️  No value found for {cloud}/{db_type}/{key}")
     return None

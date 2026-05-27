@@ -178,13 +178,19 @@ def validate_generated_code(filename: str) -> str:
             for m in getenv_scan.finditer(py_content)
             if m.group(1).upper() in _CRED_ENVVARS
         ]
+        # Detect the db_type from env var names found (POSTGRES_* → postgres, MYSQL_* → mysql)
+        detected_db_type = "mysql" if any(
+            ev.startswith("MYSQL_") for ev, _ in found_cred_violations
+        ) else "postgres"
+
         if found_cred_violations:
             replacements = "\n".join(
-                f'  {original}  →  cloud_get("{detected_provider}", "{_ENVVAR_TO_GENERIC_KEY.get(env_var, "db_host")}")'
+                f'  {original}  →  cloud_get("{detected_provider}", "{_ENVVAR_TO_GENERIC_KEY.get(env_var, "db_host")}", db_type="{detected_db_type}")'
                 for env_var, original in found_cred_violations
             )
             errors.append(
-                f'POLICY VIOLATION — os.getenv() used for DB credentials (detected provider: "{detected_provider}").\n'
+                f'POLICY VIOLATION — os.getenv() used for DB credentials '
+                f'(detected provider: "{detected_provider}", db_type: "{detected_db_type}").\n'
                 "Apply these EXACT replacements:\n"
                 f"{replacements}\n"
                 "Also add this import at the top of the file:\n"
@@ -470,24 +476,25 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
     """
 
     try:
-        # 1. Build the connection URL dynamically based on db_type
+        # 1. Build the connection URL dynamically based on db_type + cloud provider.
+        # Cloud is read from CLOUD_PROVIDER env var (set by the pipeline) so this
+        # tool works for any cloud+DB combination without hardcoded assumptions.
+        cloud = os.getenv("CLOUD_PROVIDER", "aws").lower()
+
         if db_type == "postgres":
-            # Priority: SSM → .bootstrap_outputs.json → env vars
-            host = cloud_get("aws", "rds_host")
-            port = cloud_get("aws", "rds_port") or "5432"
-            user = cloud_get("aws", "rds_username")
-            pw   = cloud_get("aws", "rds_password")
-            db   = cloud_get("aws", "rds_db_name")
+            host = cloud_get(cloud, "db_host",     db_type="postgres")
+            port = cloud_get(cloud, "db_port",     db_type="postgres") or "5432"
+            user = cloud_get(cloud, "db_user",     db_type="postgres")
+            pw   = cloud_get(cloud, "db_password", db_type="postgres")
+            db   = cloud_get(cloud, "db_name",     db_type="postgres")
             db_url = f"postgresql://{user}:{pw}@{host}:{port}/{db}"
 
         elif db_type == "mysql":
-            # Priority: .bootstrap_outputs.json → env vars (GCP Cloud SQL)
-            host = cloud_get("gcp", "db_host")
-            port = cloud_get("gcp", "db_port") or "3306"
-            user = cloud_get("gcp", "db_user")
-            pw   = cloud_get("gcp", "db_password")
-            db   = cloud_get("gcp", "db_name")
-            # Use the pymysql driver for MySQL
+            host = cloud_get(cloud, "db_host",     db_type="mysql")
+            port = cloud_get(cloud, "db_port",     db_type="mysql") or "3306"
+            user = cloud_get(cloud, "db_user",     db_type="mysql")
+            pw   = cloud_get(cloud, "db_password", db_type="mysql")
+            db   = cloud_get(cloud, "db_name",     db_type="mysql")
             db_url = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
 
         elif db_type == "sqlite":
