@@ -7,7 +7,7 @@ The Prometheus datasource is automatically wired into Grafana via the `grafana-d
 ## Stable Identity (Critical)
 - **uid**: Must be derived from the pipeline name only — never from `project_id` or any session-specific value. Use a lowercase hyphenated slug, e.g. `eu-sales-data-observability`. A stable UID ensures `kubectl apply` updates the existing dashboard instead of creating a duplicate on every run.
 - **title**: Use a human-readable pipeline name, e.g. `EU Sales Data Observability`. Never include `project_id`.
-- **tags**: Use static tags only, e.g. `["data-pipeline", "eu-sales"]`. Never include `project_id`.
+- **tags**: Use static tags only. MUST include three tags: the generic pipeline type, the pipeline name slug, and the cloud provider. e.g. `["data-pipeline", "eu-sales", "aws"]` for AWS, `["data-pipeline", "us-crm", "azure"]` for Azure, `["data-pipeline", "global-marketing", "gcp"]` for GCP. Never include `project_id`.
 
 ## Prometheus Queries (Panels)
 Do NOT hardcode `project_id` as a static label filter in `expr`. A hardcoded session ID makes every panel show only one historical run.
@@ -68,7 +68,7 @@ Alert labels MUST include both `pipeline` and `cloud_provider` static labels so 
   "version": 1,
   "refresh": "5m",
   "time": { "from": "now-6h", "to": "now" },
-  "tags": ["data-pipeline", "eu-sales", "aws"],
+  "tags": ["data-pipeline", "eu-sales", "aws"],   ← always 3 tags: type, pipeline-slug, cloud
   "templating": {
     "list": [
       {
