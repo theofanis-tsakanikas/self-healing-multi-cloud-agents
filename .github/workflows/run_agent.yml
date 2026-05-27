@@ -132,8 +132,9 @@ jobs:
         run: uv sync
 
       # ── STEP 1: Bootstrap (optional, first setup only) ───────────────────────
+      # Terraform is always installed — the infra agent uses it for pipeline-level
+      # infrastructure (S3 bucket, IAM policy) even when bootstrap is skipped.
       - name: Install Terraform
-        if: inputs.bootstrap_cloud != 'skip'
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "~1.9"
