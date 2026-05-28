@@ -60,7 +60,23 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     medic_triggered_fix = state.get("medic_fix_requested", False) or (state.get("last_agent") == "medic")
     project_id = state.get("project_id")
     collected_specs = dict(state.get("collected_specs", {}))
+
+    # Resolve ECR/registry URL: prefer value already in state, then fall back to
+    # .bootstrap_outputs.json (populated by export_bootstrap_outputs.py after bootstrap).
+    # We do NOT parse execute_terraform output — the infra agent's terraform operates on
+    # pipeline resources; the ECR repo was created during the bootstrap phase.
     ecr_repository_url = state.get("ecr_repository_url", "")
+    if not ecr_repository_url:
+        _bootstrap_file = REPO_ROOT / ".bootstrap_outputs.json"
+        if _bootstrap_file.exists():
+            try:
+                _bootstrap = json.loads(_bootstrap_file.read_text())
+                _cloud = state.get("raw_configs", {}).get("pipeline", {}).get("cloud_provider", "aws").lower()
+                ecr_repository_url = _bootstrap.get(_cloud, {}).get("ecr_repository_url", "")
+                if ecr_repository_url:
+                    logger.info(f"ECR URL loaded from bootstrap outputs: {ecr_repository_url}")
+            except Exception as _e:
+                logger.warning(f"Could not read bootstrap outputs: {_e}")
 
     
     # 2. CONTEXT GENERATION

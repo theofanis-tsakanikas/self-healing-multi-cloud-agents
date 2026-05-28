@@ -318,7 +318,7 @@ def validate_generated_code(filename: str) -> str:
                 errors.append("GHA: missing 'jobs:' — workflow has no jobs defined.")
 
             # Unresolved placeholders in CI scripts cause silent failures or wrong deployments.
-            placeholders = _re.findall(r"<[A-Z_]{3,}>", raw)
+            placeholders = _re.findall(r"<[A-Za-z_][A-Za-z0-9_.]{2,}>", raw)
             if placeholders:
                 errors.append(
                     f"GHA: unresolved placeholder(s) {list(set(placeholders))} — "
@@ -383,12 +383,12 @@ def validate_generated_code(filename: str) -> str:
 
             # ── Universal policy checks (apply to every K8s manifest) ─────────
             # Unresolved template placeholders break deployments silently.
-            placeholders = _re.findall(r"<[A-Z_]{3,}>", raw)
+            placeholders = _re.findall(r"<[A-Za-z_][A-Za-z0-9_.]{2,}>", raw)
             if placeholders:
                 unique_ph = list(set(placeholders))
                 hint = ""
                 ecr_hint_triggers = {"<AWS_ACCOUNT_ID>", "<ECR_REPOSITORY_URL>", "<ECR_REPO_URL>"}
-                if ecr_hint_triggers & set(unique_ph):
+                if ecr_hint_triggers & set(unique_ph) or any(".ecr_" in p or "ecr_repo" in p.lower() for p in unique_ph):
                     hint = (
                         " For ECR image placeholders: use the full ECR repository URL "
                         "(e.g. 123456789012.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo) "
