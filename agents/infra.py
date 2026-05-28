@@ -553,7 +553,11 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                     # when generating K8s manifests and GHA — no <AWS_ACCOUNT_ID> placeholder needed.
                     # Pattern is broad: matches any 12-digit.dkr.ecr.*.amazonaws.com/...
                     # regardless of terraform output key name or quoting style.
+                    # Primary: match the exact terraform output key name.
+                    # Fallback: match any ECR URL pattern (covers renamed outputs).
                     ecr_match = re.search(
+                        r'ecr_repository_url\s*=\s*"([^"]+)"', result_str
+                    ) or re.search(
                         r'(\d{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[^\s"\'>\n]+)',
                         result_str,
                     )

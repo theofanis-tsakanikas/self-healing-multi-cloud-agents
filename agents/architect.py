@@ -297,8 +297,13 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
             break
 
         all_skipped_this_iter = True  # Tracks whether every write was a no-op skip
+        patch_clean_files: set = set()  # Files successfully patched+validated this iteration
 
         for tool_call in response.tool_calls:
+            if tool_call["name"] == "patch_project_file":
+                _fn = tool_call["args"].get("filename", "")
+                if _fn in patch_clean_files:
+                    continue  # Already fixed this file — skip redundant call
             tool_name = tool_call["name"]
             tool_args = tool_call["args"]
 
@@ -439,6 +444,8 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                                 else:
                                     logger.info(f"✅ AUTO-VALIDATION PASSED after patch: {actual_path}")
                                     result += "\nAUTO-VALIDATION: CLEAN ✓"
+                                    patch_clean_files.add(filename)
+                                    patch_clean_files.add(actual_path)
 
                     # Logic for Schema Reading (Phase 2)
                     elif tool_name == "read_data_schema":

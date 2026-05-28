@@ -387,12 +387,12 @@ def validate_generated_code(filename: str) -> str:
             if placeholders:
                 unique_ph = list(set(placeholders))
                 hint = ""
-                if "<AWS_ACCOUNT_ID>" in unique_ph:
+                ecr_hint_triggers = {"<AWS_ACCOUNT_ID>", "<ECR_REPOSITORY_URL>", "<ECR_REPO_URL>"}
+                if ecr_hint_triggers & set(unique_ph):
                     hint = (
-                        " For <AWS_ACCOUNT_ID>: extract the full ECR repository URL "
-                        "(e.g. 123456789012.dkr.ecr.eu-central-1.amazonaws.com/...) "
-                        "from the execute_terraform output earlier in the conversation — "
-                        "the account ID is the 12-digit prefix."
+                        " For ECR image placeholders: use the full ECR repository URL "
+                        "(e.g. 123456789012.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo) "
+                        "from the execute_terraform output or the ecr_repository_url in the orchestration context."
                     )
                 errors.append(
                     f"K8S: unresolved placeholder(s) {unique_ph} — "
@@ -403,7 +403,10 @@ def validate_generated_code(filename: str) -> str:
             # ECR images (.dkr.ecr.amazonaws.com) are exempt — CI/CD patches the tag on
             # deployment via the commit SHA. Public images must use pinned versions.
             all_latest = _re.findall(r"image:\s*(\S+):latest", raw, _re.IGNORECASE)
-            public_latest = [img for img in all_latest if ".dkr.ecr." not in img]
+            # Placeholder images (e.g. <ECR_REPOSITORY_URL>) are already caught by the
+            # placeholder check above — exclude them from the :latest check to avoid
+            # a confusing second error about the same token.
+            public_latest = [img for img in all_latest if ".dkr.ecr." not in img and not img.startswith("<")]
             ecr_latest = [img for img in all_latest if ".dkr.ecr." in img]
             if public_latest:
                 fixes = []
@@ -426,10 +429,10 @@ def validate_generated_code(filename: str) -> str:
             if fname == "job.yaml":
                 # backoffLimit=0 is our policy: jobs are idempotent via partition check,
                 # so retrying a failed pod masks bugs instead of surfacing them.
-                if "backofflimit: 0" not in content_upper.replace(" ", ""):
+                if "BACKOFFLIMIT:0" not in content_upper.replace(" ", ""):
                     errors.append("K8S job.yaml [project policy]: backoffLimit must be 0 — jobs are idempotent; retries mask failures.")
                 # envFrom: secretRef is our security policy — DB creds must never appear in env[].
-                if "envfrom" not in content_upper:
+                if "ENVFROM" not in content_upper:
                     errors.append("K8S job.yaml [project policy]: missing envFrom: secretRef — DB credentials must be injected via K8s Secret, never in env[].")
                 # These env vars are consumed by our pipeline script and Prometheus metrics.
                 for env_var in ["PROJECT_ID", "CLOUD_PROVIDER", "TRINO_HOST", "PUSHGATEWAY_URL"]:
