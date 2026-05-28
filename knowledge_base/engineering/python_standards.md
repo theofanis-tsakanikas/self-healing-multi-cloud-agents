@@ -67,12 +67,14 @@ def run():
 
     # ── 2. CREDENTIALS via cloud_get() ───────────────────────────────────────
     # NEVER use os.getenv() directly for DB credentials — it bypasses SSM.
+    # Always use the canonical key names (db_host, db_port, db_user, db_password, db_name)
+    # with db_type set to the actual engine ("postgres" or "mysql").
     if _CLOUD == "aws":
-        host = cloud_get("aws", "rds_host")
-        port = cloud_get("aws", "rds_port") or "5432"
-        user = cloud_get("aws", "rds_username")
-        pw   = cloud_get("aws", "rds_password")
-        db   = cloud_get("aws", "rds_db_name")
+        host = cloud_get("aws", "db_host",     db_type="postgres")
+        port = cloud_get("aws", "db_port",     db_type="postgres") or "5432"
+        user = cloud_get("aws", "db_user",     db_type="postgres")
+        pw   = cloud_get("aws", "db_password", db_type="postgres")
+        db   = cloud_get("aws", "db_name",     db_type="postgres")
         connection_string = (
             f"postgresql+psycopg2://{user}:{pw}"
             f"@{host}:{port}/{db}"

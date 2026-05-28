@@ -167,9 +167,6 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                 "Use patch_project_file to apply ONLY the listed replacements to the affected file. "
                 "Do NOT rewrite the whole file — patch_project_file makes surgical changes "
                 "so every other line is preserved exactly. "
-                "For each os.getenv() → cloud_get() replacement, add one entry in the replacements list. "
-                "Also add {\"old\": \"__ADD_IMPORT__\", \"new\": \"from utils.cloud_config import cloud_get\"} "
-                "as the first replacement if the import is missing. "
                 "Do NOT query the knowledge base."
             )
         logger.info(f"🔧 GATE: Fix mode. Tools: {allowed_tool_names}")
@@ -189,7 +186,7 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
         allowed_tool_names = ["read_data_schema"]
         table_name = db_conf.get("default_table", "")
         phase_instruction = f"CURRENT PHASE: SCHEMA DISCOVERY. Call read_data_schema EXACTLY ONCE with table_name='{table_name}'. Do not call it with any other value."
-        logger.info("⚠️ GATE: Schema not yet discovered. Forcing Schema Phase.")
+        logger.info("⚠️ GATE: Schema not yet discovered. Starting Schema Phase.")
     else:
         # Phase 3 — Implementation: write all artifacts.
         # validate_generated_code is NOT in the LLM's tool list — it runs automatically
@@ -285,6 +282,7 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     # Up to 3 iterations so the LLM can self-correct when it skips already-written files
     # instead of writing the one still missing (e.g. requirements.txt).
     any_tool_error = False
+    patch_clean_files: set = set()  # tracks files successfully patched+validated across all iters
     last_generated_code = state.get("generated_code", "")
     new_messages = []
 
@@ -297,12 +295,12 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
             break
 
         all_skipped_this_iter = True  # Tracks whether every write was a no-op skip
-        patch_clean_files: set = set()  # Files successfully patched+validated this iteration
+        iter_patch_clean: set = set()  # Files patched+validated in this specific iteration
 
         for tool_call in response.tool_calls:
             if tool_call["name"] == "patch_project_file":
                 _fn = tool_call["args"].get("filename", "")
-                if _fn in patch_clean_files:
+                if _fn in patch_clean_files or _fn in iter_patch_clean:
                     continue  # Already fixed this file — skip redundant call
             tool_name = tool_call["name"]
             tool_args = tool_call["args"]
@@ -444,8 +442,9 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                                 else:
                                     logger.info(f"✅ AUTO-VALIDATION PASSED after patch: {actual_path}")
                                     result += "\nAUTO-VALIDATION: CLEAN ✓"
-                                    patch_clean_files.add(filename)
-                                    patch_clean_files.add(actual_path)
+                                    iter_patch_clean.add(filename)
+                                    iter_patch_clean.add(actual_path)
+                                    patch_clean_files.update(iter_patch_clean)  # persist across iters
 
                     # Logic for Schema Reading (Phase 2)
                     elif tool_name == "read_data_schema":
@@ -493,6 +492,14 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
 
     # 8. STATUS UPDATE & RETURN
     still_missing_final = _resolve_artifacts(pipe_conf, written_files)
+
+    # In fix mode: patch+auto-validation is the primary success signal.
+    # If the LLM also called a locked tool (e.g. validate_generated_code explicitly)
+    # after a successful patch, that rejection must not block the completed status.
+    if is_fix_mode and patch_clean_files and any_tool_error:
+        logger.info("Fix mode: patch+validation succeeded — overriding spurious any_tool_error.")
+        any_tool_error = False
+
     status = "completed" if (
         not still_missing_final
         and has_all_standards

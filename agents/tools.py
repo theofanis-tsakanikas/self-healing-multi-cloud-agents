@@ -244,6 +244,14 @@ def validate_generated_code(filename: str) -> str:
         missing = [p for p in mandatory if not any(p in l.lower() for l in lines)]
         if missing:
             errors.append(f"REQUIREMENTS: missing mandatory packages: {missing}")
+        # Cloud-specific filesystem driver for to_parquet() — omitting causes silent S3/GCS/ADLS failures.
+        content_lower = " ".join(lines).lower()
+        if "boto3" in content_lower and "s3fs" not in content_lower:
+            errors.append("REQUIREMENTS: boto3 present but s3fs missing — s3fs is required for to_parquet() to write directly to s3:// URIs.")
+        if "google-cloud-storage" in content_lower and "gcsfs" not in content_lower:
+            errors.append("REQUIREMENTS: google-cloud-storage present but gcsfs missing — gcsfs is required for to_parquet() to write directly to gs:// URIs.")
+        if "azure-storage-blob" in content_lower and "adlfs" not in content_lower:
+            errors.append("REQUIREMENTS: azure-storage-blob present but adlfs missing — adlfs is required for to_parquet() to write directly to abfss:// URIs.")
 
     # ── Dockerfile ───────────────────────────────────────────────────────────
     # hadolint covers: base image tag, COPY . ., non-root user, pip flags, layer hygiene.
@@ -296,6 +304,7 @@ def validate_generated_code(filename: str) -> str:
         with open(filename, encoding="utf-8") as f:
             raw = f.read()
         content_upper = raw.upper()
+        content_lower = raw.lower()
         fpath = filename.replace("\\", "/").lower()
         fname = Path(filename).name.lower()
 
@@ -324,6 +333,15 @@ def validate_generated_code(filename: str) -> str:
                     f"GHA: unresolved placeholder(s) {list(set(placeholders))} — "
                     "replace every <...> token with its actual value from context "
                     "(e.g. <AWS_ACCOUNT_ID> → the 12-digit account ID from Terraform outputs)."
+                )
+            # Secret name in kubectl create must be RFC 1123 (lowercase + hyphens, no underscores).
+            secret_creates = _re.findall(r"kubectl create secret generic\s+(\S+)", raw)
+            bad_secret_names = [n for n in secret_creates if _re.search(r"[A-Z_]", n)]
+            if bad_secret_names:
+                errors.append(
+                    f"GHA: kubectl secret name(s) {bad_secret_names} violate RFC 1123 — "
+                    "K8s resource names must be lowercase with hyphens only (no underscores, no uppercase). "
+                    "Must match the secretRef.name in job.yaml exactly."
                 )
 
             # Standalone repo guard: paths must NOT use 'projects/<name>/' prefix.
@@ -427,17 +445,56 @@ def validate_generated_code(filename: str) -> str:
 
             # ── Per-file project policy checks ────────────────────────────────
             if fname == "job.yaml":
-                # backoffLimit=0 is our policy: jobs are idempotent via partition check,
-                # so retrying a failed pod masks bugs instead of surfacing them.
                 if "BACKOFFLIMIT:0" not in content_upper.replace(" ", ""):
                     errors.append("K8S job.yaml [project policy]: backoffLimit must be 0 — jobs are idempotent; retries mask failures.")
-                # envFrom: secretRef is our security policy — DB creds must never appear in env[].
                 if "ENVFROM" not in content_upper:
                     errors.append("K8S job.yaml [project policy]: missing envFrom: secretRef — DB credentials must be injected via K8s Secret, never in env[].")
-                # These env vars are consumed by our pipeline script and Prometheus metrics.
                 for env_var in ["PROJECT_ID", "CLOUD_PROVIDER", "TRINO_HOST", "PUSHGATEWAY_URL"]:
                     if env_var not in raw:
                         errors.append(f"K8S job.yaml [project policy]: missing env var '{env_var}' — required by the pipeline script.")
+                trino_host_match = _re.search(r"TRINO_HOST[^\n]*value[^\n]*:(\d+)", raw)
+                if trino_host_match:
+                    errors.append(
+                        "K8S job.yaml [project policy]: TRINO_HOST value must be hostname only "
+                        "(e.g. trino.analytics.svc.cluster.local) — never include :port. "
+                        "The pipeline script reads port separately."
+                    )
+                # initContainers must be separate from containers — LLM often puts init-trino in containers[].
+                if "initcontainers" not in content_lower:
+                    errors.append(
+                        "K8S job.yaml [project policy]: missing 'initContainers' section — "
+                        "init-trino MUST be under initContainers (runs before pipeline). "
+                        "Using containers[] for it means both run in parallel and the schema setup is skipped."
+                    )
+                # Pipeline container (the Python script) must exist as a main container.
+                if "name: pipeline" not in raw:
+                    errors.append(
+                        "K8S job.yaml [project policy]: missing 'name: pipeline' container — "
+                        "the main container that runs the Python pipeline script is required under containers[]."
+                    )
+                # serviceAccountName is mandatory for workload identity (IRSA/GKE WI/Azure WI).
+                if "serviceaccountname" not in content_lower:
+                    errors.append(
+                        "K8S job.yaml [project policy]: missing serviceAccountName — "
+                        "required for cloud workload identity (IRSA on AWS, Workload Identity on GCP/Azure). "
+                        "Without it the pipeline pod cannot access S3/GCS/ADLS."
+                    )
+                # restartPolicy must be Never — OnFailure is contradictory with backoffLimit=0.
+                if "restartpolicy:never" not in content_lower.replace(" ", ""):
+                    errors.append(
+                        "K8S job.yaml [project policy]: restartPolicy must be Never — "
+                        "OnFailure with backoffLimit=0 is contradictory and causes confusing behaviour."
+                    )
+                # RFC 1123: secretRef names must be lowercase with hyphens only.
+                secret_names = _re.findall(r"secretRef:\s*\n\s*name:\s*(\S+)", raw)
+                bad_secrets = [n for n in secret_names if _re.search(r"[A-Z_]", n)]
+                if bad_secrets:
+                    errors.append(
+                        f"K8S job.yaml [project policy]: secretRef name(s) {bad_secrets} violate RFC 1123 — "
+                        "K8s resource names must be lowercase with hyphens only. "
+                        "Replace underscores with hyphens and convert to lowercase: "
+                        "e.g. PIPE_EU_SALES_TO_S3-db-credentials → pipe-eu-sales-to-s3-db-credentials"
+                    )
 
             elif fname == "configmaps.yaml":
                 # These 5 names are our architecture — no tool knows they're all required.
@@ -463,6 +520,38 @@ def validate_generated_code(filename: str) -> str:
                     errors.append(
                         "K8S configmaps.yaml [project policy]: placeholder content detected — "
                         "embed the actual content of sql/setup_trino.sql and dashboards/monitoring_specs.json verbatim."
+                    )
+                # hive-catalog-config key must be hive.properties — not catalog.properties or hive.yaml.
+                if "hive-catalog-config" in raw and "hive.properties" not in raw:
+                    errors.append(
+                        "K8S configmaps.yaml [project policy]: hive-catalog-config data key must be 'hive.properties' "
+                        "(not 'catalog.properties' or any other name). Trino mounts /etc/trino/catalog/hive.properties."
+                    )
+
+            elif fname in ("trino_deployment.yaml", "grafana_deployment.yaml", "prometheus_deployment.yaml"):
+                # Every deployment file must contain at least one Service — without it the pods are unreachable.
+                if "kind: Service" not in raw:
+                    errors.append(
+                        f"K8S {fname} [project policy]: missing Service resource — "
+                        "a Deployment without a Service means the pod is unreachable by other pods. "
+                        f"{'trino_deployment.yaml requires a ClusterIP Service named trino.' if 'trino' in fname else ''}"
+                        f"{'grafana_deployment.yaml requires a LoadBalancer Service with aws-load-balancer-scheme annotation.' if 'grafana' in fname else ''}"
+                        f"{'prometheus_deployment.yaml requires 4 objects: Prometheus Deployment+Service + Pushgateway Deployment+Service.' if 'prometheus' in fname else ''}"
+                    )
+                # Pushgateway must exist in prometheus_deployment.yaml.
+                if fname == "prometheus_deployment.yaml" and "pushgateway" not in content_lower:
+                    errors.append(
+                        "K8S prometheus_deployment.yaml [project policy]: missing Pushgateway — "
+                        "this file must contain 4 objects: Prometheus Deployment, Prometheus Service, "
+                        "Pushgateway Deployment, Pushgateway Service. "
+                        "Without Pushgateway the pipeline cannot push metrics."
+                    )
+                # Grafana LoadBalancer annotation required on AWS — without it EXTERNAL-IP is permanently pending.
+                if fname == "grafana_deployment.yaml" and "aws-load-balancer-scheme" not in raw:
+                    errors.append(
+                        "K8S grafana_deployment.yaml [project policy]: missing aws-load-balancer-scheme annotation — "
+                        "add 'service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing' to the Service "
+                        "annotations. Without it the LoadBalancer defaults to internal and stays <pending>."
                     )
 
     else:
@@ -1150,15 +1239,30 @@ def push_to_github(project_id: str, commit_message: str):
             if os.path.exists(os.path.join(REPO_ROOT, path)):
                 subprocess.run(["git", "add", path], cwd=REPO_ROOT, check=True)
 
-        # 4. Commit with Scope
+        # 4. Commit if there are staged changes
         full_message = f"fix({project_id}): {commit_message}"
-        
+
         status = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=REPO_ROOT)
-        if status.returncode == 0:
+        has_staged = status.returncode != 0
+
+        if has_staged:
+            subprocess.run(["git", "commit", "-m", full_message], cwd=REPO_ROOT, check=True)
+
+        # 5. Check for unpushed commits — handles the case where a previous call
+        # committed successfully but the push failed (exit 128). git status -sb
+        # reports "ahead N" when local commits exist that aren't on the remote,
+        # and omits "..." entirely when no upstream is set (first push).
+        branch_status_result = subprocess.run(
+            ["git", "status", "-sb"], cwd=REPO_ROOT, capture_output=True, text=True
+        )
+        branch_line = (branch_status_result.stdout.splitlines() or [""])[0]
+        needs_push = "ahead" in branch_line or "..." not in branch_line
+
+        if not has_staged and not needs_push:
             return f"STATUS: SUCCESS | Message: No changes detected for project {project_id}."
 
-        subprocess.run(["git", "commit", "-m", full_message], cwd=REPO_ROOT, check=True)
-        subprocess.run(["git", "push"], cwd=REPO_ROOT, check=True)
+        # -u origin HEAD: sets upstream tracking on first push and works for any branch name.
+        subprocess.run(["git", "push", "-u", "origin", "HEAD"], cwd=REPO_ROOT, check=True)
 
         sha_result = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
@@ -1281,6 +1385,13 @@ def fetch_github_action_logs(project_id: str, head_sha: str = "", run_id: str = 
         try:
             data = _github_get_json(list_url, token)
         except Exception as e:
+            err_str = str(e)
+            if "403" in err_str or "forbidden" in err_str.lower():
+                return (
+                    f"PENDING: PERMISSIONS_ERROR — GitHub API returned 403 for {workflow_file}. "
+                    f"GH_TOKEN lacks 'actions: read' scope. This is a token configuration issue, "
+                    f"not a code bug. Grant 'actions: read' permission to GH_TOKEN and retry."
+                )
             return f"Error resolving run for SHA {head_sha}: {e}"
         runs = data.get("workflow_runs", [])
         if not runs:
@@ -1296,6 +1407,12 @@ def fetch_github_action_logs(project_id: str, head_sha: str = "", run_id: str = 
                 return (
                     f"PENDING: No runs found yet for {project_id}_pipeline.yml. "
                     f"Workflow may still be queued after the recent push. Retry later."
+                )
+            if "403" in err or "forbidden" in err.lower():
+                return (
+                    f"PENDING: PERMISSIONS_ERROR — GitHub API returned 403 for {project_id}_pipeline.yml. "
+                    f"GH_TOKEN lacks 'actions: read' scope. This is a token configuration issue, "
+                    f"not a code bug. Grant 'actions: read' permission to GH_TOKEN and retry."
                 )
             return f"Error: {err}"
 

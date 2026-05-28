@@ -69,6 +69,7 @@ def medic_node(state: AgentState):
         system_prompt += (
             "\n- If infra/deployment fails: use request_fix(target_agent='infra')."
             "\n- If logs are still PENDING: tell the user you are waiting and finish your turn."
+            "\n- If logs contain PERMISSIONS_ERROR: inform the user their GH_TOKEN needs 'actions: read' scope — do NOT call request_fix, this is a GitHub token configuration issue."
             "\n- If everything is perfect: explicitly state 'VERIFIED' or 'COMPLIANT'."
         )
 
@@ -119,7 +120,9 @@ def medic_node(state: AgentState):
             result = tool_func.invoke(tool_args)
             result_str = str(result)
 
-            if tool_name == "fetch_github_action_logs" and "PENDING" in result_str.upper():
+            if tool_name == "fetch_github_action_logs" and (
+                "PENDING" in result_str.upper() or "PERMISSIONS_ERROR" in result_str.upper()
+            ):
                 logs_still_pending = True
 
             if tool_name == "request_fix":
@@ -176,20 +179,24 @@ def medic_node(state: AgentState):
         attempt = state.get("ci_poll_attempt", 0)
 
         if attempt >= 5:
-            # Exceeded ~10 minutes of cumulative waiting — escalate for human review.
-            logger.warning("CI run has been pending for over 10 minutes. Flagging for human review.")
+            # Exceeded ~10 minutes of cumulative waiting — stop polling, surface to user.
+            logger.warning("CI run has been pending for over 10 minutes. Stopping poll, routing to supervisor.")
             new_messages_for_state.append(
-                HumanMessage(content="CI run has been pending for over 10 minutes. Flagging for human review.")
+                HumanMessage(content=(
+                    "CI run has been pending for over 10 minutes with no result. "
+                    "Possible causes: workflow file not pushed, wrong trigger branch, or GHA disabled. "
+                    "Please check GitHub Actions manually."
+                ))
             )
             output_state["messages"] = new_messages_for_state
-            output_state["ci_poll_attempt"] = attempt + 1
+            output_state["ci_poll_attempt"] = 0  # reset for next pipeline run
+            output_state["next_step"] = "supervisor"
         else:
             wait = min(30 * (2 ** attempt), _MAX_POLL_WAIT_SECONDS) + random.uniform(0, 5)
             logger.info(f"CI poll attempt {attempt+1}: logs pending. Waiting {wait:.1f}s before retry.")
             time.sleep(wait)
             output_state["ci_poll_attempt"] = attempt + 1
-
-        output_state["next_step"] = "medic"
+            output_state["next_step"] = "medic"
     else:
         # Not pending — reset the counter so a future CI run starts fresh.
         output_state["ci_poll_attempt"] = 0

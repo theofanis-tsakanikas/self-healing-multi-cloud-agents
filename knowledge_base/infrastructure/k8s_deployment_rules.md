@@ -5,15 +5,36 @@ This standard defines the mandatory structure and security protocols for deployi
 
 ---
 
+## 0. PRE-GENERATION CHECKLIST — verify before submitting any K8s file
+
+Before marking a file complete, confirm every item below. Skipping even one causes runtime failure:
+
+| File | Must contain | Common omissions that break deployments |
+|---|---|---|
+| `trino_deployment.yaml` | Deployment **+** ClusterIP Service (2 objects, separated by `---`) | Missing Service → `trino.analytics.svc.cluster.local` never resolves |
+| `grafana_deployment.yaml` | Deployment **+** LoadBalancer Service with `aws-load-balancer-scheme` annotation (2 objects) | Missing Service → no external IP; missing annotation → `<pending>` forever |
+| `prometheus_deployment.yaml` | Prometheus Deployment + Service **+** Pushgateway Deployment + Service (4 objects) | Missing Pushgateway → pipeline metrics push fails at runtime |
+| `configmaps.yaml` | All 5 named ConfigMaps with `labels: project_id:` on every one | Wrong key name in hive-catalog (`catalog.properties` → must be `hive.properties`) |
+| `job.yaml` | `initContainers` (init-trino) **+** `containers` (pipeline) — two separate sections | Using `containers` for init-trino → it runs in parallel with pipeline, not before |
+
+**job.yaml non-negotiables (all must be present):**
+- `restartPolicy: Never` — not `OnFailure`
+- `serviceAccountName` — never omit; required for S3/GCS/ADLS access via workload identity
+- `backoffLimit: 0`
+- All resource names are RFC 1123: **lowercase + hyphens only** — `pipe-eu-sales-to-s3-job`, not `PIPE_EU_SALES_TO_S3-job`
+- `secretRef.name` is also RFC 1123: `pipe-eu-sales-to-s3-<timestamp>-db-credentials` (lowercase, hyphens)
+
+---
+
 ## 1. MANDATORY MANIFEST STRUCTURE
 All projects must generate and apply the following files in the `/k8s` directory:
 
-- **00_namespaces.yaml:** Defines EXACTLY two namespaces (`analytics` and `monitoring`) AND the IRSA ServiceAccount. See Section 8 for the mandatory ServiceAccount spec.
-- **trino_deployment.yaml:** Deployment + ClusterIP Service (name: `trino`) in the `analytics` namespace.
-- **grafana_deployment.yaml:** Deployment + LoadBalancer Service in the `monitoring` namespace.
-- **prometheus_deployment.yaml:** Prometheus + Pushgateway — both Deployments and ClusterIP Services in the `monitoring` namespace.
+- **00_namespaces.yaml:** Defines EXACTLY two namespaces (`analytics` and `monitoring`) AND the cloud-specific ServiceAccount. See Section 8 for the mandatory ServiceAccount spec.
+- **trino_deployment.yaml:** Deployment + ClusterIP Service (name: `trino`) in the `analytics` namespace. **2 objects.**
+- **grafana_deployment.yaml:** Deployment + LoadBalancer Service in the `monitoring` namespace. **2 objects.**
+- **prometheus_deployment.yaml:** Prometheus Deployment + Service + Pushgateway Deployment + Service — all in `monitoring`. **4 objects.**
 - **configmaps.yaml:** Five ConfigMaps in a single file separated by `---`. Each must be in the namespace of the pod that mounts it: `trino-sql-config` in `analytics` (SQL scripts), `hive-catalog-config` in `analytics` (Trino Hive/Glue catalog configuration), `grafana-dash-config` in `monitoring` (dashboard JSON), `grafana-datasource-config` in `monitoring` (Prometheus datasource), `prometheus-config` in `monitoring` (scrape config). Content must be the ACTUAL file content from the generated artifacts — never placeholders.
-- **job.yaml:** The main execution unit for the data pipeline. Namespace: `analytics`.
+- **job.yaml:** The main execution unit for the data pipeline. Namespace: `analytics`. Uses `initContainers` + `containers` — two distinct sections.
 
 ---
 
@@ -33,10 +54,10 @@ All projects must generate and apply the following files in the `/k8s` directory
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: <project_id>-job
+  name: <project_id_rfc1123>-job   # RFC 1123: lowercase + hyphens — e.g. pipe-eu-sales-to-s3-job
   namespace: analytics
   labels:
-    project_id: <project_id>
+    project_id: <project_id>        # label values are exempt from RFC 1123
     component: pipeline-job
 spec:
   backoffLimit: 0
@@ -46,9 +67,9 @@ spec:
         project_id: <project_id>
         component: pipeline-job
     spec:
-      serviceAccountName: <irsa_service_account>
-      restartPolicy: Never
-      initContainers:
+      serviceAccountName: <k8s_service_account_name>   # MANDATORY — never omit
+      restartPolicy: Never                              # MANDATORY — never OnFailure
+      initContainers:                                   # MANDATORY — runs BEFORE containers
       - name: init-trino
         image: trinodb/trino:403
         command:
@@ -62,23 +83,23 @@ spec:
         volumeMounts:
         - name: sql-scripts
           mountPath: /scripts
-      containers:
+      containers:                                       # MANDATORY — the actual pipeline script
       - name: pipeline
-        image: <ecr_image_uri>
+        image: <ecr_image_uri>                          # full ECR URL — never a placeholder
         env:
         - name: PROJECT_ID
           value: "<project_id>"
         - name: CLOUD_PROVIDER
-          value: "<cloud_provider>"         # aws | azure | gcp — required for Prometheus labels
+          value: "<cloud_provider>"                     # aws | azure | gcp
         - name: BUCKET_NAME
           value: "<bucket_name>"
         - name: TRINO_HOST
-          value: "trino.analytics.svc.cluster.local"
+          value: "trino.analytics.svc.cluster.local"   # hostname ONLY — no :port
         - name: PUSHGATEWAY_URL
           value: "http://pushgateway.monitoring.svc.cluster.local:9091"
         envFrom:
         - secretRef:
-            name: <project_id>-db-credentials
+            name: <project_id_rfc1123>-db-credentials  # RFC 1123: pipe-eu-sales-to-s3-<timestamp>-db-credentials
         resources:
           requests:
             memory: "1Gi"
@@ -95,8 +116,10 @@ spec:
           name: trino-sql-config
 ```
 
-### configmaps.yaml — MANDATORY STRUCTURE
-Five ConfigMaps in a single file separated by `---`. Content must be the ACTUAL generated file content — never placeholders like `-- SQL setup commands here`.
+### configmaps.yaml — 5 OBJECTS, all in one file separated by `---`
+Content must be the ACTUAL generated file content — never placeholders like `-- SQL setup commands here`.
+
+**hive-catalog-config key name is always `hive.properties` (never `catalog.properties` or `hive.properties.yaml`).** Content is cloud-specific — use Section 8.4 for the active cloud. The AWS template below is the default; for Azure or GCP substitute Section 8.4 content verbatim.
 
 ```yaml
 apiVersion: v1
@@ -177,8 +200,8 @@ data:
 
 ## 3. SHARED SERVICES (TRINO & GRAFANA)
 
-### 3.1 trino_deployment.yaml — MANDATORY STRUCTURE
-`trino_deployment.yaml` MUST contain both a `Deployment` AND a `Service` in a single file, separated by `---`.
+### 3.1 trino_deployment.yaml — 2 OBJECTS: Deployment + ClusterIP Service
+`trino_deployment.yaml` MUST contain both a `Deployment` AND a `Service` in a single file, separated by `---`. A Deployment without a Service means `trino.analytics.svc.cluster.local` never resolves and every job init-container fails.
 
 **CRITICAL rules:**
 - Namespace: `analytics` (never invent another name)
@@ -186,9 +209,10 @@ data:
 - Resources: minimum `2Gi` memory, `1000m` CPU
 - Labels: every resource must include `project_id: <project_id>` and `component: trino`
 - Service type: `ClusterIP`, port `8080`, name `trino` — this name is used by Jobs to reach Trino at `trino.analytics.svc.cluster.local:8080`
-- `serviceAccountName`: must be set to the IRSA service account so Trino can call AWS Glue and S3
-- Catalog volume: mount `hive-catalog-config` at `/etc/trino/catalog` so Trino picks up the Hive/Glue connector on startup
+- `serviceAccountName`: must be set to the cloud service account so Trino can call Glue/GCS/ADLS and S3/GCS/ADLS
+- Catalog volume: mount `hive-catalog-config` at `/etc/trino/catalog` so Trino picks up the Hive connector on startup
 - ConfigMap volume: mount `trino-sql-config` at `/scripts`
+- **DO NOT add `TRINO_HOST` or `PUSHGATEWAY_URL` env vars to the Trino container** — these belong on the pipeline Job container only
 
 ```yaml
 apiVersion: apps/v1
@@ -257,8 +281,8 @@ spec:
   type: ClusterIP
 ```
 
-### 3.2 grafana_deployment.yaml — MANDATORY STRUCTURE
-`grafana_deployment.yaml` MUST contain both a `Deployment` AND a `Service` in a single file, separated by `---`.
+### 3.2 grafana_deployment.yaml — 2 OBJECTS: Deployment + LoadBalancer Service
+`grafana_deployment.yaml` MUST contain both a `Deployment` AND a `Service` in a single file, separated by `---`. Without the LoadBalancer Service + `aws-load-balancer-scheme: internet-facing` annotation, Grafana is permanently `<pending>` with no external IP.
 
 **CRITICAL rules:**
 - Namespace: `monitoring` (never invent another name)
@@ -338,8 +362,8 @@ spec:
 
 ---
 
-### 3.3 prometheus_deployment.yaml — MANDATORY STRUCTURE
-`prometheus_deployment.yaml` MUST contain four resources in a single file: Prometheus Deployment, Prometheus Service, Pushgateway Deployment, Pushgateway Service — all in the `monitoring` namespace, separated by `---`.
+### 3.3 prometheus_deployment.yaml — 4 OBJECTS: Prometheus Deployment + Service + Pushgateway Deployment + Service
+`prometheus_deployment.yaml` MUST contain all four resources in a single file, separated by `---`. Missing the Pushgateway Deployment or Service causes `push_to_gateway()` in the pipeline script to fail with a connection error at runtime.
 
 **CRITICAL rules:**
 - Prometheus image: `prom/prometheus:v2.51.0` (never `latest`)

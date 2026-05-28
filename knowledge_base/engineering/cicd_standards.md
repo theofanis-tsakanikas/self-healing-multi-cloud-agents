@@ -7,9 +7,16 @@ This standard defines the mandatory, modular structure for GitHub Actions workfl
 
 **## 1. WORKFLOW TRIGGER & STRUCTURE**
 - **File Location:** `/.github/workflows/{{project_id}}_pipeline.yml`.
-- **Triggers:** Use `on: push` with `paths` filters targeting `projects/{{project_folder}}/**`.
+- **Triggers:** This is a **standalone repository** — use `on: push: paths: ['**']` or omit `paths` entirely. Never use `projects/{{project_folder}}/**` or any `projects/...` prefix — this is not a monorepo.
 - **Job Name:** The single job MUST be named `deploy`.
 - **Global Env:** Every job must include `env: GH_TOKEN: ${{ secrets.GH_TOKEN }}`.
+
+**## STANDALONE REPOSITORY — PATH RULES (mandatory)**
+All file references in the workflow are relative to the repository root — never use `projects/...` prefixes:
+- Docker build context: `.` (not `projects/...`)
+- Dockerfile: `-f Dockerfile` (not `-f projects/.../Dockerfile`)
+- kubectl applies: `k8s/job.yaml` (not `projects/.../k8s/job.yaml`)
+- sed image patch: `k8s/job.yaml` (not `projects/.../k8s/job.yaml`)
 
 ---
 
@@ -47,6 +54,27 @@ The Agent MUST select the logic block that matches the `target_cloud` identifier
 ---
 
 **## 4. DEPLOYMENT EXECUTION**
+
+### Secret naming — mandatory alignment rule
+The DB credentials secret name MUST be identical in both the GHA workflow and `job.yaml`. Use a **static, RFC 1123 name** (no timestamp — timestamps are only for Job names, not Secret names):
+
+```
+<project_id_rfc1123>-db-credentials
+```
+
+RFC 1123 conversion: replace every underscore with a hyphen, lowercase everything.
+- `pipe_eu_sales_to_s3` → `pipe-eu-sales-to-s3-db-credentials` ✓
+- `PIPE_EU_SALES_TO_S3-20260528-0505-db-credentials` ✗ (uppercase + underscore + timestamp — invalid)
+
+The secret is created idempotently (`--dry-run=client -o yaml | kubectl apply -f -`) so running the workflow multiple times does not fail.
+
+### ECR / Registry URL — no placeholders
+The ECR repository URL MUST be the **real full URL** from the infrastructure context — never `<AWS_ACCOUNT_ID>` or `<CLOUD_SETUP.ecr_repository>`. Use the `ecr_repository_url` value from the orchestration context (captured from terraform outputs or `.bootstrap_outputs.json`):
+
+```
+123456789012.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo
+```
+
 The following steps MUST appear in this exact order:
 
 ```yaml
@@ -60,43 +88,41 @@ The following steps MUST appear in this exact order:
   uses: aws-actions/amazon-ecr-login@v2
 - name: Build and Push Docker Image
   run: |
-    docker build -t <CLOUD_SETUP.ecr_repository>:${{ github.sha }} -f projects/{{project_folder}}/Dockerfile projects/{{project_folder}}/
-    docker push <CLOUD_SETUP.ecr_repository>:${{ github.sha }}
-    docker tag <CLOUD_SETUP.ecr_repository>:${{ github.sha }} <CLOUD_SETUP.ecr_repository>:latest
-    docker push <CLOUD_SETUP.ecr_repository>:latest
+    docker build -t <real_ecr_url>:${{ github.sha }} -f Dockerfile .
+    docker push <real_ecr_url>:${{ github.sha }}
+    docker tag <real_ecr_url>:${{ github.sha }} <real_ecr_url>:latest
+    docker push <real_ecr_url>:latest
 - name: Update Kubeconfig
-  run: aws eks update-kubeconfig --region ${{ secrets.AWS_DEFAULT_REGION }} --name <CLOUD_SETUP.eks_cluster_name>
+  run: aws eks update-kubeconfig --region ${{ secrets.AWS_DEFAULT_REGION }} --name <eks_cluster_name>
 - name: Set Image Tag in Job Manifest
   run: |
-    sed -i 's|image: <CLOUD_SETUP.ecr_repository>.*|image: <CLOUD_SETUP.ecr_repository>:${{ github.sha }}|' projects/{{project_folder}}/k8s/job.yaml
+    sed -i 's|image: <real_ecr_url>.*|image: <real_ecr_url>:${{ github.sha }}|' k8s/job.yaml
 - name: Deploy Shared Services to Kubernetes
   run: |
-    kubectl apply -f projects/{{project_folder}}/k8s/00_namespaces.yaml
-    kubectl apply -f projects/{{project_folder}}/k8s/configmaps.yaml
-    kubectl apply -f projects/{{project_folder}}/k8s/prometheus_deployment.yaml
-    kubectl apply -f projects/{{project_folder}}/k8s/trino_deployment.yaml
-    kubectl apply -f projects/{{project_folder}}/k8s/grafana_deployment.yaml
+    kubectl apply -f k8s/00_namespaces.yaml
+    kubectl apply -f k8s/configmaps.yaml
+    kubectl apply -f k8s/prometheus_deployment.yaml
+    kubectl apply -f k8s/trino_deployment.yaml
+    kubectl apply -f k8s/grafana_deployment.yaml
     kubectl rollout restart deployment/trino -n analytics
     kubectl rollout status deployment/trino -n analytics --timeout=120s
 - name: Create DB Credentials Secret
   run: |
-    # Secret keys must match the env var names the pipeline script reads.
-    # Use the correct secret names per cloud provider:
-    #   AWS  (eu_sales)         → POSTGRES_DB_* secrets
-    #   Azure (us_crm)          → CRM_DB_* secrets
-    #   GCP  (global_marketing) → MYSQL_DB_* secrets
-    kubectl create secret generic <PROJECT_ID>-db-credentials \
+    # Secret name must be RFC 1123 and match job.yaml envFrom.secretRef.name exactly.
+    # Key names must match what the pipeline script reads (via cloud_get → env fallback).
+    # Per cloud:  AWS → POSTGRES_DB_*   Azure → CRM_DB_*   GCP → MYSQL_DB_*
+    kubectl create secret generic <project_id_rfc1123>-db-credentials \
       -n analytics \
-      --from-literal=<DB_HOST_KEY>=${{ secrets.<DB_HOST_SECRET> }} \
-      --from-literal=<DB_PORT_KEY>=${{ secrets.<DB_PORT_SECRET> }} \
-      --from-literal=<DB_USER_KEY>=${{ secrets.<DB_USER_SECRET> }} \
-      --from-literal=<DB_PASSWORD_KEY>=${{ secrets.<DB_PASSWORD_SECRET> }} \
-      --from-literal=<DB_NAME_KEY>=${{ secrets.<DB_NAME_SECRET> }} \
+      --from-literal=POSTGRES_DB_HOST=${{ secrets.POSTGRES_DB_HOST }} \
+      --from-literal=POSTGRES_DB_PORT=${{ secrets.POSTGRES_DB_PORT }} \
+      --from-literal=POSTGRES_DB_USER=${{ secrets.POSTGRES_DB_USER }} \
+      --from-literal=POSTGRES_DB_PASSWORD=${{ secrets.POSTGRES_DB_PASSWORD }} \
+      --from-literal=POSTGRES_DB_NAME=${{ secrets.POSTGRES_DB_NAME }} \
       --dry-run=client -o yaml | kubectl apply -f -
 - name: Deploy Pipeline Job to Kubernetes
   run: |
     kubectl delete job -l component=pipeline-job -n analytics --ignore-not-found=true
-    kubectl apply -f projects/{{project_folder}}/k8s/job.yaml
+    kubectl apply -f k8s/job.yaml
 - name: Check Deployment Status
   run: |
     kubectl get pods -n analytics
@@ -125,15 +151,13 @@ The following steps MUST appear in this exact order:
     exit 1
 ```
 
-Replace all `<...>` placeholders with the literal values from the infrastructure context. Use the following per-cloud mappings:
+Per-cloud `--from-literal` key mapping:
 
-| Cloud | DB secret prefix | `--from-literal` keys |
-|---|---|---|
-| AWS (`eu_sales`) | `POSTGRES_DB_` | `POSTGRES_DB_HOST`, `POSTGRES_DB_PORT`, `POSTGRES_DB_USER`, `POSTGRES_DB_PASSWORD`, `POSTGRES_DB_NAME` |
-| Azure (`us_crm`) | `CRM_DB_` | `CRM_DB_HOST`, `CRM_DB_PORT`, `CRM_DB_USER`, `CRM_DB_PASSWORD`, `CRM_DB_NAME` |
-| GCP (`global_marketing`) | `MYSQL_DB_` | `MYSQL_DB_HOST`, `MYSQL_DB_PORT`, `MYSQL_DB_USER`, `MYSQL_DB_PASSWORD`, `MYSQL_DB_NAME` |
-
-The secret key names must match exactly what the Python pipeline script reads via `os.getenv()`.
+| Cloud | Secret keys |
+|---|---|
+| AWS | `POSTGRES_DB_HOST`, `POSTGRES_DB_PORT`, `POSTGRES_DB_USER`, `POSTGRES_DB_PASSWORD`, `POSTGRES_DB_NAME` |
+| Azure | `CRM_DB_HOST`, `CRM_DB_PORT`, `CRM_DB_USER`, `CRM_DB_PASSWORD`, `CRM_DB_NAME` |
+| GCP | `MYSQL_DB_HOST`, `MYSQL_DB_PORT`, `MYSQL_DB_USER`, `MYSQL_DB_PASSWORD`, `MYSQL_DB_NAME` |
 
 ---
 
