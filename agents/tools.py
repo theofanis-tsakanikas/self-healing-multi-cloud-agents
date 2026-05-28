@@ -172,7 +172,7 @@ def validate_generated_code(filename: str) -> str:
         )
         detected_provider = _cloud_detect.group(1).lower() if _cloud_detect else "aws"
 
-        getenv_scan = re.compile(r'os\.getenv\s*\(\s*["\']([^"\']+)["\']', re.IGNORECASE)
+        getenv_scan = re.compile(r'os\.getenv\s*\(\s*["\']([^"\']+)["\'][^)]*\)', re.IGNORECASE)
         found_cred_violations = [
             (m.group(1).upper(), m.group(0))
             for m in getenv_scan.finditer(py_content)
@@ -265,12 +265,27 @@ def validate_generated_code(filename: str) -> str:
 
         # Project-specific: utils/ is OUR module tree — hadolint cannot know this is required.
         with open(filename, encoding="utf-8") as f:
-            content_lower = f.read().lower()
-        if "copy utils/" not in content_lower:
+            dockerfile_content = f.read()
+        if "copy utils/" not in dockerfile_content.lower():
+            # Find an anchor line for the patch suggestion.
+            anchor = None
+            for candidate in ("COPY scripts/ scripts/", "COPY scripts/", "CMD ", "ENTRYPOINT "):
+                if candidate.lower() in dockerfile_content.lower():
+                    for line in dockerfile_content.splitlines():
+                        if line.strip().lower().startswith(candidate.lower()):
+                            anchor = line.strip()
+                            break
+                if anchor:
+                    break
+            patch_hint = (
+                f"\nFix: add 'COPY utils/ utils/' immediately before '{anchor}'."
+                if anchor else
+                "\nFix: add 'COPY utils/ utils/' before the CMD/ENTRYPOINT instruction."
+            )
             errors.append(
                 "DOCKERFILE [project policy]: missing 'COPY utils/ utils/' — "
                 "pipeline scripts import 'from utils.cloud_config import cloud_get'. "
-                "Omitting this causes ModuleNotFoundError at container startup."
+                f"Omitting this causes ModuleNotFoundError at container startup.{patch_hint}"
             )
 
     # ── YAML files — two distinct types require different validation ─────────────
@@ -308,6 +323,19 @@ def validate_generated_code(filename: str) -> str:
                     f"GHA: unresolved placeholder(s) {list(set(placeholders))} — "
                     "replace every <...> token with its actual value from context "
                     "(e.g. <AWS_ACCOUNT_ID> → the 12-digit account ID from Terraform outputs)."
+                )
+
+            # Standalone repo guard: paths must NOT use 'projects/<name>/' prefix.
+            # This repo is standalone — all paths are relative to the repository root.
+            monorepo_paths = list(set(_re.findall(r"projects/[a-zA-Z0-9_-]+/", raw)))
+            if monorepo_paths:
+                errors.append(
+                    f"GHA [project policy]: monorepo path(s) detected {monorepo_paths} — "
+                    "this is a STANDALONE repository. All paths are relative to the repo root:\n"
+                    "  • Dockerfile  (not 'projects/.../Dockerfile')\n"
+                    "  • k8s/job.yaml  (not 'projects/.../k8s/job.yaml')\n"
+                    "  • docker build context is '.'  (not 'projects/...')\n"
+                    "  • on.push.paths: omit or use '**'  (not 'projects/...')"
                 )
 
         else:
@@ -356,17 +384,35 @@ def validate_generated_code(filename: str) -> str:
             # Unresolved template placeholders break deployments silently.
             placeholders = _re.findall(r"<[A-Z_]{3,}>", raw)
             if placeholders:
+                unique_ph = list(set(placeholders))
+                hint = ""
+                if "<AWS_ACCOUNT_ID>" in unique_ph:
+                    hint = (
+                        " For <AWS_ACCOUNT_ID>: extract the full ECR repository URL "
+                        "(e.g. 123456789012.dkr.ecr.eu-central-1.amazonaws.com/...) "
+                        "from the execute_terraform output earlier in the conversation — "
+                        "the account ID is the 12-digit prefix."
+                    )
                 errors.append(
-                    f"K8S: unresolved placeholder(s) {list(set(placeholders))} — "
-                    "replace every <...> token with its actual value from context before applying."
+                    f"K8S: unresolved placeholder(s) {unique_ph} — "
+                    f"replace every <...> token with its actual value from context before applying.{hint}"
                 )
 
-            # :latest tags are policy violations — kubectl allows them but we forbid them.
-            latest_matches = _re.findall(r"image:\s*\S+:latest", raw, _re.IGNORECASE)
-            if latest_matches:
+            # :latest tags are policy violations for public images.
+            # ECR images (.dkr.ecr.amazonaws.com) are exempt — CI/CD patches the tag on
+            # deployment via the commit SHA. Public images must use pinned versions.
+            all_latest = _re.findall(r"image:\s*(\S+):latest", raw, _re.IGNORECASE)
+            public_latest = [img for img in all_latest if ".dkr.ecr." not in img]
+            ecr_latest = [img for img in all_latest if ".dkr.ecr." in img]
+            if public_latest:
                 errors.append(
-                    f"K8S: ':latest' image tag(s) found {latest_matches} — "
-                    "pin to a specific version per the pinned versions in k8s_deployment_rules.md."
+                    f"K8S: ':latest' image tag(s) found for public images {public_latest} — "
+                    "pin to a specific version. Use the pinned versions from the "
+                    "infra_standard_dockerfile standard retrieved earlier (k8s_deployment_rules.md)."
+                )
+            if ecr_latest:
+                warnings.append(
+                    f"ECR image(s) {ecr_latest} use ':latest' — CI/CD will pin to commit SHA on deployment. Acceptable."
                 )
 
             # ── Per-file project policy checks ────────────────────────────────
@@ -718,6 +764,12 @@ def generate_dockerfile(content: str):
     Generates a Dockerfile.
     Must include 'pandas', 'sqlalchemy', 'psycopg2-binary' and 'pymysql'.
     Use python:3.11-slim for OCI/Kubernetes optimization.
+    MANDATORY COPY statements (in this order):
+      COPY requirements.txt .
+      RUN pip install ...
+      COPY utils/ utils/
+      COPY scripts/ scripts/
+    COPY utils/ utils/ is required because pipeline scripts import from utils.cloud_config.
     """
     try:
         with open("Dockerfile", "w", encoding="utf-8") as f:
@@ -976,6 +1028,17 @@ def generate_github_action(project_id: str, content: str):
     Generates a GitHub Actions workflow file in the REPOSITORY ROOT (.github/workflows/).
     The filename is always {project_id}_pipeline.yml — do NOT pass a custom name.
     Sanitizes line breaks to ensure valid YAML syntax.
+
+    STANDALONE REPO — never use 'projects/...' path prefixes. All paths are relative
+    to the repository root:
+      • docker build context: '.'  (not 'projects/multi-cloud-self-healing-agent/')
+      • Dockerfile path: 'Dockerfile'  (not 'projects/.../Dockerfile')
+      • kubectl apply: 'k8s/job.yaml'  (not 'projects/.../k8s/job.yaml')
+      • on.push.paths: omit entirely or use '**'
+
+    AWS_ACCOUNT_ID: extract the 12-digit prefix from the ECR repository URL returned
+    by execute_terraform (e.g. '123456789012.dkr.ecr.eu-central-1.amazonaws.com/...')
+    — never write <AWS_ACCOUNT_ID> as a literal placeholder.
     """
     workflow_dir = os.path.join(REPO_ROOT, ".github", "workflows")
     os.makedirs(workflow_dir, exist_ok=True)

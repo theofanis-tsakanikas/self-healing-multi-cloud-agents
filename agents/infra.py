@@ -16,7 +16,7 @@ from utils.config_utils import build_infra_context, build_databricks_infra_conte
 from agents.tools import (
     write_terraform_config, execute_terraform, generate_dockerfile,
     generate_k8s_manifest, generate_github_action, push_to_github, query_vector_store,
-    validate_generated_code
+    validate_generated_code, REPO_ROOT
 )
 
 from agents.constants import (
@@ -502,9 +502,22 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                             any_tool_error = True
                             logger.warning(f"⚠️ AUTO-VALIDATION FAILED: {auto_validate_path}")
                             validation_errors.append(f"{auto_validate_path}: {validation_result}")
+                            # Remove from tracking so the LLM can regenerate on the next attempt.
+                            # Without this, the file stays in written_files and docker_ready/k8s_ready
+                            # becomes True, causing the broken file to be pushed as-is.
+                            tracked_key = None
+                            if t_name == "generate_dockerfile":
+                                tracked_key = "Dockerfile"
+                            elif t_name == "generate_k8s_manifest":
+                                tracked_key = tracked  # set above when file was added
+                            elif t_name == "generate_github_action":
+                                tracked_key = tracked  # set above when file was added
+                            if tracked_key and tracked_key in updated_files:
+                                updated_files.remove(tracked_key)
+                                logger.info(f"↩️ Removed '{tracked_key}' from tracking — validation failed, will regenerate.")
                             result_str = (
                                 f"{result_str}\n\n"
-                                f"AUTO-VALIDATION FAILED — fix these errors and regenerate '{auto_validate_path}':\n"
+                                f"AUTO-VALIDATION FAILED — fix these errors and call the same generation tool again with corrected content:\n"
                                 f"{validation_result}"
                             )
                         else:
