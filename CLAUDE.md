@@ -58,11 +58,41 @@ docs(knowledge-base): update terraform_gcp_bucket standard with GCS backend
 
 ---
 
+## Repository Structure
+
+This is a **standalone repository** — not a monorepo. All file paths are relative to the repository root.
+
+- Never use `projects/multi-cloud-self-healing-agent/` prefixes anywhere.
+- GHA docker build context: `.` (not `projects/...`)
+- GHA kubectl applies: `k8s/job.yaml` (not `projects/.../k8s/job.yaml`)
+- Dockerfile path in GHA: `Dockerfile` (not `projects/.../Dockerfile`)
+- `on.push.paths`: omit or use `**` (not `projects/...`)
+
+---
+
+## Credential Access — Mandatory Convention
+
+**`cloud_get()` is the only permitted way to read DB credentials in generated pipeline scripts.**
+
+```python
+from utils.cloud_config import cloud_get
+
+host = cloud_get(cloud, "db_host", db_type="postgres")  # "aws" | "gcp" | "azure"
+```
+
+- `os.getenv()` is **forbidden** for credential env vars (`POSTGRES_DB_*`, `MYSQL_DB_*`).
+- Three-tier priority: SSM Parameter Store → `.bootstrap_outputs.json` → env var fallback.
+- Generic keys: `db_host`, `db_port`, `db_user`, `db_password`, `db_name` — same API for every cloud/engine.
+- The `validate_generated_code` tool enforces this and will block any file that uses `os.getenv()` for credentials.
+
+---
+
 ## Before You Suggest Any Change
 
 Ask yourself:
 - Is this cloud-agnostic? Would it work equally on AWS, Azure, and GCP?
 - Is this the production solution or a shortcut?
 - Am I about to commit a secret or hardcoded credential?
+- Am I using `cloud_get()` for credentials, not `os.getenv()`?
 
 If any answer is no — stop and fix it first.

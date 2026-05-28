@@ -403,12 +403,24 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                     # Logic for Surgical Patching (Fix Mode)
                     elif tool_name == "patch_project_file":
                         filename = tool_args.get("filename", "")
+                        filename_base = Path(filename).stem.lower()
+                        is_patch_target = filename_base in healing_context.lower()
                         if not _is_architect_allowed_file(filename):
                             result = f"Policy Error: Architect is not permitted to modify '{filename}'."
                             any_tool_error = True
+                        elif not is_patch_target:
+                            result = (
+                                f"Fix-mode Policy: '{filename}' is not the fix target and must not be patched. "
+                                f"Only the file named in the diagnosis (healing_context) may be modified. "
+                                f"Do not touch files that already passed validation."
+                            )
+                            any_tool_error = True
                         else:
                             result = tool_func.invoke(tool_args)
-                            all_skipped_this_iter = False
+                            if result.startswith("Error:"):
+                                any_tool_error = True
+                            else:
+                                all_skipped_this_iter = False
                             # Auto-validate the patched file
                             if "Error" not in result:
                                 import re as _re

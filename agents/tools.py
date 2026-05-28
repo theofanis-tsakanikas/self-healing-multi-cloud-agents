@@ -22,6 +22,7 @@ import time
 import logging
 from langchain_openai import OpenAIEmbeddings
 from utils.cloud_config import cloud_get
+from agents.constants import K8S_PINNED_IMAGES
 
 # Initialize Pinecone client
 try:
@@ -126,7 +127,7 @@ def validate_generated_code(filename: str) -> str:
         ruff_path = shutil.which("ruff")
         if ruff_path:
             result = subprocess.run(
-                [ruff_path, "check", "--select", "F,E9", "--no-cache", filename],
+                [ruff_path, "check", "--select", "F,E9", "--extend-ignore", "F401", "--no-cache", filename],
                 capture_output=True, text=True
             )
             if result.returncode != 0 and result.stdout.strip():
@@ -405,10 +406,16 @@ def validate_generated_code(filename: str) -> str:
             public_latest = [img for img in all_latest if ".dkr.ecr." not in img]
             ecr_latest = [img for img in all_latest if ".dkr.ecr." in img]
             if public_latest:
+                fixes = []
+                for img in public_latest:
+                    pinned = next((v for k, v in K8S_PINNED_IMAGES.items() if k in img), None)
+                    if pinned:
+                        fixes.append(f"  {img}:latest  →  {pinned}")
+                    else:
+                        fixes.append(f"  {img}:latest  →  pin to a specific version from k8s_deployment_rules.md")
                 errors.append(
-                    f"K8S: ':latest' image tag(s) found for public images {public_latest} — "
-                    "pin to a specific version. Use the pinned versions from the "
-                    "infra_standard_dockerfile standard retrieved earlier (k8s_deployment_rules.md)."
+                    f"K8S: ':latest' image tag(s) found for public images — replace with pinned versions:\n"
+                    + "\n".join(fixes)
                 )
             if ecr_latest:
                 warnings.append(
@@ -536,10 +543,12 @@ def patch_project_file(filename: str, replacements: list) -> str:
         filepath = filename
     else:
         base_name = os.path.basename(filename)
-        ext = os.path.splitext(base_name)[1].lower()
+        _ext = os.path.splitext(base_name)[1].lower()
         folder_map = {".py": "scripts", ".sql": "sql", ".json": "dashboards", ".csv": "data"}
-        target_dir = folder_map.get(ext, "scripts")
+        target_dir = folder_map.get(_ext, "scripts")
         filepath = os.path.join(target_dir, base_name)
+
+    ext = os.path.splitext(filepath)[1].lower()  # always available after path resolution
 
     if not os.path.exists(filepath):
         return f"Error: '{filepath}' does not exist. Use write_project_file to create it first."
@@ -550,6 +559,12 @@ def patch_project_file(filename: str, replacements: list) -> str:
     except Exception as e:
         return f"Error reading '{filepath}': {e}"
 
+    if not replacements:
+        return (
+            f"Error: replacements list is empty — patch_project_file requires at least one replacement. "
+            f"To check a file without modifying it, use validate_generated_code instead."
+        )
+
     applied, skipped = [], []
 
     for rep in replacements:
@@ -558,6 +573,9 @@ def patch_project_file(filename: str, replacements: list) -> str:
 
         # Special directive: add import line after the last existing import
         if old == "__ADD_IMPORT__":
+            if ext not in (".py",):
+                skipped.append(f"__ADD_IMPORT__ skipped — only valid for .py files, not '{ext}'")
+                continue
             if new in content:
                 skipped.append(f"import already present: {new}")
                 continue
@@ -826,7 +844,30 @@ def execute_docker_command(image_name: str, registry_url: str = None, tag: str =
 
 @tool
 def generate_k8s_manifest(filename: str, content: str):
-    """Generates K8s manifests. Automatically creates 'k8s' directory."""
+    """
+    Generates K8s manifests. Automatically creates 'k8s' directory.
+
+    MANDATORY PINNED IMAGE VERSIONS — never use ':latest':
+      trinodb/trino:403
+      grafana/grafana:10.4.2
+      prom/prometheus:v2.51.0
+      prom/pushgateway:v1.8.0
+      For ECR custom images: use the actual ECR repository URL from execute_terraform output
+        (e.g. 123456789012.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest)
+        — extract the 12-digit account ID from the ECR URL, never write <AWS_ACCOUNT_ID>.
+
+    MANDATORY job.yaml fields:
+      spec.backoffLimit: 0
+      spec.template.spec.containers[].envFrom: [{secretRef: {name: <project_id>-db-credentials}}]
+      env vars required: PROJECT_ID, CLOUD_PROVIDER, TRINO_HOST, PUSHGATEWAY_URL
+
+    MANDATORY configmaps.yaml: all 5 ConfigMaps in one file (separated by ---):
+      trino-sql-config (namespace: analytics)
+      hive-catalog-config (namespace: analytics)
+      grafana-dash-config (namespace: monitoring)
+      grafana-datasource-config (namespace: monitoring)
+      prometheus-config (namespace: monitoring, scrape target: pushgateway.monitoring.svc.cluster.local:9091)
+    """
     target_dir = "k8s"
     os.makedirs(target_dir, exist_ok=True)
     

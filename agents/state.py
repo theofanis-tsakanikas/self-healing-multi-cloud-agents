@@ -64,6 +64,11 @@ class AgentState(TypedDict):
     # exact run triggered by that push, not just the latest run in the repo.
     last_push_sha: str
 
+    # Full ECR repository URL extracted from terraform apply output.
+    # Injected into orchestration_phase_instruction so K8s/GHA generation
+    # uses the real URL instead of writing <AWS_ACCOUNT_ID> placeholders.
+    ecr_repository_url: str
+
     # Set to True by Medic when it requests a fix. Survives through the Architect step
     # so Infra knows it's in fix mode even though last_agent == "architect" by then.
     # Reset to False by Infra after completing the fix cycle.

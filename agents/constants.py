@@ -49,3 +49,13 @@ DEFAULT_REQUIRED_DATABRICKS_TF_FILES = [
 # Defined here only as documentation; do not import these — use os.getenv() in llm_factory.
 # LLM_TIMEOUT_SEC  (default: 120s)
 # LLM_MAX_RETRIES  (default: 1)
+
+# Pinned image versions for K8s manifests.
+# Single source of truth — keep in sync with knowledge_base/infrastructure/k8s_deployment_rules.md.
+# Used by: validate_generated_code (enforcement) and generate_k8s_manifest docstring (guidance).
+K8S_PINNED_IMAGES: dict[str, str] = {
+    "trinodb/trino":    "trinodb/trino:403",
+    "grafana/grafana":  "grafana/grafana:10.4.2",
+    "prom/prometheus":  "prom/prometheus:v2.51.0",
+    "prom/pushgateway": "prom/pushgateway:v1.8.0",
+}

@@ -60,6 +60,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     medic_triggered_fix = state.get("medic_fix_requested", False) or (state.get("last_agent") == "medic")
     project_id = state.get("project_id")
     collected_specs = dict(state.get("collected_specs", {}))
+    ecr_repository_url = state.get("ecr_repository_url", "")
 
     
     # 2. CONTEXT GENERATION
@@ -190,11 +191,21 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                 if k8s_ready and docker_ready and not github_ready:
                     missing_orchestration.append(".github/workflows/<project_id>_pipeline.yaml")
 
+                ecr_hint = (
+                    f"\nECR Repository URL (use this exact value, never write <AWS_ACCOUNT_ID>): {ecr_repository_url}"
+                    if ecr_repository_url else
+                    "\nECR Repository URL: not yet available — extract it from the execute_terraform output in conversation history."
+                )
                 orchestration_phase_instruction = (
                     f"CURRENT OPERATIONAL PHASE: IMPLEMENTATION — ORCHESTRATION. "
                     f"Generate ONLY these missing files: {missing_orchestration}. "
                     "Do NOT regenerate files that already exist."
-                )
+                    f"{ecr_hint}"
+                    "\n\nMANDATORY K8S POLICY (enforced by auto-validation):"
+                    "\n• job.yaml: spec.backoffLimit=0 | envFrom secretRef '{project_id}-db-credentials' | env: PROJECT_ID, CLOUD_PROVIDER, TRINO_HOST, PUSHGATEWAY_URL"
+                    "\n• configmaps.yaml: ALL 5 ConfigMaps in ONE file separated by ---: trino-sql-config (analytics), hive-catalog-config (analytics), grafana-dash-config (monitoring), grafana-datasource-config (monitoring), prometheus-config (monitoring, scrape: pushgateway.monitoring.svc.cluster.local:9091)"
+                    "\n• Pinned images: trinodb/trino:403 | grafana/grafana:10.4.2 | prom/prometheus:v2.51.0 | prom/pushgateway:v1.8.0"
+                ).format(project_id=project_id or "pipeline")
 
                 selected_keys = []
                 if not docker_ready or medic_triggered_fix:
@@ -538,6 +549,19 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                 # D. Terraform Provisioning Check
                 if t_name == "execute_terraform" and "apply complete" in result_str.lower():
                     infra_success_detected = True
+                    # Extract ECR repo URL so it's available as a concrete value
+                    # when generating K8s manifests and GHA — no <AWS_ACCOUNT_ID> placeholder needed.
+                    # Pattern is broad: matches any 12-digit.dkr.ecr.*.amazonaws.com/...
+                    # regardless of terraform output key name or quoting style.
+                    ecr_match = re.search(
+                        r'(\d{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[^\s"\'>\n]+)',
+                        result_str,
+                    )
+                    if ecr_match:
+                        ecr_repository_url = ecr_match.group(1).rstrip("/")
+                        logger.info(f"📦 ECR repo URL captured: {ecr_repository_url}")
+                    else:
+                        logger.warning("⚠️ ECR repo URL not found in terraform output — LLM will need to extract it manually.")
 
             except Exception as e:
                 logger.error(f"Tool {t_name} execution error: {e}")
@@ -556,6 +580,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         "written_files": updated_files,
         "collected_specs": collected_specs,
         "infra_provisioned": infra_success_detected,
+        "ecr_repository_url": ecr_repository_url,
         "github_done": github_success,
         "last_push_sha": last_push_sha,
         "infra_status": "completed" if github_success else "pending",
