@@ -48,11 +48,16 @@ The following structured context defines your mission. You must strictly adhere 
 - Map the **capability items** found under `TRANSFORMATION_LOGIC` in the provided Context to the discovered columns based on the `target_criteria`.
 - **Constraint:** Do not hardcode column names unless they are explicitly discovered via the tool.
 - Develop a transformation plan that handles PII masking, casing, and uniqueness as defined in the standards.
-- **MANDATORY:** Every item in `TRANSFORMATION_LOGIC` MUST be implemented as explicit pandas DataFrame operations before any write. No rule may appear only as a comment — it must be real, executable code. Each item has a `target_criteria` and an `on_failure_action`: use `target_criteria` to identify the correct column from the discovered schema, and translate `on_failure_action` to pandas code using the **Business Rule Translation Standard** retrieved from the knowledge base.
+- **MANDATORY:** Every item in `TRANSFORMATION_LOGIC` MUST be implemented as explicit pandas DataFrame operations before any write. No rule may appear only as a comment — it must be real, executable code. Each item has a `target_criteria` and an `on_failure_action`. Use `target_criteria` to identify the correct column from the discovered schema, then translate `on_failure_action` using this exact mapping (no exceptions):
+  - `DROP_RECORD` → `chunk = chunk[condition]`
+  - `EXCLUDE_AND_LOG` → `excluded = chunk[~condition]` + `logging.warning(f"Excluded {len(excluded)} rows: <reason>.")` + `chunk = chunk[condition]`
+  - `DEFAULT_VALUE` → `chunk[col] = chunk[col].where(condition, other=<default>)`
+  - `FLAG_AS_SUSPICIOUS` → `chunk['is_suspicious'] = ~condition` — DO NOT filter rows after flagging, keep all rows. If multiple FLAG_AS_SUSPICIOUS rules exist, combine with `|`: `chunk['is_suspicious'] = ~condition_a | ~condition_b`
+  - **`chunk['is_suspicious'] = False` is a COMPLIANCE VIOLATION** — it is a placeholder, never an implementation.
 
 ### 4. UNIVERSAL CODE GENERATION (PYTHON)
 Generate a Python script (`scripts/*.py`) with the following requirements:
-- **Connectivity:** Use `SQLAlchemy` engines. Fetch credentials ONLY via `os.getenv()`.
+- **Connectivity:** Use `SQLAlchemy` engines. Fetch credentials ONLY via `cloud_get()` from `utils.cloud_config` — `os.getenv()` is FORBIDDEN for host/user/password/db (bypasses SSM, returns None in production). Use canonical keys: `db_host`, `db_port`, `db_user`, `db_password`, `db_name` with `db_type` set to the actual engine.
 - **Agnostic Storage:** Read `LOGICAL_DESTINATION.uri` from the context above (e.g. `s3://bucket/processed/`). Write each chunk to a **Hive-style date partition** using this exact pattern:
 ```python
 run_date = datetime.date.today().isoformat()          # "2026-05-05"
