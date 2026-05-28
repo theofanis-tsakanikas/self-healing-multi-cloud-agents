@@ -469,6 +469,91 @@ def write_project_file(filename: str, content: str):
         return f"Error writing file: {str(e)}"
 
 @tool
+def patch_project_file(filename: str, replacements: list) -> str:
+    """
+    Applies targeted find-and-replace edits to an existing file WITHOUT rewriting it.
+    Use this in fix mode to apply surgical changes (e.g. os.getenv → cloud_get)
+    while preserving all other code exactly as-is.
+
+    Each item in `replacements` must be a dict with:
+      - "old": the exact string to find (must be unique in the file)
+      - "new": the string to replace it with
+
+    Also handles adding a missing import line at the top of the file:
+      {"old": "__ADD_IMPORT__", "new": "from utils.cloud_config import cloud_get"}
+
+    Returns: summary of applied/skipped replacements, or an error message.
+    """
+    # Resolve path the same way write_project_file does
+    has_custom_path = os.path.dirname(filename) != ""
+    if has_custom_path:
+        filepath = filename
+    else:
+        base_name = os.path.basename(filename)
+        ext = os.path.splitext(base_name)[1].lower()
+        folder_map = {".py": "scripts", ".sql": "sql", ".json": "dashboards", ".csv": "data"}
+        target_dir = folder_map.get(ext, "scripts")
+        filepath = os.path.join(target_dir, base_name)
+
+    if not os.path.exists(filepath):
+        return f"Error: '{filepath}' does not exist. Use write_project_file to create it first."
+
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return f"Error reading '{filepath}': {e}"
+
+    applied, skipped = [], []
+
+    for rep in replacements:
+        old = rep.get("old", "")
+        new = rep.get("new", "")
+
+        # Special directive: add import line after the last existing import
+        if old == "__ADD_IMPORT__":
+            if new in content:
+                skipped.append(f"import already present: {new}")
+                continue
+            # Insert after the last 'import' line
+            lines = content.splitlines(keepends=True)
+            last_import_idx = -1
+            for i, line in enumerate(lines):
+                if line.startswith("import ") or line.startswith("from "):
+                    last_import_idx = i
+            if last_import_idx >= 0:
+                lines.insert(last_import_idx + 1, new + "\n")
+                content = "".join(lines)
+                applied.append(f"added import: {new}")
+            else:
+                content = new + "\n" + content
+                applied.append(f"prepended import: {new}")
+            continue
+
+        if old not in content:
+            skipped.append(f"not found: {repr(old[:60])}")
+            continue
+
+        count = content.count(old)
+        content = content.replace(old, new, 1)
+        applied.append(f"replaced ({count}x): {repr(old[:60])}")
+
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+    except Exception as e:
+        return f"Error writing '{filepath}': {e}"
+
+    lines_applied  = "\n  ".join(applied)  if applied  else "(none)"
+    lines_skipped  = "\n  ".join(skipped)  if skipped  else "(none)"
+    return (
+        f"PATCH APPLIED to '{filepath}'.\n"
+        f"Applied:\n  {lines_applied}\n"
+        f"Skipped:\n  {lines_skipped}"
+    )
+
+
+@tool
 def read_data_schema(table_name: str, db_type: str = "postgres"):
     """
     Connects to the database and returns the table schema and a sample of rows.

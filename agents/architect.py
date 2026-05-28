@@ -19,7 +19,7 @@ from utils.prompt_utils import format_prompt
 from utils.file_utils import read_file
 from utils.message_utils import safe_recent_messages
 from utils.config_utils import build_architect_context
-from agents.tools import read_data_schema, write_project_file, query_vector_store, validate_generated_code
+from agents.tools import read_data_schema, write_project_file, patch_project_file, query_vector_store, validate_generated_code
 
 # Logger configuration
 logging.basicConfig(
@@ -135,6 +135,7 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     full_tools_map = {
         "read_data_schema": read_data_schema,
         "write_project_file": write_project_file,
+        "patch_project_file": patch_project_file,
         "query_vector_store": query_vector_store,
         "validate_generated_code": validate_generated_code,
     }
@@ -156,14 +157,20 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
             phase_instruction = "CURRENT PHASE: FIX MODE — SCHEMA. Schema not yet read, retrieve it before writing."
         else:
             # healing_context is in the system prompt — no need to re-query the KB.
-            # query_vector_store is removed to prevent the LLM from running a full
-            # re-discovery cycle (3 calls) instead of applying the ready-made fix.
-            allowed_tool_names = ["write_project_file"]
+            # Use patch_project_file (surgical find-and-replace) instead of
+            # write_project_file (full rewrite) so only the specified lines change
+            # and the rest of the file is preserved exactly as-is.
+            allowed_tool_names = ["patch_project_file"]
             phase_instruction = (
                 "CURRENT PHASE: FIX MODE. "
                 "The exact fix instructions are in the MANDATORY FIX section of your system prompt above. "
-                "Call write_project_file to rewrite ONLY the affected file, applying the fix exactly as described. "
-                "Do NOT query the knowledge base — the Medic already did that research and the solution is in your system prompt."
+                "Use patch_project_file to apply ONLY the listed replacements to the affected file. "
+                "Do NOT rewrite the whole file — patch_project_file makes surgical changes "
+                "so every other line is preserved exactly. "
+                "For each os.getenv() → cloud_get() replacement, add one entry in the replacements list. "
+                "Also add {\"old\": \"__ADD_IMPORT__\", \"new\": \"from utils.cloud_config import cloud_get\"} "
+                "as the first replacement if the import is missing. "
+                "Do NOT query the knowledge base."
             )
         logger.info(f"🔧 GATE: Fix mode. Tools: {allowed_tool_names}")
     elif not has_all_standards:
@@ -392,6 +399,34 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                                 else:
                                     logger.info(f"✅ AUTO-VALIDATION PASSED: {actual_path}")
                                     result = f"{result}\nAUTO-VALIDATION: CLEAN ✓"
+
+                    # Logic for Surgical Patching (Fix Mode)
+                    elif tool_name == "patch_project_file":
+                        filename = tool_args.get("filename", "")
+                        if not _is_architect_allowed_file(filename):
+                            result = f"Policy Error: Architect is not permitted to modify '{filename}'."
+                            any_tool_error = True
+                        else:
+                            result = tool_func.invoke(tool_args)
+                            all_skipped_this_iter = False
+                            # Auto-validate the patched file
+                            if "Error" not in result:
+                                import re as _re
+                                # Resolve the actual filepath from the tool result
+                                path_match = _re.search(r"PATCH APPLIED to '(.+?)'", result)
+                                actual_path = path_match.group(1).strip() if path_match else filename
+                                validation_result = str(
+                                    validate_generated_code.invoke(
+                                        {"filename": actual_path}, config=config
+                                    )
+                                )
+                                if "VALIDATION FAILED" in validation_result:
+                                    any_tool_error = True
+                                    logger.warning(f"⚠️ AUTO-VALIDATION FAILED after patch: {actual_path}")
+                                    result += f"\n\nAUTO-VALIDATION FAILED:\n{validation_result}"
+                                else:
+                                    logger.info(f"✅ AUTO-VALIDATION PASSED after patch: {actual_path}")
+                                    result += "\nAUTO-VALIDATION: CLEAN ✓"
 
                     # Logic for Schema Reading (Phase 2)
                     elif tool_name == "read_data_schema":
