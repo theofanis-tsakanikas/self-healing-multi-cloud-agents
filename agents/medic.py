@@ -139,7 +139,10 @@ def medic_node(state: AgentState):
                     payload = json.loads(result_str)
                     diagnosis    = payload.get("diagnosis", "")
                     instructions = payload.get("healing_instructions", "")
-                    healing_context = "\n".join(filter(None, [diagnosis, instructions]))
+                    new_chunk = "\n".join(filter(None, [diagnosis, instructions]))
+                    # Accumulate — do not overwrite. Multiple request_fix calls in one
+                    # turn must all reach the target agent, not just the last one.
+                    healing_context = "\n\n---\n\n".join(filter(None, [healing_context, new_chunk]))
                 except (json.JSONDecodeError, AttributeError):
                     pass
 

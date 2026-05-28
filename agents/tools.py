@@ -199,6 +199,16 @@ def validate_generated_code(filename: str) -> str:
                 "cloud_get() reads SSM → .bootstrap_outputs.json → env fallback (production-safe)."
             )
 
+        # storage_options={} is required for every to_parquet() call that writes to
+        # cloud storage (s3://, gs://, abfss://). Omitting it causes TypeError at
+        # runtime — pyarrow falls back to local filesystem and rejects the URI scheme.
+        if "to_parquet(" in py_content and "storage_options" not in py_content:
+            errors.append(
+                "STORAGE: to_parquet() call found but storage_options={} is missing — "
+                "add storage_options={} to every to_parquet() call. "
+                "Without it, pyarrow cannot write to s3://, gs://, or abfss:// URIs."
+            )
+
     # ── JSON (Grafana dashboard) ──────────────────────────────────────────────
     elif ext == ".json":
         try:
@@ -247,11 +257,11 @@ def validate_generated_code(filename: str) -> str:
         # Cloud-specific filesystem driver for to_parquet() — omitting causes silent S3/GCS/ADLS failures.
         content_lower = " ".join(lines).lower()
         if "boto3" in content_lower and "s3fs" not in content_lower:
-            errors.append("REQUIREMENTS: boto3 present but s3fs missing — s3fs is required for to_parquet() to write directly to s3:// URIs.")
+            errors.append("REQUIREMENTS: boto3 present but s3fs missing — add 's3fs' to requirements.txt (repo root, not scripts/).")
         if "google-cloud-storage" in content_lower and "gcsfs" not in content_lower:
-            errors.append("REQUIREMENTS: google-cloud-storage present but gcsfs missing — gcsfs is required for to_parquet() to write directly to gs:// URIs.")
+            errors.append("REQUIREMENTS: google-cloud-storage present but gcsfs missing — add 'gcsfs' to requirements.txt (repo root, not scripts/).")
         if "azure-storage-blob" in content_lower and "adlfs" not in content_lower:
-            errors.append("REQUIREMENTS: azure-storage-blob present but adlfs missing — adlfs is required for to_parquet() to write directly to abfss:// URIs.")
+            errors.append("REQUIREMENTS: azure-storage-blob present but adlfs missing — add 'adlfs' to requirements.txt (repo root, not scripts/).")
 
     # ── Dockerfile ───────────────────────────────────────────────────────────
     # hadolint covers: base image tag, COPY . ., non-root user, pip flags, layer hygiene.

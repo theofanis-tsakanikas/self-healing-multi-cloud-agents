@@ -4,6 +4,47 @@ After writing any `.py` file, you MUST call `validate_generated_code` on it — 
 
 ---
 
+## CRITICAL RULES — read these BEFORE writing any code
+
+These violations cause immediate runtime failure. No exceptions.
+
+### Credentials
+- `cloud_get()` is MANDATORY for all DB credentials. `os.getenv()` is FORBIDDEN for host/user/password/db — it bypasses SSM and returns None in production.
+- Import: `from utils.cloud_config import cloud_get` — place after standard library imports, before cloud SDK block.
+- Connection strings MUST use double-quoted outer f-strings to avoid `SyntaxError: f-string: unmatched '('`.
+
+### Storage
+- `storage_options={}` is MANDATORY in every `to_parquet()` call — omitting it causes `TypeError` on cloud storage writes (s3://, gs://, abfss://).
+- `run_date` MUST NOT be added as a DataFrame column — it is a Hive partition key derived from the path.
+- Partition path format is always `run_date=YYYY-MM-DD/` — any other format breaks Trino partition discovery.
+
+### Error Handling
+- `create_engine` AND the extraction loop MUST be in the **SAME** `try` block.
+```python
+# ❌ WRONG — engine unprotected:
+engine = create_engine(connection_string)
+try:
+    for i, chunk in enumerate(...):
+
+# ✅ CORRECT — both protected:
+try:
+    engine = create_engine(connection_string)
+    for i, chunk in enumerate(...):
+```
+
+### Business Rules
+- Every `quality_standards` entry from the pipeline config MUST be translated to real pandas code.
+- **`chunk['is_suspicious'] = False` is a COMPLIANCE VIOLATION** — it is a placeholder, not an implementation.
+- `FLAG_AS_SUSPICIOUS` sets `chunk['is_suspicious'] = ~condition`. Do NOT add a filter after — suspicious rows must be retained.
+
+### Type Casting
+- Cast `float64` → `Int64` for quantity/count columns before every `to_parquet()` call — pandas defaults NULLable integers to float64, causing Trino to read `double` instead of `BIGINT`.
+
+### Cloud SDK
+- The cloud storage SDK (`boto3` / `gcs` / `BlobServiceClient`) MUST be used inside `if _CLOUD == "..."` guards — never called unconditionally after a conditional import.
+
+---
+
 ## MANDATORY SCRIPT STRUCTURE
 Every pipeline script MUST follow this exact skeleton. This is the authoritative execution order — do not reorder steps:
 
@@ -173,44 +214,6 @@ if __name__ == "__main__":
 
 ---
 
-## CRITICAL RULES — violations cause immediate runtime failure
-
-### Credentials
-- `cloud_get()` is MANDATORY for all DB credentials. `os.getenv()` is FORBIDDEN for host/user/password/db — it bypasses SSM and returns None in production.
-- Connection strings MUST use double-quoted outer f-strings to avoid `SyntaxError: f-string: unmatched '('`.
-
-### Error Handling
-- `create_engine` AND the extraction loop MUST be in the **SAME** `try` block.
-```python
-# ❌ WRONG — engine unprotected:
-engine = create_engine(connection_string)
-try:
-    for i, chunk in enumerate(...):
-
-# ✅ CORRECT — both protected:
-try:
-    engine = create_engine(connection_string)
-    for i, chunk in enumerate(...):
-```
-
-### Business Rules
-- Every `quality_standards` entry from the pipeline config MUST be translated to real pandas code.
-- **`chunk['is_suspicious'] = False` is a COMPLIANCE VIOLATION** — it is a placeholder, not an implementation.
-- `FLAG_AS_SUSPICIOUS` sets `chunk['is_suspicious'] = ~condition`. Do NOT add a filter after — suspicious rows must be retained.
-
-### Storage
-- `storage_options={}` is MANDATORY in every `to_parquet()` call — omitting it causes `TypeError` on cloud storage writes.
-- `run_date` MUST NOT be added as a DataFrame column — it is a Hive partition key derived from the S3/GCS/ABFS path.
-- Partition path format is always `run_date=YYYY-MM-DD/` — any other format breaks Trino partition discovery.
-
-### Type Casting
-- Cast `float64` → `Int64` for quantity/count columns before every `to_parquet()` call — pandas defaults NULLable integers to float64, causing Trino to read `double` instead of `BIGINT`.
-
-### Cloud SDK
-- The cloud storage SDK (`boto3` / `gcs` / `BlobServiceClient`) MUST be used inside `if _CLOUD == "..."` guards — never called unconditionally after a conditional import.
-
----
-
 ## Storage URI by Cloud
 | Cloud | Protocol | Example |
 |---|---|---|
@@ -226,6 +229,9 @@ Hidden runtime dependencies (never imported directly):
 ---
 
 ## Requirements Standard
+
+**File location:** `requirements.txt` at the **repository root** — never inside `scripts/` or any subdirectory.
+
 ```
 pandas
 sqlalchemy
@@ -237,3 +243,5 @@ prometheus-client
 # Azure: azure-storage-blob, adlfs, pyodbc
 ```
 `trino` is always required. Include only the packages for the active cloud provider.
+
+The filesystem driver (`s3fs` / `gcsfs` / `adlfs`) is **mandatory** — `to_parquet()` cannot write to cloud storage URIs without it.

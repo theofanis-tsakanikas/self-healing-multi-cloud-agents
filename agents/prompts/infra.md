@@ -41,19 +41,35 @@ The following structured context defines your infrastructure mission. All resour
 ### 3. CONTAINERIZATION & ORCHESTRATION
 - **Dockerfile:** Build a `python:3.11-slim` image following the dockerfile standard.
     - **MANDATORY:** After generating the Dockerfile, immediately call `validate_generated_code` on it. Fix any errors before proceeding.
-- **K8s Manifest Stack:** Generate in `/k8s`. **After each manifest, immediately call `validate_generated_code` on it — do not proceed to the next file if validation fails:**
-    - `00_namespaces.yaml` — two namespaces (analytics, monitoring) + cloud-specific ServiceAccount:
-        - AWS IRSA: `eks.amazonaws.com/role-arn` annotation
-        - Azure Workload Identity: `azure.workload.identity/client-id` annotation + `azure.workload.identity/use: "true"` label
-        - GCP Workload Identity: `iam.gke.io/gcp-service-account` annotation
-    - `trino_deployment.yaml` — with catalog ConfigMap matching cloud storage connector
-    - `grafana_deployment.yaml`
-    - `prometheus_deployment.yaml` (Prometheus + Pushgateway)
-    - `configmaps.yaml` — five ConfigMaps including cloud-specific Trino catalog config:
-        - AWS: `hive.metastore=glue`, `hive.s3.region=<region>`
-        - Azure: `hive.metastore=file`, `hive.azure-adls-gen2.oauth2.client-id=<managed_identity_client_id>`
-        - GCP: `hive.metastore=file`, `hive.gcs.use-access-token=false`
-    - `job.yaml` — with initContainer for Trino DDL setup
+- **K8s Manifest Stack:** Generate in `/k8s`. **After each manifest, immediately call `validate_generated_code` on it — do not proceed to the next file if validation fails.**
+
+  **MANDATORY object counts — every file must contain EXACTLY these objects (separated by `---`):**
+
+  | File | Objects | Notes |
+  |---|---|---|
+  | `00_namespaces.yaml` | 3 | analytics Namespace + monitoring Namespace + ServiceAccount |
+  | `trino_deployment.yaml` | **2** | Deployment + **ClusterIP Service named `trino`** in analytics namespace |
+  | `grafana_deployment.yaml` | **2** | Deployment + **LoadBalancer Service** (cloud annotation below) in monitoring namespace |
+  | `prometheus_deployment.yaml` | **4** | Prometheus Deployment + Prometheus ClusterIP Service + Pushgateway Deployment + Pushgateway ClusterIP Service — all in monitoring namespace |
+  | `configmaps.yaml` | 5 | trino-sql-config, hive-catalog-config, grafana-dash-config, grafana-datasource-config, prometheus-config |
+  | `job.yaml` | 1 | Job with initContainers (init-trino) + containers (pipeline) |
+
+  **Cloud-specific ServiceAccount annotation (`00_namespaces.yaml`):**
+  - AWS IRSA: `eks.amazonaws.com/role-arn: <role_arn>`
+  - Azure Workload Identity: `azure.workload.identity/client-id: <client_id>` + label `azure.workload.identity/use: "true"`
+  - GCP Workload Identity: `iam.gke.io/gcp-service-account: <gsa_email>`
+
+  **Cloud-specific Grafana LoadBalancer Service annotation:**
+  - AWS: `service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing`
+  - Azure: `service.beta.kubernetes.io/azure-load-balancer-internal: "false"`
+  - GCP: no annotation needed — use `type: LoadBalancer`
+
+  **`configmaps.yaml` critical rules:**
+  - `hive-catalog-config` data key MUST be `hive.properties` — NEVER `catalog.properties` or any other name. Trino mounts `/etc/trino/catalog/hive.properties`.
+  - Cloud-specific hive content:
+    - AWS: `hive.metastore=glue`, `hive.s3.region=<region>`
+    - Azure: `hive.metastore=file`, `hive.azure-adls-gen2.oauth2.client-id=<managed_identity_client_id>`
+    - GCP: `hive.metastore=file`, `hive.gcs.use-access-token=false`
 
 ### 4. CI/CD WORKFLOW (GITHUB ACTIONS)
 - **MANDATORY:** After calling `generate_github_action`, immediately call `validate_generated_code` on the generated file path (`.github/workflows/{{project_id}}_pipeline.yml`). If it reports unresolved placeholders (e.g. `<AWS_ACCOUNT_ID>`), rewrite the workflow with the actual values from context before proceeding to `push_to_github`.
