@@ -237,7 +237,10 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     # in the same turn — without it the fix is never deployed.
     if medic_triggered_fix:
         has_healing = bool(state.get("healing_context", "").strip())
-        if not has_healing and "query_vector_store" not in selected_keys:
+        # Skip query_vector_store when fix came through architect: architect already
+        # applied the patch and cleared healing_context — no KB re-lookup needed.
+        coming_from_architect = state.get("last_agent") == "architect"
+        if not has_healing and not coming_from_architect and "query_vector_store" not in selected_keys:
             # Fallback: no healing_context (edge case) — allow KB lookup as before
             selected_keys.append("query_vector_store")
             logger.info("🔧 MEDIC BYPASS: No healing_context — re-enabling query_vector_store as fallback.")

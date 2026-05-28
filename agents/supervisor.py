@@ -93,7 +93,14 @@ def supervisor_node(state: AgentState):
             logger.warning("Architect explicit error flag set. Routing to MEDIC.")
             return {"next_step": "medic", "agent_error": False}
 
-        # Fallback check: keyword scan on last 5 messages
+        # Status check before keyword scan: if architect explicitly set "completed",
+        # trust that signal. Keyword scan sees stale medic error messages in last 5
+        # and produces false positives that override a legitimate completion.
+        if arch_status == "completed":
+            logger.info("Architect phase COMPLETED. Routing to INFRA.")
+            return {"next_step": "infra"}
+
+        # Fallback check: keyword scan only when status is still pending
         arch_errors = [
             "failed", "error", "exception", "syntaxerror",
             "importerror", "typeerror", "keyerror", "traceback",
@@ -103,12 +110,8 @@ def supervisor_node(state: AgentState):
             logger.warning("Architect failure detected via keyword scan. Routing to MEDIC.")
             return {"next_step": "medic"}
 
-        if arch_status == "completed":
-            logger.info("Architect phase COMPLETED. Routing to INFRA.")
-            return {"next_step": "infra"}
-        else:
-            logger.info("Architect phase PENDING. Returning to ARCHITECT.")
-            return {"next_step": "architect"}
+        logger.info("Architect phase PENDING. Returning to ARCHITECT.")
+        return {"next_step": "architect"}
 
     # RULE B: Infrastructure & Deployment Flow
     if last_step == "infra":

@@ -512,9 +512,10 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
         "last_agent": "architect",
         "agent_error": any_tool_error,
         "healing_context": "",  # One-shot: clear after use so it doesn't leak into future turns
-        # Clear medic_fix_requested when Architect completes its fix cycle.
-        # If left True, Infra incorrectly enters fix mode even though the fix
-        # was handled by the Architect — causing Gate 3 to add query_vector_store
-        # and fix-mode prompts to fire on every Infra invocation.
-        "medic_fix_requested": False if status == "completed" else state.get("medic_fix_requested", False),
+        # Scenario A (github_done=False): infra hasn't run yet — clear the flag so infra
+        # starts from scratch, not in fix mode.
+        # Scenario B (github_done=True): infra already pushed — keep True so line 178 in
+        # infra detects (fix_requested AND github_done) and routes to push_to_github only.
+        # Infra clears medic_fix_requested after a successful push.
+        "medic_fix_requested": state.get("medic_fix_requested", False) and state.get("github_done", False),
     }
