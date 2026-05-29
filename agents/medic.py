@@ -84,6 +84,25 @@ def medic_node(state: AgentState):
         system_prompt = "Diagnostic mode active. Analyze CI/CD logs."
 
     # 2. CONTEXT PREPARATION
+    # Inject standards already loaded by architect/infra into the system prompt so the LLM
+    # can reference them directly — avoids redundant query_vector_store calls for standards
+    # that are already in state. dynamic-experience (past fixes) is never pre-loaded, so
+    # query_vector_store remains available and useful for that namespace.
+    collected_specs = state.get("collected_specs", {})
+    if collected_specs:
+        available_keys = list(collected_specs.keys())
+        specs_block = "\n\n**ENGINEERING STANDARDS ALREADY LOADED IN STATE — do NOT re-query these via query_vector_store:**\n"
+        for key in available_keys:
+            content = collected_specs.get(key, "")
+            if content:
+                specs_block += f"\n### {key}\n{content}\n"
+        specs_block += (
+            "\nUse the above standards directly when diagnosing errors. "
+            "Only call query_vector_store for the 'dynamic-experience' namespace "
+            "(past successful fixes for similar errors)."
+        )
+        system_prompt += specs_block
+
     # We include more history for Medic to see the previous Infra logic
     messages = [{"role": "system", "content": system_prompt}] + safe_recent_messages(state["messages"], limit=10)
     

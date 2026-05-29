@@ -267,9 +267,11 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             # Fallback: no healing_context (edge case) — allow KB lookup as before
             selected_keys.append("query_vector_store")
             logger.info("🔧 MEDIC BYPASS: No healing_context — re-enabling query_vector_store as fallback.")
+        if "patch_project_file" not in selected_keys:
+            selected_keys.append("patch_project_file")
         if "push_to_github" not in selected_keys:
             selected_keys.append("push_to_github")
-        logger.info("🔧 MEDIC BYPASS: push_to_github enabled for fix cycle.")
+        logger.info("🔧 MEDIC BYPASS: patch_project_file + push_to_github enabled for fix cycle.")
 
     # 5. EARLY EXIT GATE
     # If all files exist, all actions are done, and standards are met, signal completion.

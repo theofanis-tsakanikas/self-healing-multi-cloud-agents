@@ -606,6 +606,14 @@ def validate_generated_code(filename: str) -> str:
                         "See k8s_deployment_rules.md Section 8.4 for the correct config: "
                         "hive.metastore=glue, hive.metastore.glue.region=<region>."
                     )
+                # connector.name=hive is the first mandatory line — without it Trino ignores the file.
+                if "hive-catalog-config" in raw and "hive.properties" in raw and "connector.name=hive" not in raw:
+                    errors.append(
+                        "K8S configmaps.yaml [project policy]: hive-catalog-config is missing 'connector.name=hive' — "
+                        "this is the first required property in hive.properties. "
+                        "Without it Trino does not recognize the file as a Hive connector config. "
+                        "See k8s_deployment_rules.md Section 8.4 for the full required property set."
+                    )
 
             elif fname in ("trino_deployment.yaml", "grafana_deployment.yaml", "prometheus_deployment.yaml"):
                 # Every deployment file must contain at least one Service — without it the pods are unreachable.
@@ -644,8 +652,10 @@ def validate_generated_code(filename: str) -> str:
                     if "hive-catalog-config" not in raw:
                         errors.append(
                             "K8S trino_deployment.yaml [project policy]: missing hive-catalog-config volumeMount — "
-                            "must be mounted at /etc/trino/catalog so Trino loads the Hive connector. "
-                            "Without it Trino starts but cannot resolve hive.* catalog queries."
+                            "mount hive-catalog-config at mountPath: /etc/trino/catalog (NOT /etc/trino). "
+                            "trino-sql-config is a different ConfigMap — it mounts at /scripts for init-trino SQL scripts. "
+                            "Two separate volumes are required: hive-catalog at /etc/trino/catalog, sql-scripts at /scripts. "
+                            "See k8s_deployment_rules.md Section 3.1 skeleton."
                         )
 
                 if fname == "grafana_deployment.yaml":
@@ -672,6 +682,16 @@ def validate_generated_code(filename: str) -> str:
                             "K8S prometheus_deployment.yaml [project policy]: missing "
                             "'--config.file=/etc/prometheus/prometheus.yml' arg — "
                             "Prometheus ignores the mounted config without this flag."
+                        )
+                    # Pushgateway must be a separate Deployment, not a sidecar inside the Prometheus pod.
+                    # Detect: pushgateway image appears in the first YAML document (Prometheus Deployment).
+                    first_doc = raw.split("---")[0]
+                    if "pushgateway" in first_doc.lower():
+                        errors.append(
+                            "K8S prometheus_deployment.yaml [project policy]: Pushgateway is a sidecar "
+                            "inside the Prometheus Deployment — it must be a separate Deployment. "
+                            "The file must contain 4 objects: Prometheus Deployment + ClusterIP Service "
+                            "+ Pushgateway Deployment + Pushgateway ClusterIP Service (separated by ---)."
                         )
 
     else:

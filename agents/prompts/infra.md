@@ -78,6 +78,12 @@ The following structured context defines your infrastructure mission. All resour
 
   **Deployment skeletons are non-negotiable:** Copy `volumeMounts` + `volumes` from `infra_standard_k8s` exactly for every Deployment — Trino, Grafana, and Prometheus each require specific ConfigMap mounts to function. A Deployment generated without its volume mounts starts but silently ignores its configuration.
 
+  **Trino volume mapping (two distinct volumes, two distinct purposes):**
+  - `hive-catalog-config` → `mountPath: /etc/trino/catalog` — Hive connector configuration. NEVER mount at `/etc/trino` (overwrites all of Trino's built-in config).
+  - `trino-sql-config` → `mountPath: /scripts` — SQL DDL scripts for `init-trino`. These are two different ConfigMaps with two different mount points.
+
+  **Prometheus: Pushgateway is a separate Deployment** — NEVER a sidecar container inside the Prometheus pod. `prometheus_deployment.yaml` MUST contain 4 separate objects: Prometheus Deployment + ClusterIP Service + Pushgateway Deployment + Pushgateway ClusterIP Service.
+
 ### 4. CI/CD WORKFLOW (GITHUB ACTIONS)
 - **MANDATORY:** After calling `generate_github_action`, immediately call `validate_generated_code` on the generated file path (`.github/workflows/{{project_id}}_pipeline.yml`). If it reports unresolved placeholders (e.g. `<AWS_ACCOUNT_ID>`), rewrite the workflow with the actual values from context before proceeding to `push_to_github`.
 - **File Location:** `/.github/workflows/{{project_id}}_pipeline.yml`
