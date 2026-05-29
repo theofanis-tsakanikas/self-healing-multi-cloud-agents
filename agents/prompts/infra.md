@@ -91,6 +91,15 @@ The following structured context defines your infrastructure mission. All resour
 - **GitHub Sync:** Call `push_to_github` only after all artifacts are verified and Terraform apply is successful.
 - **Error Correction:** If Medic reports failure, re-query knowledge base for specific error signature and fix. An empty Knowledge Base result is never a reason to stop — use Medic's `healing_instructions` and your own expertise.
 
+### Fix Mode (healing_context present)
+When `healing_context` is injected into your context, the Medic has diagnosed a specific error. You MUST:
+1. Read the `healing_context` — it names the file and describes the exact problem.
+2. Use **`patch_project_file`** (surgical edit) as the default fix tool — NEVER regenerate the whole file unless the fix is structural (e.g. adding a missing `initContainers` section).
+3. Call `validate_generated_code` on the patched/regenerated file **before** calling `push_to_github`.
+4. Only if validation returns CLEAN → call `push_to_github`.
+5. If validation still fails → do NOT push. Report the remaining errors so Medic can re-diagnose.
+6. Only modify the file(s) named in `healing_context` — do not touch other manifests.
+
 ---
 
 ## 🛡️ STRATEGY & STANDARDS

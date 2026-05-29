@@ -16,7 +16,7 @@ from utils.config_utils import build_infra_context, build_databricks_infra_conte
 from agents.tools import (
     write_terraform_config, execute_terraform, generate_dockerfile,
     generate_k8s_manifest, generate_github_action, push_to_github, query_vector_store,
-    validate_generated_code, REPO_ROOT
+    validate_generated_code, patch_project_file, REPO_ROOT
 )
 
 from agents.constants import (
@@ -107,6 +107,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         "push_to_github": push_to_github,
         "query_vector_store": query_vector_store,
         "validate_generated_code": validate_generated_code,
+        "patch_project_file": patch_project_file,
     }
 
     # 4. PHASE-GATE LOGIC (PROGRESSIVE TOOL LOCKING)
@@ -188,11 +189,17 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             docker_ready = any(f.lower().endswith("dockerfile") for f in written_files)
             github_ready = any(".github/workflows" in f.lower() for f in written_files)
 
-            # If the Architect handled the fix (medic_fix_requested=True), skip regeneration —
-            # the Architect already wrote the fix file, Infra just needs to push it.
-            # Direct Medic→Infra fixes (last_agent=="medic") still go through file generation.
+            # Scenario B: medic_fix_requested + github_done=True.
+            # Two sub-cases:
+            #   B1 (healing_context empty): architect consumed it → fix already applied, just push.
+            #   B2 (healing_context present): infra itself must fix first, THEN push.
+            #      Use patch_project_file (surgical) for targeted edits; generate_k8s_manifest
+            #      as fallback for structural rewrites. Never push before validation passes.
             if state.get("medic_fix_requested", False) and state.get("github_done", False):
-                selected_keys = ["push_to_github"]
+                if state.get("healing_context", "").strip():
+                    selected_keys = ["patch_project_file", "generate_k8s_manifest", "push_to_github"]
+                else:
+                    selected_keys = ["push_to_github"]
 
             elif not (k8s_ready and docker_ready and github_ready) or medic_triggered_fix:
                 # Compute exactly which files are missing so the LLM doesn't regenerate
@@ -426,14 +433,34 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                     new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
                     logger.info("⏭️ Skipping duplicate push_to_github call.")
                     continue
-                elif t_name in ("generate_dockerfile", "generate_k8s_manifest", "generate_github_action") and not medic_triggered_fix:
+                elif t_name == "generate_k8s_manifest":
+                    raw = os.path.basename(t_args.get("filename", ""))
+                    clean = raw.replace(".yaml", "").replace(".yml", "")
+                    tracked = f"k8s/{clean}.yaml"
+                    already_exists = tracked.lower() in {f.lower() for f in updated_files}
+                    if already_exists:
+                        if medic_triggered_fix:
+                            # Fix mode: only regenerate the file explicitly named in healing_context.
+                            # Prevents full K8s stack rewrites when only one manifest is broken.
+                            filename_base = Path(raw).name.lower()
+                            is_fix_target = filename_base in healing_context.lower()
+                            if not is_fix_target:
+                                result = (
+                                    f"Skipped: '{tracked}' is not the fix target. "
+                                    "Only files named in healing_context may be regenerated in fix mode."
+                                )
+                                new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
+                                logger.info(f"⏭️ Fix mode: skipping '{tracked}' — not in healing_context.")
+                                continue
+                        else:
+                            result = f"Skipped: '{tracked}' already exists."
+                            new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
+                            logger.info(f"⏭️ Skipping existing K8s manifest: {tracked}")
+                            continue
+
+                elif t_name in ("generate_dockerfile", "generate_github_action") and not medic_triggered_fix:
                     if t_name == "generate_dockerfile":
                         already_exists = any(f.lower().endswith("dockerfile") for f in updated_files)
-                    elif t_name == "generate_k8s_manifest":
-                        raw = os.path.basename(t_args.get("filename", ""))
-                        clean = raw.replace(".yaml", "").replace(".yml", "")
-                        tracked = f"k8s/{clean}.yaml"
-                        already_exists = tracked.lower() in {f.lower() for f in updated_files}
                     else:  # generate_github_action
                         already_exists = any(".github/workflows" in f.lower() for f in updated_files)
                     if already_exists:
@@ -441,6 +468,19 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                         new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
                         logger.info(f"⏭️ Skipping existing file for tool: {t_name}")
                         continue
+
+                elif t_name == "push_to_github" and medic_triggered_fix and validation_errors:
+                    # Validate-before-push gate: block push if any file still fails validation.
+                    # This prevents pushing broken artifacts and losing the healing_context to a
+                    # secondary push-failure error that overwrites the original diagnosis.
+                    result = (
+                        "BLOCKED: Cannot push — the following files still fail validation. "
+                        "Fix them before calling push_to_github:\n" + "\n".join(validation_errors)
+                    )
+                    any_tool_error = True
+                    new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
+                    logger.warning("🚫 PUSH BLOCKED: outstanding validation errors in fix mode.")
+                    continue
 
                 result = full_tools_map[t_name].invoke(t_args)
                 result_str = str(result)
