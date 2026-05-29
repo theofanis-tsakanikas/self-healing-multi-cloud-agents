@@ -91,12 +91,14 @@ spec:
           value: "<project_id>"
         - name: CLOUD_PROVIDER
           value: "<cloud_provider>"                     # aws | azure | gcp
+        - name: DESTINATION_URI
+          value: "<LOGICAL_DESTINATION.uri>"            # e.g. s3://eu-sales-insights-data/processed/ — the pipeline script reads os.getenv("DESTINATION_URI") at runtime; omitting this causes immediate failure with None
         - name: BUCKET_NAME
           value: "<bucket_name>"
         - name: TRINO_HOST
           value: "trino.analytics.svc.cluster.local"   # hostname ONLY — no :port
         - name: PUSHGATEWAY_URL
-          value: "http://pushgateway.monitoring.svc.cluster.local:9091"
+          value: "http://pushgateway.monitoring.svc.cluster.local:9091"  # http:// scheme is MANDATORY — push_to_gateway() requires a full URL
         envFrom:
         - secretRef:
             name: <project_id_rfc1123>-db-credentials  # RFC 1123: pipe-eu-sales-to-s3-<timestamp>-db-credentials

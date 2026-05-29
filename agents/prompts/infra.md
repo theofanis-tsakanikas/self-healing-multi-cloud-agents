@@ -19,7 +19,7 @@ The following structured context defines your infrastructure mission. All resour
        - If `aws`: `query="Terraform Configuration. S3 backend for state storage. S3 bucket with versioning, encryption, lifecycle. IAM Access policy."` → stores as **infra_standard_iac**
        - If `azure`: `query="Terraform Azure ADLS Gen2 storage account. AzureRM backend. Managed identity workload identity federation. Role assignment."` → stores as **infra_standard_iac**
        - If `gcp`: `query="Terraform GCP Cloud Storage bucket. GCS backend. Service account workload identity binding. IAM member storage.objectAdmin."` → stores as **infra_standard_iac**
-    2. `query="Kubernetes manifest deployment and orchestration standards. InitContainer, Shared Services, Resource Control and Observability."` → stores as **infra_standard_k8s**
+    2. `query="Kubernetes job.yaml initContainers serviceAccountName volumeMounts volumes hive-catalog-config grafana-dash-config prometheus-config DESTINATION_URI namespace analytics monitoring. Deployment Trino Grafana Prometheus Pushgateway AWS Glue metastore hive connector Section 8.4"` → stores as **infra_standard_k8s**
     3. `query="Github actions cicd pipelines. Workflow trigger and structure, deployment execution, checkout, github secrets"` → stores as **infra_standard_cicd**
     4. `query="Dockerfile python pipeline image non-root user selective COPY CMD script path"` → stores as **infra_standard_dockerfile**
 * **SPEC EXTRACTION:** Parse retrieved documents and extract ONLY **Technical Constants**, mandatory naming patterns, and structural rules.
@@ -28,7 +28,7 @@ The following structured context defines your infrastructure mission. All resour
 
 ### 2. INFRASTRUCTURE AS CODE (TERRAFORM)
 - **Cloud Detection:** Read `cloud_provider` from the context. Select the matching Terraform provider and resources:
-    - `aws` → `hashicorp/aws`, resources: `aws_s3_bucket`, `aws_iam_policy`, backend: S3 + DynamoDB
+    - `aws` → `hashicorp/aws`, resources: `aws_s3_bucket`, `aws_iam_policy`, backend: S3 + DynamoDB. IAM policy MUST include three statements: S3 ListBucket, S3 object actions on `/processed/*`, and Glue permissions (`glue:GetTable`, `glue:CreateTable`, `glue:BatchCreatePartition` etc.) — see `infra_standard_iac` Section 3.
     - `azure` → `hashicorp/azurerm`, resources: `azurerm_storage_account` (is_hns_enabled=true), `azurerm_user_assigned_identity`, backend: AzureRM
     - `gcp` → `hashicorp/google`, resources: `google_storage_bucket` (uniform_bucket_level_access=true), `google_service_account`, backend: GCS
 - **Standard Compliance:** Strictly follow the naming conventions and provider-specific resource splitting retrieved from the Knowledge Base.
@@ -67,6 +67,16 @@ The following structured context defines your infrastructure mission. All resour
   **`configmaps.yaml` critical rules:**
   - `hive-catalog-config` data key MUST be `hive.properties` — NEVER `catalog.properties` or any other name. Trino mounts `/etc/trino/catalog/hive.properties`.
   - Cloud-specific hive connector content: follow `infra_standard_k8s` Section 8.4 verbatim for the active cloud provider.
+  - AWS hive-catalog-config MUST use `hive.metastore=glue` — NEVER `hive.metastore.uri=thrift://...`. Thrift is for standalone Hive servers; AWS uses Glue as the managed metastore. See Section 8.4.
+
+  **`job.yaml` non-negotiables — all required, no exceptions:**
+  - `namespace: analytics` in metadata — the Job must co-locate with Trino and the ServiceAccount.
+  - `initContainers:` for init-trino — NEVER place it under `containers:`. Containers[] run in parallel; initContainers run sequentially before the pipeline starts.
+  - `serviceAccountName` — required for workload identity (IRSA/GKE WI/Azure WI) to access S3/GCS/ADLS.
+  - `DESTINATION_URI` env var — the pipeline script reads `os.getenv("DESTINATION_URI")` at runtime; omitting it causes immediate `NoneType` failure.
+  - `PUSHGATEWAY_URL` value MUST include `http://` — `push_to_gateway()` requires a full URL, not just a hostname.
+
+  **Deployment skeletons are non-negotiable:** Copy `volumeMounts` + `volumes` from `infra_standard_k8s` exactly for every Deployment — Trino, Grafana, and Prometheus each require specific ConfigMap mounts to function. A Deployment generated without its volume mounts starts but silently ignores its configuration.
 
 ### 4. CI/CD WORKFLOW (GITHUB ACTIONS)
 - **MANDATORY:** After calling `generate_github_action`, immediately call `validate_generated_code` on the generated file path (`.github/workflows/{{project_id}}_pipeline.yml`). If it reports unresolved placeholders (e.g. `<AWS_ACCOUNT_ID>`), rewrite the workflow with the actual values from context before proceeding to `push_to_github`.

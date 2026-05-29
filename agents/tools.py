@@ -286,6 +286,33 @@ def validate_generated_code(filename: str) -> str:
         if "azure-storage-blob" in content_lower and "adlfs" not in content_lower:
             errors.append("REQUIREMENTS: azure-storage-blob present but adlfs missing — add 'adlfs' to requirements.txt (repo root, not scripts/).")
 
+    # ── Terraform ────────────────────────────────────────────────────────────
+    elif ext == ".tf":
+        with open(filename, encoding="utf-8") as f:
+            tf_content = f.read()
+
+        if base == "main.tf":
+            # IAM least privilege: the pipeline writes only to {bucket}/processed/run_date=.../
+            # so object-level actions must be scoped to /processed/*, not the full bucket (/*).
+            # Pattern matches: "${aws_s3_bucket.data_bucket.arn}/*" — arn ref followed directly by /*"
+            if re.search(r'\.arn\}\s*/\*"', tf_content):
+                errors.append(
+                    "IAM [project policy]: GetObject/PutObject/DeleteObject resource is '/*' (full bucket) — "
+                    "restrict to '/processed/*'. The pipeline only writes to processed/run_date=.../. "
+                    "See terraform_aws_s3.md Section 3."
+                )
+            # AWS: Glue permissions are mandatory — Trino uses Glue Data Catalog as metastore.
+            # Without them, CREATE TABLE, DROP TABLE, and CALL sync_partition_metadata all fail.
+            # Azure and GCP use file-based metastore on their storage, covered by existing permissions.
+            _tf_cloud = os.getenv("CLOUD_PROVIDER", "").lower()
+            if _tf_cloud == "aws" and "glue:GetTable" not in tf_content:
+                errors.append(
+                    "IAM [project policy]: AWS Glue permissions missing from IAM policy — "
+                    "Trino uses Glue Data Catalog as metastore; glue:GetTable, glue:CreateTable, "
+                    "glue:BatchCreatePartition etc. are required for CREATE TABLE and sync_partition_metadata. "
+                    "See terraform_aws_s3.md Section 3."
+                )
+
     # ── Dockerfile ───────────────────────────────────────────────────────────
     # hadolint covers: base image tag, COPY . ., non-root user, pip flags, layer hygiene.
     # We add only the ONE rule hadolint cannot know: our project requires utils/.
@@ -482,9 +509,20 @@ def validate_generated_code(filename: str) -> str:
                     errors.append("K8S job.yaml [project policy]: backoffLimit must be 0 — jobs are idempotent; retries mask failures.")
                 if "ENVFROM" not in content_upper:
                     errors.append("K8S job.yaml [project policy]: missing envFrom: secretRef — DB credentials must be injected via K8s Secret, never in env[].")
-                for env_var in ["PROJECT_ID", "CLOUD_PROVIDER", "TRINO_HOST", "PUSHGATEWAY_URL"]:
+                if not _re.search(r'namespace:\s*analytics', raw):
+                    errors.append(
+                        "K8S job.yaml [project policy]: missing 'namespace: analytics' in job metadata — "
+                        "the Job must run in the analytics namespace where Trino and the ServiceAccount live."
+                    )
+                for env_var in ["PROJECT_ID", "CLOUD_PROVIDER", "TRINO_HOST", "PUSHGATEWAY_URL", "DESTINATION_URI"]:
                     if env_var not in raw:
                         errors.append(f"K8S job.yaml [project policy]: missing env var '{env_var}' — required by the pipeline script.")
+                if "PUSHGATEWAY_URL" in raw and not _re.search(r'http://pushgateway', raw):
+                    errors.append(
+                        "K8S job.yaml [project policy]: PUSHGATEWAY_URL value is missing the 'http://' scheme — "
+                        "prometheus_client.push_to_gateway() requires a full URL. "
+                        "Correct: value: 'http://pushgateway.monitoring.svc.cluster.local:9091'."
+                    )
                 trino_host_match = _re.search(r"TRINO_HOST[^\n]*value[^\n]*:(\d+)", raw)
                 if trino_host_match:
                     errors.append(
@@ -560,6 +598,14 @@ def validate_generated_code(filename: str) -> str:
                         "K8S configmaps.yaml [project policy]: hive-catalog-config data key must be 'hive.properties' "
                         "(not 'catalog.properties' or any other name). Trino mounts /etc/trino/catalog/hive.properties."
                     )
+                _cm_cloud = os.getenv("CLOUD_PROVIDER", "").lower()
+                if _cm_cloud == "aws" and "hive-catalog-config" in raw and "thrift://" in raw:
+                    errors.append(
+                        "K8S configmaps.yaml [project policy]: hive-catalog-config uses Thrift metastore "
+                        "('hive.metastore.uri=thrift://...') on AWS — must use AWS Glue. "
+                        "See k8s_deployment_rules.md Section 8.4 for the correct config: "
+                        "hive.metastore=glue, hive.metastore.glue.region=<region>."
+                    )
 
             elif fname in ("trino_deployment.yaml", "grafana_deployment.yaml", "prometheus_deployment.yaml"):
                 # Every deployment file must contain at least one Service — without it the pods are unreachable.
@@ -586,6 +632,47 @@ def validate_generated_code(filename: str) -> str:
                         "add 'service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing' to the Service "
                         "annotations. Without it the LoadBalancer defaults to internal and stays <pending>."
                     )
+
+                # Per-deployment ConfigMap volume checks — kubectl cannot know which project ConfigMaps are required.
+                if fname == "trino_deployment.yaml":
+                    if "serviceaccountname" not in content_lower:
+                        errors.append(
+                            "K8S trino_deployment.yaml [project policy]: missing serviceAccountName — "
+                            "Trino needs the IRSA service account to access S3 and Glue. "
+                            "Set to the service account name from 00_namespaces.yaml."
+                        )
+                    if "hive-catalog-config" not in raw:
+                        errors.append(
+                            "K8S trino_deployment.yaml [project policy]: missing hive-catalog-config volumeMount — "
+                            "must be mounted at /etc/trino/catalog so Trino loads the Hive connector. "
+                            "Without it Trino starts but cannot resolve hive.* catalog queries."
+                        )
+
+                if fname == "grafana_deployment.yaml":
+                    for _cm, _path in [
+                        ("grafana-dash-config", "/etc/grafana/provisioning/dashboards"),
+                        ("grafana-datasource-config", "/etc/grafana/provisioning/datasources"),
+                    ]:
+                        if _cm not in raw:
+                            errors.append(
+                                f"K8S grafana_deployment.yaml [project policy]: missing {_cm} volumeMount — "
+                                f"must be mounted at {_path}. "
+                                "Without it Grafana won't auto-provision the dashboard/datasource on startup."
+                            )
+
+                if fname == "prometheus_deployment.yaml":
+                    if "prometheus-config" not in raw:
+                        errors.append(
+                            "K8S prometheus_deployment.yaml [project policy]: missing prometheus-config volumeMount — "
+                            "must be mounted at /etc/prometheus. "
+                            "Without it Prometheus uses default config and won't scrape Pushgateway."
+                        )
+                    if "--config.file" not in raw:
+                        errors.append(
+                            "K8S prometheus_deployment.yaml [project policy]: missing "
+                            "'--config.file=/etc/prometheus/prometheus.yml' arg — "
+                            "Prometheus ignores the mounted config without this flag."
+                        )
 
     else:
         return f"CLEAN: '{filename}' — no validator for this file type."

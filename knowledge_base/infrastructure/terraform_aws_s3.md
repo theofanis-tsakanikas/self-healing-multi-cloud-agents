@@ -151,15 +151,49 @@ resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
 
 ## 3. IAM & ACCESS POLICY
 - **Policy Syntax:** Every statement in `jsonencode` must include `Effect = "Allow"` (or "Deny"). Omitting this causes `MalformedPolicyDocument`.
-- **Scope:** - Statement 1: `s3:ListBucket` on the **Bucket ARN**.
-    - Statement 2: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on the **Bucket ARN + /***.
-- **Least Privilege:** Restrict resources to the `processed/{{project_id}}/*` prefix where possible.
+- **Three mandatory statements — all required:**
+    - Statement 1: `s3:ListBucket` on the **Bucket ARN**.
+    - Statement 2: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on the **Bucket ARN + `/processed/*`**.
+    - Statement 3: Glue permissions on `"*"` — Trino uses AWS Glue Data Catalog as metastore. Without these, `CREATE TABLE`, `DROP TABLE`, and `CALL sync_partition_metadata` all fail with access denied. Glue ARNs are complex and region/account-scoped internally — always use `Resource = ["*"]` for Glue statements.
+- **Least Privilege:** For dedicated buckets (one pipeline per bucket), restrict Statement 2 to `/processed/*` — the pipeline writes exclusively to `{bucket}/processed/run_date=.../`. Granting `/*` is over-permissive:
+```hcl
+# ✅ restricted to actual write path:
+Resource = ["${aws_s3_bucket.data_bucket.arn}/processed/*"]
+# ❌ over-permissive — full bucket access:
+# Resource = ["${aws_s3_bucket.data_bucket.arn}/*"]
+```
 - **CRITICAL — `description` is mandatory and forces replacement if removed:** AWS treats `aws_iam_policy.description` as an immutable attribute — removing it from the config after initial creation causes Terraform to destroy and recreate the policy with a new ARN, breaking any IAM role attachments. Always include `description` AND add `lifecycle { ignore_changes = [description, tags] }`:
 ```hcl
 resource "aws_iam_policy" "s3_access_policy" {
   name        = "${var.project_id}-s3-access-policy"
-  description = "Scoped S3 access policy for ${var.project_id}"
-  policy      = jsonencode({ ... })
+  description = "Scoped S3 and Glue access policy for ${var.project_id}"
+  policy      = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = [aws_s3_bucket.data_bucket.arn]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = ["${aws_s3_bucket.data_bucket.arn}/processed/*"]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "glue:GetDatabase", "glue:GetDatabases", "glue:CreateDatabase",
+          "glue:GetTable",    "glue:GetTables",    "glue:CreateTable",
+          "glue:DeleteTable", "glue:UpdateTable",
+          "glue:GetPartition",     "glue:GetPartitions",
+          "glue:CreatePartition",  "glue:DeletePartition",  "glue:UpdatePartition",
+          "glue:BatchCreatePartition", "glue:BatchDeletePartition"
+        ]
+        Resource = ["*"]
+      }
+    ]
+  })
   lifecycle {
     ignore_changes = [description, tags]
   }

@@ -48,6 +48,7 @@ Generate `scripts/*.py` following `arch_standard_python` exactly. The standard d
 - **Destination URI:** `destination_uri = os.getenv("DESTINATION_URI")` — never hardcode a URI string in the script. `LOGICAL_DESTINATION.uri` from context identifies the bucket but must not appear as a literal in the generated code. The K8s Job injects the real value at runtime.
 - **Partition path:** Always `{destination_uri}run_date=YYYY-MM-DD/` — never use `project_id` or the pipeline name as a path component.
 - **Error handling:** `create_engine` AND the extraction loop must be in the same `try` block.
+- **Cloud SDK guards:** All cloud SDK calls (`boto3`, `gcs`, `BlobServiceClient`) MUST be inside `if _CLOUD == "..."` guards — never called unconditionally after a conditional import.
 - **Business rules:** Every `TRANSFORMATION_LOGIC` item as real pandas code (see Section 3).
 - **Type casting:** Step 3c in `arch_standard_python` is mandatory — cast `float64` → `Int64` for all quantity/count/units columns before every `to_parquet()`.
 - **Storage:** `storage_options={}` in every `to_parquet()` call.
