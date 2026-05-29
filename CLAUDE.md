@@ -2,97 +2,145 @@
 
 ## Project Identity
 
-This is a **production-grade, cloud-agnostic AI orchestration system** that autonomously
-designs, deploys, and self-heals data pipelines across AWS, Azure, and GCP.
-Every decision must reflect that standard.
+Production-grade AI orchestration system that autonomously designs, deploys, and self-heals data pipelines across AWS, Azure, and GCP using a LangGraph multi-agent architecture: **Supervisor → Architect → Infra → Medic**.
 
 ---
 
-## Core Principles
+## Non-Negotiable Principles
 
-### 1. Radical Honesty
-- Never tell me what sounds good. Tell me what is true.
-- If my approach is wrong, say so directly and explain why.
-- If a task has a better solution than the one I described, propose it — don't just execute my instructions blindly.
-- If something is incomplete or broken, say it clearly. No sugar-coating.
-
-### 2. No Shortcuts. Ever.
-- Always implement the production-grade solution, even if a simpler one exists.
-- No `TODO` comments as substitutes for real implementation.
-- No placeholder logic, mock functions, or "simplified for now" patterns.
-- If the correct solution requires more time, say so — don't ship a shortcut.
-
-### 3. Cloud Agnostic by Default
-- This system targets **AWS, Azure, and GCP equally**. No cloud is the default.
-- Never hardcode cloud-specific assumptions (e.g., assume S3 when the pipeline config may target ADLS or GCS).
-- Cloud is always detected from `cloud_provider` in the pipeline/infra config — never guessed.
-- Storage URIs, auth patterns, and SDK calls must always come from config, not assumptions.
-
-
-## Git Workflow — Mandatory Protocol
-
-After **every** set of changes, follow this exact sequence:
-
-1. Run `git diff` and present the full output to the user.
-2. Ask: **"Commit and push? [yes / no]"**
-3. If **no**: Tell the user to make their edits in the editor, then say "Tell me when you're ready." Wait.
-4. When the user confirms: run `git diff` again to show the final state.
-5. Ask again: **"Commit and push? [yes / no]"**
-6. If **yes**: commit with a conventional commit message and push.
-
-### Commit Message Format (Conventional Commits)
-```
-<type>(<scope>): <short description>
-
-Types: feat | fix | infra | docs | refactor | test | chore
-Scope: architect | infra | medic | supervisor | bootstrap | configs | knowledge-base | ci
-
-Examples:
-feat(architect): add chunked parquet write with Int64 casting for GCP pipeline
-infra(bootstrap): add GKE autopilot cluster with workload identity binding
-fix(medic): correct partition URI format for Azure ADLS target
-docs(knowledge-base): update terraform_gcp_bucket standard with GCS backend
-```
-
-**Never commit secrets, `.env` files, or credential JSON files.**
+- **Cloud Agnostic:** AWS, GCP, Azure are equals. No cloud is the default. Cloud is always read from `cloud_provider` in config — never assumed.
+- **No Shortcuts:** Production solution always. No TODOs, no placeholders, no "simplified for now".
+- **Standards First:** When the LLM generates wrong output, fix the **standard or prompt** — not the generated file. Hardcoded one-off fixes are never the answer.
+- **Radical Honesty:** If an approach is wrong, say so. Don't execute bad instructions blindly.
 
 ---
 
-## Repository Structure
+## Credential Access — Absolute Rule
 
-This is a **standalone repository** — not a monorepo. All file paths are relative to the repository root.
-
-- Never use `projects/multi-cloud-self-healing-agent/` prefixes anywhere.
-- GHA docker build context: `.` (not `projects/...`)
-- GHA kubectl applies: `k8s/job.yaml` (not `projects/.../k8s/job.yaml`)
-- Dockerfile path in GHA: `Dockerfile` (not `projects/.../Dockerfile`)
-- `on.push.paths`: omit or use `**` (not `projects/...`)
-
----
-
-## Credential Access — Mandatory Convention
-
-**`cloud_get()` is the only permitted way to read DB credentials in generated pipeline scripts.**
+`cloud_get()` is the **only** permitted way to read DB credentials in generated pipeline scripts.
 
 ```python
 from utils.cloud_config import cloud_get
-
-host = cloud_get(cloud, "db_host", db_type="postgres")  # "aws" | "gcp" | "azure"
+host = cloud_get(cloud, "db_host", db_type="postgres")  # aws | gcp | azure
 ```
 
-- `os.getenv()` is **forbidden** for credential env vars (`POSTGRES_DB_*`, `MYSQL_DB_*`).
-- Three-tier priority: SSM Parameter Store → `.bootstrap_outputs.json` → env var fallback.
-- Generic keys: `db_host`, `db_port`, `db_user`, `db_password`, `db_name` — same API for every cloud/engine.
-- The `validate_generated_code` tool enforces this and will block any file that uses `os.getenv()` for credentials.
+`os.getenv()` for `POSTGRES_DB_*` / `MYSQL_DB_*` is a **policy violation** — caught by `validate_generated_code`. The architect.md prompt explicitly forbids it. Three-tier resolution: SSM → `.bootstrap_outputs.json` → env fallback.
 
 ---
 
-## Before You Suggest Any Change
+## Standalone Repository — Path Rules
 
-Ask yourself:
-- Is this cloud-agnostic? Would it work equally on AWS, Azure, and GCP?
-- Is this the production solution or a shortcut?
-- Am I about to commit a secret or hardcoded credential?
-- Am I using `cloud_get()` for credentials, not `os.getenv()`?
+This is **not a monorepo**. All paths are relative to the repo root:
+- Docker build context: `.`
+- Dockerfile: `Dockerfile`
+- K8s applies: `k8s/job.yaml`
+- GHA trigger: `on: push` with no `paths:` filter (or `paths: ['**']`)
+- Never use `projects/multi-cloud-self-healing-agent/` anywhere.
 
-If any answer is no — stop and fix it first.
+---
+
+## Agent Routing — Key Invariants
+
+**Supervisor RULE A (architect just ran):**
+1. `agent_error` flag → medic (cleared to False)
+2. `architect_status == "completed"` → infra
+
+**Fix mode — architect:**
+- Uses `patch_project_file` (surgical), never `write_project_file` (full rewrite).
+- If patch + auto-validation succeed (`patch_clean_files` non-empty), `any_tool_error` is overridden to False — an unauthorized secondary tool call must not block success.
+
+**`healing_context` is one-shot:**
+- Set by medic's `request_fix`. Read by architect or infra. Cleared to `""` by whichever agent consumes it. Never leaks between agents.
+- Multiple `request_fix` calls in one medic turn **accumulate** (not overwrite) the healing_context.
+
+**`medic_fix_requested` lifecycle:**
+- Scenario A (github_done=False): architect clears it → infra starts from scratch.
+- Scenario B (github_done=True): architect keeps it → infra skips terraform, goes straight to push.
+
+**ECR URL source:** Always from `.bootstrap_outputs.json` — never from infra agent's terraform output. Bootstrap creates the registry; infra just uses it.
+
+**CI polling (medic):** 5 retries with exponential backoff (30s → 60s → 120s → 240s → 300s). After attempt 5: surface message to user, route to supervisor, reset counter. Never loops to recursion limit.
+
+**403 from `fetch_github_action_logs`:** Token permissions issue, not a code bug. Returns `PENDING: PERMISSIONS_ERROR` → medic tells user to fix GH_TOKEN scope, does NOT call `request_fix`.
+
+---
+
+## Generated Artifacts — Critical Rules
+
+**Python pipeline scripts:**
+- `storage_options={}` is mandatory in every `to_parquet()` call.
+- `create_engine` AND the extraction loop in the **same** `try` block.
+- `destination_uri = os.getenv("DESTINATION_URI")` — never hardcode a URI string in the script.
+- Type casting mandatory: `float64` → `Int64` for quantity/count columns before every `to_parquet()`.
+- Business rules (`quality_standards`) must be real pandas code — never `is_suspicious = False`.
+- `FLAG_AS_SUSPICIOUS` → `chunk['is_suspicious'] = ~condition`. Multiple rules: combine with `|`.
+- `run_date` is a Hive partition key from the path — never add it as a DataFrame column.
+
+**`requirements.txt`:** At the **repo root** — never in `scripts/`. Always include the filesystem driver: `s3fs` (AWS), `gcsfs` (GCP), `adlfs` (Azure).
+
+**K8s mandatory object counts:**
+
+| File | Objects |
+|---|---|
+| `00_namespaces.yaml` | 3 — analytics Namespace + monitoring Namespace + ServiceAccount |
+| `trino_deployment.yaml` | 2 — Deployment + ClusterIP Service named `trino` |
+| `grafana_deployment.yaml` | 2 — Deployment + LoadBalancer Service (cloud annotation) |
+| `prometheus_deployment.yaml` | 4 — Prometheus Dep + Svc + Pushgateway Dep + Svc |
+| `configmaps.yaml` | 5 ConfigMaps |
+
+`hive-catalog-config` data key is **always** `hive.properties` — never `catalog.properties`.
+
+**K8s secret names:** RFC 1123 — lowercase + hyphens only. `pipe-eu-sales-to-s3-db-credentials` ✓. Same name in GHA workflow and `job.yaml`.
+
+---
+
+## Prompt vs. Standard — Separation of Concerns
+
+**Agent prompts (`agents/prompts/*.md`) answer "what to do and when":**
+- Role definition, workflow steps in order, tool call sequences
+- Routing decisions and absolute one-line prohibitions
+- Structural invariants that must be correct 100% of the time (K8s object counts, mandatory file names) — these stay in the prompt for directness, even though the standard also defines them
+
+**Standards (`knowledge_base/*.md`) answer "how exactly and why":**
+- Full code skeletons and ❌/✅ examples
+- Detailed mappings, data type tables, edge cases, WHY explanations
+- Single source of truth for implementation detail
+
+**Rules for adding a new requirement:**
+- Needs a code example → standard only, prompt gets a one-line reference
+- Structural invariant (must be right 100% of the time) → brief rule in prompt + full detail in standard
+- If it lives in both places it will eventually diverge — pick one owner for the detail
+
+**Rules for removing from a prompt:** Verify the rule exists in the standard first, then remove.
+
+**Rules for modifying an existing rule:** Update the standard first (the owner), then update any prompt reference if the wording changed.
+
+## Knowledge Base & Pinecone
+
+Standards live in `knowledge_base/`. Pinecone loads the full content of each standard (no chunking) — every agent has access to the complete text.
+
+The validator (`validate_generated_code`) is a **safety net** for architectural issues the LLM can't know from general knowledge (custom modules, cloud-specific quirks). It is not a substitute for correct prompts and standards. Do not add fragile regex checks for general Python best practices.
+
+---
+
+## Git Workflow
+
+After every set of changes:
+1. `git diff` → show full output.
+2. Ask: **"Commit and push? [yes / no]"**
+3. If yes: conventional commit message + push.
+
+Format: `<type>(<scope>): <description>`
+Types: `feat | fix | infra | docs | refactor | test | chore`
+Scopes: `architect | infra | medic | supervisor | bootstrap | configs | knowledge-base | ci`
+
+Never commit `.env` files or credential JSON.
+
+---
+
+## Before Any Change — Checklist
+
+- Is this cloud-agnostic? Works equally on AWS, GCP, Azure?
+- Am I fixing the standard/prompt (root cause) or patching the output (symptom)?
+- Am I using `cloud_get()` for credentials?
+- Does the fix need a code example? → standard. Is it a one-line prohibition? → prompt. See "Prompt vs. Standard" section.

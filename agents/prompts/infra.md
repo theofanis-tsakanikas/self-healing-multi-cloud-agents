@@ -66,10 +66,7 @@ The following structured context defines your infrastructure mission. All resour
 
   **`configmaps.yaml` critical rules:**
   - `hive-catalog-config` data key MUST be `hive.properties` — NEVER `catalog.properties` or any other name. Trino mounts `/etc/trino/catalog/hive.properties`.
-  - Cloud-specific hive content:
-    - AWS: `hive.metastore=glue`, `hive.s3.region=<region>`
-    - Azure: `hive.metastore=file`, `hive.azure-adls-gen2.oauth2.client-id=<managed_identity_client_id>`
-    - GCP: `hive.metastore=file`, `hive.gcs.use-access-token=false`
+  - Cloud-specific hive connector content: follow `infra_standard_k8s` Section 8.4 verbatim for the active cloud provider.
 
 ### 4. CI/CD WORKFLOW (GITHUB ACTIONS)
 - **MANDATORY:** After calling `generate_github_action`, immediately call `validate_generated_code` on the generated file path (`.github/workflows/{{project_id}}_pipeline.yml`). If it reports unresolved placeholders (e.g. `<AWS_ACCOUNT_ID>`), rewrite the workflow with the actual values from context before proceeding to `push_to_github`.

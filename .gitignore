@@ -20,6 +20,9 @@ venv/
 *.tfplan
 .terraform.lock.hcl
 
+# Prompt snapshots — working copies, not versioned
+agents/prompts_copy/
+
 # Logs
 *.log
 pipeline_execution.log

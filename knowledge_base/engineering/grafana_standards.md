@@ -9,6 +9,11 @@ The Prometheus datasource is automatically wired into Grafana via the `grafana-d
 - **title**: Use a human-readable pipeline name, e.g. `EU Sales Data Observability`. Never include `project_id`.
 - **tags**: Use static tags only. MUST include three tags: the generic pipeline type, the pipeline name slug, and the cloud provider. e.g. `["data-pipeline", "eu-sales", "aws"]` for AWS, `["data-pipeline", "us-crm", "azure"]` for Azure, `["data-pipeline", "global-marketing", "gcp"]` for GCP. Never include `project_id`.
 
+## Panel Types
+All panels MUST use `"type": "timeseries"`. The `"graph"` type is deprecated and forbidden in Grafana 8+. Every panel must include `id`, `datasource`, `gridPos`, and `targets` with at least one `expr`.
+
+---
+
 ## Prometheus Queries (Panels)
 Do NOT hardcode `project_id` as a static label filter in `expr`. A hardcoded session ID makes every panel show only one historical run.
 

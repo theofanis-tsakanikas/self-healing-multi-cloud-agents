@@ -209,6 +209,31 @@ def validate_generated_code(filename: str) -> str:
                 "Without it, pyarrow cannot write to s3://, gs://, or abfss:// URIs."
             )
 
+        # destination_uri must come from os.getenv("DESTINATION_URI") — the K8s Job
+        # injects it at runtime. A hardcoded URI string makes the script un-deployable
+        # to a different bucket without a code change.
+        _hardcoded_uri = re.search(
+            r'destination_uri\s*=\s*["\'](?:s3://|gs://|abfss://)[^"\']+["\']',
+            py_content,
+        )
+        if _hardcoded_uri:
+            errors.append(
+                "STORAGE: destination_uri is hardcoded as a URI literal — "
+                "replace with: destination_uri = os.getenv(\"DESTINATION_URI\")  "
+                "The K8s Job env block injects this at runtime."
+            )
+
+        # chunk['is_suspicious'] = False is a compliance violation — it is a placeholder,
+        # not an implementation of FLAG_AS_SUSPICIOUS. Every quality_standards rule must
+        # be real pandas code: chunk['is_suspicious'] = ~condition.
+        if re.search(r"chunk\[.is_suspicious.\]\s*=\s*False", py_content):
+            errors.append(
+                "BUSINESS RULES: chunk['is_suspicious'] = False is a placeholder — "
+                "COMPLIANCE VIOLATION. Replace with real pandas logic: "
+                "chunk['is_suspicious'] = ~condition  (derived from quality_standards). "
+                "If multiple FLAG_AS_SUSPICIOUS rules exist, combine with |."
+            )
+
     # ── JSON (Grafana dashboard) ──────────────────────────────────────────────
     elif ext == ".json":
         try:

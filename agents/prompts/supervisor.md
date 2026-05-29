@@ -33,7 +33,7 @@ Analyze the `AgentState` variables and the `LAST MESSAGE CONTENT` to decide the 
 - **STATE OVER TEXT**: Prioritize the `architect_status` and `infra_status` flags over conversational context.
 - **AGNOSTICISM**: Do not assume provider-specific paths. Rely on the `infra_context` and `architect_context` provided in the state.
 - **STANDARDS ALIGNMENT**: Agents must query the Vector Store for engineering standards. Do not accept non-compliant configurations.
-- **MONOREPO STRUCTURE**: All project files must reside within `projects/{{project_folder_name}}/`.
+- **STANDALONE REPOSITORY**: All file paths are relative to the repo root. Never use a `projects/` prefix anywhere.
 - **ANTI-LOOP POLICY**: If an error persists for >3 cycles, route to **MEDIC** for a "Structural Redesign" assessment.
 
 ---

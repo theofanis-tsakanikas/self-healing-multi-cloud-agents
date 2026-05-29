@@ -17,6 +17,14 @@ These violations cause immediate runtime failure. No exceptions.
 - `storage_options={}` is MANDATORY in every `to_parquet()` call — omitting it causes `TypeError` on cloud storage writes (s3://, gs://, abfss://).
 - `run_date` MUST NOT be added as a DataFrame column — it is a Hive partition key derived from the path.
 - Partition path format is always `run_date=YYYY-MM-DD/` — any other format breaks Trino partition discovery.
+- `destination_uri` MUST come from `os.getenv("DESTINATION_URI")` — **never hardcode a URI string** (`"s3://..."`, `"gs://..."`, `"abfss://..."`). The K8s Job injects this at runtime; hardcoding it makes the script un-deployable to a different bucket without a code change.
+```python
+# ❌ WRONG — hardcoded, cannot be overridden at deploy time:
+destination_uri = "s3://eu-sales-insights-data/processed/"
+
+# ✅ CORRECT — injected by the K8s Job env block:
+destination_uri = os.getenv("DESTINATION_URI")
+```
 
 ### Error Handling
 - `create_engine` AND the extraction loop MUST be in the **SAME** `try` block.
@@ -39,6 +47,15 @@ try:
 
 ### Type Casting
 - Cast `float64` → `Int64` for quantity/count columns before every `to_parquet()` call — pandas defaults NULLable integers to float64, causing Trino to read `double` instead of `BIGINT`.
+- This step is **MANDATORY** whenever the schema contains integer/quantity/count columns. It must appear as step 3c inside the chunk loop, before `to_parquet()`:
+```python
+# 3c. Type casting — cast float64 → Int64 for integer/count/quantity columns
+int_cols = [c for c in chunk.select_dtypes(include='float64').columns
+            if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
+for col in int_cols:
+    chunk[col] = chunk[col].astype('Int64')
+```
+- Omitting this step causes a type mismatch: Trino reads the column as `double` instead of `INTEGER`/`BIGINT`, silently breaking downstream aggregations.
 
 ### Cloud SDK
 - The cloud storage SDK (`boto3` / `gcs` / `BlobServiceClient`) MUST be used inside `if _CLOUD == "..."` guards — never called unconditionally after a conditional import.
