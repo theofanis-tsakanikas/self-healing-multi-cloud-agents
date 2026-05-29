@@ -84,24 +84,46 @@ def medic_node(state: AgentState):
         system_prompt = "Diagnostic mode active. Analyze CI/CD logs."
 
     # 2. CONTEXT PREPARATION
-    # Inject standards already loaded by architect/infra into the system prompt so the LLM
-    # can reference them directly — avoids redundant query_vector_store calls for standards
-    # that are already in state. dynamic-experience (past fixes) is never pre-loaded, so
-    # query_vector_store remains available and useful for that namespace.
+    # Smart standard injection: identify WHICH standard is relevant to the current error,
+    # then inject only that one from collected_specs (already loaded by architect/infra).
+    # This avoids context bloat from dumping all standards AND avoids redundant Pinecone queries.
+    # dynamic-experience (past fixes) is never pre-loaded — query_vector_store stays available for it.
+    _STANDARD_INDICATORS = {
+        "arch_standard_python":   ["scripts/", "pandas", "chunk", "cloud_get", "to_parquet",
+                                   "is_suspicious", "destination_uri", "storage_options"],
+        "arch_standard_trino":    ["setup_trino.sql", "sql/", "create table", "sync_partition",
+                                   "external_location", "partitioned_by"],
+        "arch_standard_grafana":  ["dashboards/", "monitoring_specs", "grafana", "timeseries", "uid"],
+        "infra_standard_k8s":     ["k8s/", "job.yaml", "configmap", "trino_deployment",
+                                   "prometheus_deployment", "grafana_deployment", "00_namespaces",
+                                   "initcontainer", "serviceaccountname", "hive-catalog-config",
+                                   "pushgateway", "namespace: analytics"],
+        "infra_standard_iac":     [".tf", "aws_s3", "iam_policy", "glue", "terraform",
+                                   "providers.tf", "main.tf"],
+        "infra_standard_dockerfile": ["dockerfile", "docker build", "copy utils", "appuser"],
+        "infra_standard_cicd":    [".github/", "workflow", "github_action", "pipeline.yml",
+                                   "ecr", "kubectl apply"],
+    }
+
     collected_specs = state.get("collected_specs", {})
-    if collected_specs:
-        available_keys = list(collected_specs.keys())
-        specs_block = "\n\n**ENGINEERING STANDARDS ALREADY LOADED IN STATE — do NOT re-query these via query_vector_store:**\n"
-        for key in available_keys:
-            content = collected_specs.get(key, "")
-            if content:
-                specs_block += f"\n### {key}\n{content}\n"
-        specs_block += (
-            "\nUse the above standards directly when diagnosing errors. "
-            "Only call query_vector_store for the 'dynamic-experience' namespace "
-            "(past successful fixes for similar errors)."
-        )
+    error_context = (
+        state.get("error_log", "") + " " +
+        " ".join(str(m.content if hasattr(m, "content") else m)
+                 for m in state["messages"][-4:])
+    ).lower()
+
+    matched_standards = {}
+    for key, indicators in _STANDARD_INDICATORS.items():
+        if key in collected_specs and any(ind in error_context for ind in indicators):
+            matched_standards[key] = collected_specs[key]
+
+    if matched_standards:
+        specs_block = "\n\n**RELEVANT ENGINEERING STANDARD(S) — use directly, do NOT re-query via query_vector_store:**\n"
+        for key, content in matched_standards.items():
+            specs_block += f"\n### {key}\n{content}\n"
+        specs_block += "\nFor past fixes on similar errors, call query_vector_store once (dynamic-experience namespace only)."
         system_prompt += specs_block
+        logger.info(f"📋 Injected standards into medic prompt: {list(matched_standards.keys())}")
 
     # We include more history for Medic to see the previous Infra logic
     messages = [{"role": "system", "content": system_prompt}] + safe_recent_messages(state["messages"], limit=10)
