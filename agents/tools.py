@@ -229,9 +229,7 @@ def validate_generated_code(filename: str) -> str:
         if re.search(r"chunk\[.is_suspicious.\]\s*=\s*False", py_content):
             errors.append(
                 "BUSINESS RULES: chunk['is_suspicious'] = False is a placeholder — "
-                "COMPLIANCE VIOLATION. Replace with real pandas logic: "
-                "chunk['is_suspicious'] = ~condition  (derived from quality_standards). "
-                "If multiple FLAG_AS_SUSPICIOUS rules exist, combine with |."
+                "COMPLIANCE VIOLATION. See python_standards.md Business Rules section."
             )
 
     # ── JSON (Grafana dashboard) ──────────────────────────────────────────────

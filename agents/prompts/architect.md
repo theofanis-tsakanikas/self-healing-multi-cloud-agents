@@ -23,8 +23,8 @@ The following structured context defines your mission. You must strictly adhere 
 ### 1. KNOWLEDGE RETRIEVAL & SPEC EXTRACTION
 - **PRIORITY 1:** Before analyzing any project data, you MUST call `query_vector_store` using the `engineering-standards` namespace.
 - **MANDATORY:** Execute three (3) distinct tool calls with these exact query strings if the keys are missing from state:
-    1. `query="All Python scripts generated for data engineering must follow these standards. Logging Standard. Idempotency Standard. Error Handling Standard. Business Rule Translation Standard. Metrics Emission Standard"` → stores as **arch_standard_python**
-    2. `query="trino sql ddl naming conventions. Table format, external location, data types."` → stores as **arch_standard_trino**
+    1. `query="STANDARD PYTHON DATA PIPELINES CRITICAL RULES: cloud_get mandatory credentials, storage_options to_parquet, create_engine extraction loop same try block, FLAG_AS_SUSPICIOUS is_suspicious quality_standards pandas, type casting float64 Int64 quantity columns, destination_uri os.getenv DESTINATION_URI, idempotency partition run_date, push_to_gateway prometheus_client, requirements.txt repo root"` → stores as **arch_standard_python**
+    2. `query="STANDARD TRINO DDL GENERATION setup_trino.sql: CREATE SCHEMA DROP TABLE CREATE TABLE 3-part catalog.schema.table, external_location PARQUET partitioned_by ARRAY run_date, data types VARCHAR DECIMAL INTEGER TIMESTAMP BOOLEAN, hive external table s3 gs abfss protocol"` → stores as **arch_standard_trino**
     3. `query="grafana dashboard json specifications. Panels, fields, alerting rules."` → stores as **arch_standard_grafana**
 - **SPEC EXTRACTION:** Parse retrieved documents and extract only **Technical Constants**. Store as key-value pairs in `collected_specs`. These are non-negotiable constraints for all following steps.
 
@@ -36,7 +36,10 @@ The following structured context defines your mission. You must strictly adhere 
 ### 3. AGNOSTIC REASONING & MAPPING
 - Map every `TRANSFORMATION_LOGIC` item to a discovered column using `target_criteria`. Do not hardcode column names unless they were returned by `read_data_schema`.
 - Translate every `on_failure_action` to real pandas code using the mapping defined in `arch_standard_python`. No rule may appear only as a comment — it must be real, executable code.
-- **ABSOLUTE PROHIBITION: `chunk['is_suspicious'] = False`** is never a valid implementation. `FLAG_AS_SUSPICIOUS` always requires a real pandas condition: `chunk['is_suspicious'] = ~condition`. Multiple rules combine with `|`.
+- **`is_suspicious` is conditional — not a default column:**
+  - `TRANSFORMATION_LOGIC` contains `FLAG_AS_SUSPICIOUS` → implement as `chunk['is_suspicious'] = ~condition` AND add `is_suspicious BOOLEAN` to the SQL DDL.
+  - `TRANSFORMATION_LOGIC` has NO `FLAG_AS_SUSPICIOUS` rule → omit `is_suspicious` entirely from both the Python script and the SQL DDL. No placeholder, no default, no column.
+  - **`chunk['is_suspicious'] = False` is never valid** — it is a placeholder, not an implementation. If there are no rules to apply, omit the column.
 
 ### 4. UNIVERSAL CODE GENERATION (PYTHON)
 Generate `scripts/*.py` following `arch_standard_python` exactly. The standard defines the authoritative skeleton and step ordering. These constraints must never be violated:
@@ -68,12 +71,25 @@ Generate `scripts/*.py` following `arch_standard_python` exactly. The standard d
 ---
 
 ## 🛠️ TOOL EXECUTION & PERSISTENCE
+
+### Normal Mode (initial generation)
 - **MANDATORY:** Execute `write_project_file` for every artifact:
     1. The Python pipeline script.
     2. The Trino DDL SQL script.
     3. The Monitoring JSON specification.
     4. The `requirements.txt` file.
 - **MANDATORY:** After writing ANY artifact, immediately call `validate_generated_code` with the same filename. If it returns errors, fix them before proceeding. An artifact that does not pass validation MUST NOT be considered complete.
+
+### Fix Mode (healing_context present)
+When `## 🔧 FIX MODE — ACTIVE` appears in your context, the Medic has diagnosed a specific error. You MUST:
+1. Read the healing_context carefully — it names the file and describes the exact problem.
+2. Use **`patch_project_file`** (surgical edit) — NEVER `write_project_file` in fix mode.
+3. Call `validate_generated_code` on the patched file to confirm the fix.
+4. Only modify the file(s) named in the healing_context — do not touch other files.
+
+**Fix decision for `is_suspicious = False` violations:**
+- Pipeline config has `FLAG_AS_SUSPICIOUS` rules → implement real pandas logic: `chunk['is_suspicious'] = ~condition`
+- Pipeline config has NO `FLAG_AS_SUSPICIOUS` rules → **remove the line entirely** using `patch_project_file`. Also remove `is_suspicious BOOLEAN` from the SQL DDL if present. Omitting is correct, not a violation.
 
 ---
 

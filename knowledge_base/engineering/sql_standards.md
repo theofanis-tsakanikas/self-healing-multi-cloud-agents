@@ -26,7 +26,8 @@ When generating `setup_trino.sql`, ensure the following:
 
   Trino's Hive connector supports `s3://` natively via the AWS S3 file system. With a GCS connector configured it supports `gs://`. With an Azure connector it supports `abfss://`. **Do NOT use `s3a://` (Hadoop/Spark protocol) for any cloud.** Do NOT replace `gs://` or `abfss://` with `s3://` — that would point to a non-existent AWS bucket.
 - **Data Types**:
-    - Column names and types MUST be derived from the schema returned by `read_data_schema` PLUS any columns added by business rules. Specifically: if any `FLAG_AS_SUSPICIOUS` rule is defined in the pipeline config, add `is_suspicious BOOLEAN` as a column — it is written to every Parquet file by the pipeline script and must be declared in the DDL. Do not omit it.
+    - Column names and types MUST be derived from the schema returned by `read_data_schema` PLUS any columns added by business rules.
+    - `is_suspicious BOOLEAN`: add this column **only if** at least one `FLAG_AS_SUSPICIOUS` rule is defined in `TRANSFORMATION_LOGIC`. If no such rule exists, omit the column entirely from the DDL — adding it without a corresponding pipeline implementation creates a schema/data mismatch. Do not add it as a default or placeholder.
     - Map discovered types as follows:
         - String / text → `VARCHAR`
         - Integer / count / quantity → `INTEGER` or `BIGINT`

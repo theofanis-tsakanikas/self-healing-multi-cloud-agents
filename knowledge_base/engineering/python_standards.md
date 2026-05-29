@@ -42,8 +42,10 @@ try:
 
 ### Business Rules
 - Every `quality_standards` entry from the pipeline config MUST be translated to real pandas code.
-- **`chunk['is_suspicious'] = False` is a COMPLIANCE VIOLATION** — it is a placeholder, not an implementation.
-- `FLAG_AS_SUSPICIOUS` sets `chunk['is_suspicious'] = ~condition`. Do NOT add a filter after — suspicious rows must be retained.
+- **`is_suspicious` is a conditional column — not a default:**
+  - `FLAG_AS_SUSPICIOUS` rule present → `chunk['is_suspicious'] = ~condition`. Do NOT filter rows after — retain all. Multiple rules combine with `|`.
+  - No `FLAG_AS_SUSPICIOUS` rule → omit `is_suspicious` entirely. No column, no placeholder.
+- **`chunk['is_suspicious'] = False` is a COMPLIANCE VIOLATION** — never a valid implementation regardless of context.
 
 ### Type Casting
 - Cast `float64` → `Int64` for quantity/count columns before every `to_parquet()` call — pandas defaults NULLable integers to float64, causing Trino to read `double` instead of `BIGINT`.
