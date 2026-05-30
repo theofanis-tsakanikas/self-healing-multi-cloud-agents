@@ -1532,7 +1532,15 @@ def push_to_github(project_id: str, commit_message: str):
             return f"STATUS: SUCCESS | Message: No changes detected for project {project_id}."
 
         # -u origin HEAD: sets upstream tracking on first push and works for any branch name.
-        subprocess.run(["git", "push", "-u", "origin", "HEAD"], cwd=REPO_ROOT, check=True)
+        push_result = subprocess.run(
+            ["git", "push", "-u", "origin", "HEAD"],
+            cwd=REPO_ROOT, capture_output=True, text=True
+        )
+        if push_result.returncode != 0:
+            return (
+                f"STATUS: ERROR | Message: Git Push Error (exit {push_result.returncode}): "
+                f"{push_result.stderr.strip() or push_result.stdout.strip()}"
+            )
 
         sha_result = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
@@ -1540,7 +1548,7 @@ def push_to_github(project_id: str, commit_message: str):
         commit_sha = sha_result.stdout.strip()
 
         return f"STATUS: SUCCESS | SHA: {commit_sha} | Message: Successfully pushed changes for {project_id} to GitHub."
-        
+
     except Exception as e:
         return f"STATUS: ERROR | Message: Git Push Error: {str(e)}"
 
