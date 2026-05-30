@@ -37,9 +37,9 @@ The Agent MUST select the logic block that matches the `target_cloud` identifier
 - **Auth:** Use `aws-actions/configure-aws-credentials@v4` with:
     - `aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}`
     - `aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}`
-    - `aws-region: ${{ secrets.AWS_DEFAULT_REGION }}`
+    - `aws-region: ${{ vars.AWS_DEFAULT_REGION }}`
 - **Registry:** `aws-actions/amazon-ecr-login@v2`.
-- **Kubeconfig:** `aws eks update-kubeconfig --region ${{ secrets.AWS_DEFAULT_REGION }} --name {{eks_cluster_name}}`
+- **Kubeconfig:** `aws eks update-kubeconfig --region ${{ vars.AWS_DEFAULT_REGION }} --name {{eks_cluster_name}}`
 
 ### 3.2 Module: GCP (target_cloud: gcp)
 - **Auth:** Use `google-github-actions/auth@v2` (via Workload Identity Federation or Service Account JSON secrets).
@@ -83,7 +83,7 @@ The following steps MUST appear in this exact order:
   with:
     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-    aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+    aws-region: ${{ vars.AWS_DEFAULT_REGION }}
 - name: ECR Login
   uses: aws-actions/amazon-ecr-login@v2
 - name: Build and Push Docker Image
@@ -93,7 +93,7 @@ The following steps MUST appear in this exact order:
     docker tag <real_ecr_url>:${{ github.sha }} <real_ecr_url>:latest
     docker push <real_ecr_url>:latest
 - name: Update Kubeconfig
-  run: aws eks update-kubeconfig --region ${{ secrets.AWS_DEFAULT_REGION }} --name <eks_cluster_name>
+  run: aws eks update-kubeconfig --region ${{ vars.AWS_DEFAULT_REGION }} --name <eks_cluster_name>
 - name: Set Image Tag in Job Manifest
   run: |
     sed -i 's|image: <real_ecr_url>.*|image: <real_ecr_url>:${{ github.sha }}|' k8s/job.yaml
@@ -109,16 +109,32 @@ The following steps MUST appear in this exact order:
 - name: Create DB Credentials Secret
   run: |
     # Secret name must be RFC 1123 and match job.yaml envFrom.secretRef.name exactly.
-    # Key names must match what the pipeline script reads (via cloud_get → env fallback).
-    # Per cloud:  AWS → POSTGRES_DB_*   Azure → CRM_DB_*   GCP → MYSQL_DB_*
+    #
+    # AWS: cloud_get() reads credentials from SSM Parameter Store via IRSA — the secret
+    # is created empty so the pod starts (envFrom: secretRef requires the object to exist)
+    # but env vars are never used at runtime. Do NOT add --from-literal values for AWS.
+    #
+    # GCP / Azure: cloud_get() reads directly from env vars — populate the secret with
+    # actual values from GitHub vars/secrets so the pipeline can connect to the database.
+    #   GCP   → MYSQL_DB_HOST (vars), MYSQL_DB_PORT (vars), MYSQL_DB_USER (vars),
+    #            MYSQL_DB_PASSWORD (secrets), MYSQL_DB_NAME (vars)
+    #   Azure → CRM_DB_HOST (vars), CRM_DB_PORT (vars), CRM_DB_USER (vars),
+    #            CRM_DB_PASSWORD (secrets), CRM_DB_NAME (vars)
+
+    # AWS — empty secret (credentials come from SSM via IRSA):
     kubectl create secret generic <project_id_rfc1123>-db-credentials \
       -n analytics \
-      --from-literal=POSTGRES_DB_HOST=${{ secrets.POSTGRES_DB_HOST }} \
-      --from-literal=POSTGRES_DB_PORT=${{ secrets.POSTGRES_DB_PORT }} \
-      --from-literal=POSTGRES_DB_USER=${{ secrets.POSTGRES_DB_USER }} \
-      --from-literal=POSTGRES_DB_PASSWORD=${{ secrets.POSTGRES_DB_PASSWORD }} \
-      --from-literal=POSTGRES_DB_NAME=${{ secrets.POSTGRES_DB_NAME }} \
       --dry-run=client -o yaml | kubectl apply -f -
+
+    # GCP example (substitute for Azure with CRM_DB_* keys):
+    # kubectl create secret generic <project_id_rfc1123>-db-credentials \
+    #   -n analytics \
+    #   --from-literal=MYSQL_DB_HOST=${{ vars.MYSQL_DB_HOST }} \
+    #   --from-literal=MYSQL_DB_PORT=${{ vars.MYSQL_DB_PORT }} \
+    #   --from-literal=MYSQL_DB_USER=${{ vars.MYSQL_DB_USER }} \
+    #   --from-literal=MYSQL_DB_PASSWORD=${{ secrets.MYSQL_DB_PASSWORD }} \
+    #   --from-literal=MYSQL_DB_NAME=${{ vars.MYSQL_DB_NAME }} \
+    #   --dry-run=client -o yaml | kubectl apply -f -
 - name: Deploy Pipeline Job to Kubernetes
   run: |
     kubectl delete job -l component=pipeline-job -n analytics --ignore-not-found=true
@@ -162,5 +178,5 @@ Per-cloud `--from-literal` key mapping:
 ---
 
 **## 5. SECURITY & COMPLIANCE**
-- **Secret Usage:** All credentials must be sourced from GitHub Secrets.
+- **Secret Usage:** DB credentials are read at runtime by `cloud_get()` — AWS reads from SSM Parameter Store via IRSA (K8s secret exists but is empty), GCP/Azure read from env vars injected via K8s secret. Never hardcode credentials in workflow files.
 - **Isolation:** Pipelines must be restricted to their respective project namespaces to prevent cross-project interference.
