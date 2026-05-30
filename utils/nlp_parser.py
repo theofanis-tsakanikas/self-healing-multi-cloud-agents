@@ -957,13 +957,6 @@ def _build_from_answers(
     infra_conf = _INFRA_CONF[cloud].copy()
 
     dest_uri = _destination_uri(cloud, cloud_setup)
-    rules_summary = (
-        "\n".join(
-            f"  - {r['rule_id']}: {r['on_failure_action']} on `{r['target_criteria']['column']}`"
-            for r in quality_standards
-        )
-        or "  - No explicit rules. Apply general data quality standards."
-    )
 
     nl_header = f"**Natural Language Input:** {description}\n\n---\n\n" if description else ""
 
@@ -980,7 +973,7 @@ def _build_from_answers(
 - Save script to: `scripts/{pipeline_id}.py`
 
 **BUSINESS RULES:**
-{rules_summary}
+  - See `TRANSFORMATION_LOGIC` in your context — this is the authoritative and complete rules list. Do not infer or skip rules based on this task description.
 
 **CATALOG & OBSERVABILITY:**
 - Trino DDL: `sql/setup_trino.sql` — external table at `{dest_uri}` with `run_date` partitioning
@@ -999,7 +992,7 @@ def _build_from_answers(
 
 ## 🔒 3. GLOBAL CONSTRAINTS
 
-- All credentials via `os.getenv()` / GitHub Secrets — zero hardcoding.
+- All DB credentials via `cloud_get()` — never `os.getenv()` for host/user/password/db. GitHub Secrets are for CI/CD auth only (ECR, cloud CLI).
 - Every agent MUST query the Vector Store for domain standards before writing.
 - Final signal: `echo "Deployment Complete"`.
 """
@@ -1165,13 +1158,6 @@ def build_pipeline_bundle_from_nl(
     infra_conf = _INFRA_CONF[cloud].copy()
 
     dest_uri = _destination_uri(cloud, cloud_setup)
-    rules_summary = (
-        "\n".join(
-            f"  - {r['rule_id']}: {r['on_failure_action']} on `{r['target_criteria']['column']}`"
-            for r in quality_standards
-        )
-        or "  - No explicit rules. Apply general data quality standards."
-    )
 
     task = f"""\
 # MISSION OBJECTIVE: {pipeline_id.upper()}
@@ -1190,7 +1176,7 @@ def build_pipeline_bundle_from_nl(
 - Save script to: `scripts/{pipeline_id}.py`
 
 **BUSINESS RULES:**
-{rules_summary}
+  - See `TRANSFORMATION_LOGIC` in your context — this is the authoritative and complete rules list. Do not infer or skip rules based on this task description.
 
 **CATALOG & OBSERVABILITY:**
 - Trino DDL: `sql/setup_trino.sql` — external table at `{dest_uri}` with `run_date` partitioning
@@ -1209,7 +1195,7 @@ def build_pipeline_bundle_from_nl(
 
 ## 🔒 3. GLOBAL CONSTRAINTS
 
-- All credentials via `os.getenv()` / GitHub Secrets — zero hardcoding.
+- All DB credentials via `cloud_get()` — never `os.getenv()` for host/user/password/db. GitHub Secrets are for CI/CD auth only (ECR, cloud CLI).
 - Every agent MUST query the Vector Store for domain standards before writing.
 - Final signal: `echo "Deployment Complete"`.
 """

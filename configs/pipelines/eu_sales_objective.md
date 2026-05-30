@@ -14,7 +14,7 @@
 - Save script to: `scripts/pipe_eu_sales_to_s3.py`
 
 **BUSINESS RULES:**
-  - No explicit rules. Apply general data quality standards.
+  - See `TRANSFORMATION_LOGIC` in your context — this is the authoritative and complete rules list. Do not infer or skip rules based on this task description.
 
 **CATALOG & OBSERVABILITY:**
 - Trino DDL: `sql/setup_trino.sql` — external table at `s3://eu-sales-insights-data/processed/` with `run_date` partitioning
@@ -33,6 +33,6 @@
 
 ## 🔒 3. GLOBAL CONSTRAINTS
 
-- All credentials via `os.getenv()` / GitHub Secrets — zero hardcoding.
+- All DB credentials via `cloud_get()` — never `os.getenv()` for host/user/password/db. GitHub Secrets are for CI/CD auth only (ECR, cloud CLI).
 - Every agent MUST query the Vector Store for domain standards before writing.
 - Final signal: `echo "Deployment Complete"`.
