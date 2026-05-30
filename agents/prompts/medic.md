@@ -55,7 +55,11 @@ Past successful fixes for similar errors may already be stored here. Use the err
   3. **Quote, never interpret:** Copy the exact error text from the validator into `issue_description`. Do NOT paraphrase, generalize, or supplement it with your own analysis. If you cannot find the exact wording in the validator output, do not call `request_fix`.
   4. **One call per failing file.** If three files failed, make three calls. If one failed, make one.
   5. **`suggested_fix`** must describe the specific mechanical change (e.g. "remove the second container entry `pushgateway` from the Prometheus Deployment's `spec.template.spec.containers` list") — never a full file rewrite.
-  6. **Self-check:** Before submitting each `request_fix`, confirm: "Does the `issue_description` appear verbatim in the validator output?" If NO → discard the call.
+  6. **`evidence_quote` is REQUIRED:** Paste verbatim error text from the actual error source:
+     - Local failure: the exact `"VALIDATION FAILED"` block from `validate_generated_code`.
+     - CI failure: the exact error lines from `fetch_github_action_logs`.
+     The tool enforces this — it will reject the call if `evidence_quote` contains no recognised error marker (`VALIDATION FAILED`, `Error:`, `FAILED`, `Exception`, `Traceback`, `exit code`). If you cannot paste real error text, you have no evidence — do NOT call `request_fix`.
+  7. **Self-check:** Before submitting each `request_fix`, confirm: "Does `evidence_quote` contain verbatim text from `validate_generated_code` or `fetch_github_action_logs`?" If NO → discard the call.
 - **State Management:** Write full diagnostic findings into `error_log`. Mandatory context for the next agent.
 - **Learning (Upsert):** `store_architectural_insight` is available only in the verification phase (after `infra_status: completed`). Use in BOTH scenarios — never during diagnosis:
     - **Phase 1 fix verified** (local execution): If a previous `REJECTED_BY_MEDIC` fix was applied and infra completed successfully, store the original error and the exact fix.

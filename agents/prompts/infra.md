@@ -55,7 +55,7 @@ The following structured context defines your infrastructure mission. All resour
   | `job.yaml` | 1 | Job with initContainers (init-trino) + containers (pipeline) |
 
   **Cloud-specific ServiceAccount annotation (`00_namespaces.yaml`):**
-  - AWS IRSA: `eks.amazonaws.com/role-arn: arn:aws:iam::<account_id>:role/<iam_role_name>` — `<account_id>` is the 12-digit prefix of the ECR URL that `execute_terraform` returns (the digits before `.dkr.ecr.`). `CLOUD_SETUP.ecr_repository_url` in your context is `RESOLVE_FROM_EXECUTE_TERRAFORM_OUTPUT` — the real URL is not available until after Terraform runs. Use only the actual URL from the terraform output; do not substitute any example or placeholder value. **Never write `<AWS_ACCOUNT_ID>` as a literal placeholder** — the validator will reject it.
+  - AWS IRSA: `eks.amazonaws.com/role-arn: arn:aws:iam::<account_id>:role/<iam_role_name>` — use `CLOUD_SETUP.aws_account_id` from your context for `<account_id>` and `CLOUD_SETUP.iam_role_name` for `<iam_role_name>`. Both are static values provided in context — never derive them from Terraform output, never write a `<...>` placeholder — the validator will reject it.
   - Azure Workload Identity: `azure.workload.identity/client-id: <client_id>` + label `azure.workload.identity/use: "true"`
   - GCP Workload Identity: `iam.gke.io/gcp-service-account: <gsa_email>`
 

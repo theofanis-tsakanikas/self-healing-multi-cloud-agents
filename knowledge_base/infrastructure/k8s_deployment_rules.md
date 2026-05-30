@@ -572,7 +572,7 @@ metadata:
     eks.amazonaws.com/role-arn: arn:aws:iam::<account_id>:role/<iam_role_name>
 ```
 
-Replace `<k8s_service_account_name>` and `<iam_role_name>` from `aws_setup` in context. `<account_id>` is the 12-digit prefix from the ECR repository URL.
+Replace `<k8s_service_account_name>` from `ORCHESTRATION.service_account`, `<iam_role_name>` from `CLOUD_SETUP.iam_role_name`, and `<account_id>` from `CLOUD_SETUP.aws_account_id` — all are static values provided in context. Never derive `<account_id>` from the ECR URL and never write a `<...>` placeholder — the validator will reject it.
 
 ### 8.2 Azure — Azure Workload Identity
 

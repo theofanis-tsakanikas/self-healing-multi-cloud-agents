@@ -873,7 +873,8 @@ def _build_from_answers(
     }
 
     if cloud == "aws":
-        if v := cloud_outputs.get("state_bucket"):   cloud_setup["state_bucket"] = v
+        if v := cloud_outputs.get("aws_account_id"):  cloud_setup["aws_account_id"] = v
+        if v := cloud_outputs.get("state_bucket"):    cloud_setup["state_bucket"] = v
         if v := cloud_outputs.get("lock_table"):      cloud_setup["lock_table"] = v
         if v := cloud_outputs.get("eks_oidc_issuer"): cloud_setup["eks_oidc_issuer"] = v
     elif cloud == "azure":

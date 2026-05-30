@@ -1605,19 +1605,48 @@ def _normalize_handoff_agent(agent_name: str) -> str:
     return "architect"
 
 
+_EVIDENCE_MARKERS = (
+    "VALIDATION FAILED",  # validate_generated_code Phase 1 local failure
+    "Error:",             # Python/Docker traceback
+    "error:",             # lowercase variant
+    "FAILED",             # CI step failure
+    "Exception",          # Python exception
+    "Traceback",          # Python traceback header
+    "exit code",          # shell/Docker non-zero exit
+    "rejected",           # auth/API rejection
+)
+
 @tool
-def request_fix(target_agent: str, issue_description: str, suggested_fix: str):
+def request_fix(target_agent: str, issue_description: str, suggested_fix: str, evidence_quote: str):
     """
     Sends a formal technical fix request to the Supervisor.
     - target_agent: 'architect' or 'infra'
-    - issue_description: Detailed summary of the error found in logs.
-    - suggested_fix: Exact technical steps or code snippets to resolve the issue.
+    - issue_description: MUST be copied verbatim from the error source. Never paraphrase.
+    - suggested_fix: Exact mechanical change to resolve the issue (not a full file rewrite).
+    - evidence_quote: Verbatim text from the error source that proves a real failure occurred.
+      For local failures: the exact 'VALIDATION FAILED' block from validate_generated_code.
+      For CI failures: the exact error lines from fetch_github_action_logs.
+      Must contain at least one error marker (e.g. 'VALIDATION FAILED', 'Error:', 'FAILED',
+      'Exception', 'Traceback', 'exit code'). Rejected if empty or contains no error marker —
+      you MUST NOT call this tool based on your own analysis of artifact content.
     """
+    if not evidence_quote or not any(m in evidence_quote for m in _EVIDENCE_MARKERS):
+        return json.dumps({
+            "status": "TOOL_ERROR",
+            "error": (
+                "request_fix rejected: evidence_quote contains no recognised error marker "
+                f"({', '.join(repr(m) for m in _EVIDENCE_MARKERS)}). "
+                "Paste the exact failure text from validate_generated_code or "
+                "fetch_github_action_logs. Do NOT call request_fix based on your own "
+                "analysis of artifact content."
+            ),
+        }, ensure_ascii=False)
     payload = {
         "status": "REJECTED_BY_MEDIC",
         "target_agent": _normalize_handoff_agent(target_agent),
         "diagnosis": issue_description,
         "healing_instructions": suggested_fix,
+        "evidence": evidence_quote,
     }
     return json.dumps(payload, ensure_ascii=False)
 

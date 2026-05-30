@@ -110,6 +110,7 @@ def build_infra_context(pipeline_conf: dict, infra_conf: dict) -> str:
         _ecr_raw = cloud_setup.get("ecr_repository_name") or cloud_setup.get("ecr_repository", "")
         _ecr_name = _ecr_raw.split("/")[-1] if "/" in _ecr_raw else _ecr_raw
         infra_setup = {
+            "aws_account_id": cloud_setup.get("aws_account_id", ""),
             "bucket_name": cloud_setup.get("bucket_name"),
             "state_bucket": cloud_setup.get("state_bucket"),
             "state_key": cloud_setup.get("state_key"),

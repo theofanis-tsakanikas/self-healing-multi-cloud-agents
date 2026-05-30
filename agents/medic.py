@@ -5,7 +5,7 @@ import random
 import time
 from pathlib import Path
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 from agents.llm_factory import get_llm
 from agents.state import AgentState
 from agents.tools import (
@@ -29,6 +29,42 @@ logger = logging.getLogger("MEDIC")
 load_dotenv()
 
 _MAX_POLL_WAIT_SECONDS = 300  # 5-minute ceiling per backoff step
+
+
+def _extract_validation_summary(messages: list) -> dict[str, tuple[str, str]]:
+    """
+    Parses state["messages"] and returns a dict mapping filename → (status, detail).
+    status is "CLEAN" or "FAILED". detail is the error text for FAILED, empty for CLEAN.
+
+    Strategy: AIMessage.tool_calls links each validate_generated_code call to its filename.
+    The matching ToolMessage (by tool_call_id) holds the result text.
+    Only the MOST RECENT result per file is kept — earlier attempts are superseded.
+    """
+    # Build tool_call_id → filename map from AIMessages
+    call_id_to_file: dict[str, str] = {}
+    for msg in messages:
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            for tc in msg.tool_calls:
+                if tc.get("name") == "validate_generated_code":
+                    fname = tc.get("args", {}).get("filename", "")
+                    if fname and tc.get("id"):
+                        call_id_to_file[tc["id"]] = fname
+
+    # Walk ToolMessages and classify results; later entries overwrite earlier ones
+    results: dict[str, tuple[str, str]] = {}
+    for msg in messages:
+        if not isinstance(msg, ToolMessage):
+            continue
+        fname = call_id_to_file.get(msg.tool_call_id)
+        if not fname:
+            continue
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        if "VALIDATION FAILED" in content:
+            results[fname] = ("FAILED", content)
+        elif content.startswith("CLEAN"):
+            results[fname] = ("CLEAN", "")
+
+    return results
 
 def medic_node(state: AgentState):
     """
@@ -83,7 +119,30 @@ def medic_node(state: AgentState):
     except Exception as e:
         system_prompt = "Diagnostic mode active. Analyze CI/CD logs."
 
-    # 2. CONTEXT PREPARATION
+    # 2. VALIDATION SUMMARY — parsed at the Python layer, never left to the LLM to scan messages.
+    # The LLM sees a structured list of exactly which files FAILED (with verbatim error text)
+    # and which are CLEAN. This is the authoritative source for request_fix decisions:
+    # only files in the FAILED list may be passed to request_fix.
+    _validation_results = _extract_validation_summary(state["messages"])
+    if _validation_results:
+        _failed = {f: det for f, (st, det) in _validation_results.items() if st == "FAILED"}
+        _clean  = [f for f, (st, _) in _validation_results.items() if st == "CLEAN"]
+        _summary_lines = ["\n\n## VALIDATION SUMMARY (authoritative — do not override with your own analysis)"]
+        if _failed:
+            _summary_lines.append("\n### FAILED — call request_fix ONLY for these files:")
+            for fname, detail in _failed.items():
+                _summary_lines.append(f"\n**{fname}**\n```\n{detail}\n```")
+        else:
+            _summary_lines.append("\n### FAILED — none")
+        if _clean:
+            _summary_lines.append("\n### CLEAN — do NOT call request_fix for these files:")
+            _summary_lines.append(", ".join(f"`{f}`" for f in _clean))
+        system_prompt += "\n".join(_summary_lines)
+        logger.info(
+            f"📊 Validation summary injected — FAILED: {list(_failed.keys())}, CLEAN: {_clean}"
+        )
+
+    # 3. CONTEXT PREPARATION
     # Smart standard injection: identify WHICH standard is relevant to the current error,
     # then inject only that one from collected_specs (already loaded by architect/infra).
     # This avoids context bloat from dumping all standards AND avoids redundant Pinecone queries.
@@ -106,11 +165,11 @@ def medic_node(state: AgentState):
     }
 
     collected_specs = state.get("collected_specs", {})
-    error_context = (
-        state.get("error_log", "") + " " +
-        " ".join(str(m.content if hasattr(m, "content") else m)
-                 for m in state["messages"][-4:])
-    ).lower()
+    # Build error_context from the structured validation summary + error_log.
+    # Using the parsed summary (not raw messages) prevents the LLM from "discovering"
+    # errors in CLEAN files via context bleed.
+    _failed_text = " ".join(det for _, det in _validation_results.values() if det)
+    error_context = (state.get("error_log", "") + " " + _failed_text).lower()
 
     matched_standards = {}
     for key, indicators in _STANDARD_INDICATORS.items():

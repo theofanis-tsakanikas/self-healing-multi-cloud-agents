@@ -375,18 +375,19 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         else:
             relevant_keys = []
 
-        # Critical K8s standard: always read from disk, never from collected_specs.
+        # All four infra standards are always read from disk to bypass Pinecone key-swapping.
         # The discovery-phase agent frequently stores query results under the wrong
         # collected_specs key (e.g. cicd_standards.md ends up as infra_standard_k8s).
-        # k8s_deployment_rules.md is always needed for orchestration and its path is known.
-        if "infra_standard_k8s" in relevant_keys:
-            _k8s_rules_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "knowledge_base", "infrastructure", "k8s_deployment_rules.md"
-            )
-            if os.path.exists(_k8s_rules_path):
-                with open(_k8s_rules_path, encoding="utf-8") as _f:
-                    collected_specs["infra_standard_k8s"] = _f.read()
+        _kb_root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "knowledge_base")
+        _disk_standards = {
+            "infra_standard_k8s":        os.path.join(_kb_root, "infrastructure", "k8s_deployment_rules.md"),
+            "infra_standard_dockerfile": os.path.join(_kb_root, "infrastructure", "dockerfile_standard.md"),
+            "infra_standard_cicd":       os.path.join(_kb_root, "engineering",    "cicd_standards.md"),
+        }
+        for _std_key, _std_path in _disk_standards.items():
+            if _std_key in relevant_keys and os.path.exists(_std_path):
+                with open(_std_path, encoding="utf-8") as _f:
+                    collected_specs[_std_key] = _f.read()
 
         if relevant_keys:
             system_prompt += "\n\n## ENGINEERING STANDARDS — follow these exactly:\n"
