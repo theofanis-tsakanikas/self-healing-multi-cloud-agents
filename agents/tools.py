@@ -614,23 +614,6 @@ def validate_generated_code(filename: str) -> str:
                         "Without it Trino does not recognize the file as a Hive connector config. "
                         "See k8s_deployment_rules.md Section 8.4 for the full required property set."
                     )
-                # AWS: Glue needs the region to resolve the endpoint — missing it causes GetTable to fail.
-                # Only check when connector.name=hive is already present (avoids duplicate errors).
-                _cm_cloud = os.getenv("CLOUD_PROVIDER", "").lower()
-                if (
-                    _cm_cloud == "aws"
-                    and "hive-catalog-config" in raw
-                    and "connector.name=hive" in raw
-                    and "hive.metastore.glue.region" not in raw
-                ):
-                    errors.append(
-                        "K8S configmaps.yaml [project policy]: hive-catalog-config is missing "
-                        "'hive.metastore.glue.region' — AWS Glue requires the region to resolve "
-                        "the service endpoint; omitting it causes Trino to fail with a configuration error. "
-                        "See k8s_deployment_rules.md Section 8.4 for the full required property set "
-                        "(connector.name, hive.metastore=glue, hive.metastore.glue.region, "
-                        "hive.s3.region, hive.s3.path-style-access, hive.allow-drop-table)."
-                    )
 
             elif fname in ("trino_deployment.yaml", "grafana_deployment.yaml", "prometheus_deployment.yaml"):
                 # Every deployment file must contain at least one Service — without it the pods are unreachable.

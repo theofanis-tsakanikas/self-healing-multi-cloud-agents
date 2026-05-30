@@ -68,6 +68,7 @@ The following structured context defines your infrastructure mission. All resour
   - `hive-catalog-config` data key MUST be `hive.properties` — NEVER `catalog.properties` or any other name. Trino mounts `/etc/trino/catalog/hive.properties`.
   - Cloud-specific hive connector content: follow `infra_standard_k8s` Section 8.4 verbatim for the active cloud provider.
   - AWS hive-catalog-config MUST use `hive.metastore=glue` — NEVER `hive.metastore.uri=thrift://...`. Thrift is for standalone Hive servers; AWS uses Glue as the managed metastore. See Section 8.4.
+  - **Copy ALL properties from Section 8.4 verbatim for the active cloud** — every property is required and has a specific runtime effect. Omitting any one (e.g. `hive.metastore.glue.region` on AWS, or the ADLS credential properties on Azure) causes a silent Trino connection failure. The standard is the complete specification — do not cherry-pick.
 
   **`job.yaml` non-negotiables — all required, no exceptions:**
   - `namespace: analytics` in metadata — the Job must co-locate with Trino and the ServiceAccount.
