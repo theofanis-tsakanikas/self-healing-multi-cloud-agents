@@ -375,6 +375,19 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         else:
             relevant_keys = []
 
+        # Critical K8s standard: always read from disk, never from collected_specs.
+        # The discovery-phase agent frequently stores query results under the wrong
+        # collected_specs key (e.g. cicd_standards.md ends up as infra_standard_k8s).
+        # k8s_deployment_rules.md is always needed for orchestration and its path is known.
+        if "infra_standard_k8s" in relevant_keys:
+            _k8s_rules_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "knowledge_base", "infrastructure", "k8s_deployment_rules.md"
+            )
+            if os.path.exists(_k8s_rules_path):
+                with open(_k8s_rules_path, encoding="utf-8") as _f:
+                    collected_specs["infra_standard_k8s"] = _f.read()
+
         if relevant_keys:
             system_prompt += "\n\n## ENGINEERING STANDARDS — follow these exactly:\n"
             for key in relevant_keys:

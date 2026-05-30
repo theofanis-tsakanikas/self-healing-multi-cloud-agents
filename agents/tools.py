@@ -527,9 +527,43 @@ def validate_generated_code(filename: str) -> str:
                         "K8S job.yaml [project policy]: missing 'namespace: analytics' in job metadata — "
                         "the Job must run in the analytics namespace where Trino and the ServiceAccount live."
                     )
-                for env_var in ["PROJECT_ID", "CLOUD_PROVIDER", "TRINO_HOST", "PUSHGATEWAY_URL", "DESTINATION_URI"]:
-                    if env_var not in raw:
-                        errors.append(f"K8S job.yaml [project policy]: missing env var '{env_var}' — required by the pipeline script.")
+                # Check env vars are present in the *pipeline* container specifically, not
+                # just anywhere in the file. init-trino carries some vars too, which would
+                # cause a raw string-search to give a false-CLEAN for the pipeline container.
+                _pipeline_env_vars: set = set()
+                try:
+                    for _doc in yaml.safe_load_all(raw):
+                        if not _doc:
+                            continue
+                        _pod_spec = (
+                            _doc.get("spec", {})
+                                .get("template", {})
+                                .get("spec", {})
+                        )
+                        for _c in (_pod_spec.get("containers", []) or []):
+                            if (_c.get("name") or "").lower() == "pipeline":
+                                for _ev in (_c.get("env", []) or []):
+                                    if _ev.get("name"):
+                                        _pipeline_env_vars.add(_ev["name"])
+                except yaml.YAMLError:
+                    pass
+                _required_pipeline_vars = [
+                    "PROJECT_ID", "CLOUD_PROVIDER", "TRINO_HOST", "PUSHGATEWAY_URL", "DESTINATION_URI"
+                ]
+                if _pipeline_env_vars:
+                    # YAML parsed successfully — check pipeline container directly
+                    for env_var in _required_pipeline_vars:
+                        if env_var not in _pipeline_env_vars:
+                            errors.append(
+                                f"K8S job.yaml [project policy]: missing env var '{env_var}' in the "
+                                f"'pipeline' container — required by the pipeline script. "
+                                f"(Having it only in the init-trino container is not enough.)"
+                            )
+                else:
+                    # Fallback: YAML parse failed or pipeline container not found — broad check
+                    for env_var in _required_pipeline_vars:
+                        if env_var not in raw:
+                            errors.append(f"K8S job.yaml [project policy]: missing env var '{env_var}' — required by the pipeline script.")
                 if "PUSHGATEWAY_URL" in raw and not _re.search(r'http://pushgateway', raw):
                     errors.append(
                         "K8S job.yaml [project policy]: PUSHGATEWAY_URL value is missing the 'http://' scheme — "
@@ -611,7 +645,16 @@ def validate_generated_code(filename: str) -> str:
                         "K8S configmaps.yaml [project policy]: hive-catalog-config data key must be 'hive.properties' "
                         "(not 'catalog.properties' or any other name). Trino mounts /etc/trino/catalog/hive.properties."
                     )
-                _cm_cloud = os.getenv("CLOUD_PROVIDER", "").lower()
+                # Detect cloud from YAML content — never from an env var, which is
+                # empty when the validator runs locally (outside the K8s runtime).
+                if "hive.metastore=glue" in raw:
+                    _cm_cloud = "aws"
+                elif "hive.metastore=file" in raw and "abfss://" in raw:
+                    _cm_cloud = "azure"
+                elif "hive.metastore=file" in raw and "gs://" in raw:
+                    _cm_cloud = "gcp"
+                else:
+                    _cm_cloud = os.getenv("CLOUD_PROVIDER", "").lower()
                 if _cm_cloud == "aws" and "hive-catalog-config" in raw and "thrift://" in raw:
                     errors.append(
                         "K8S configmaps.yaml [project policy]: hive-catalog-config uses Thrift metastore "

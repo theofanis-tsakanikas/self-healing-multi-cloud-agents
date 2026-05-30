@@ -55,7 +55,7 @@ The following structured context defines your infrastructure mission. All resour
   | `job.yaml` | 1 | Job with initContainers (init-trino) + containers (pipeline) |
 
   **Cloud-specific ServiceAccount annotation (`00_namespaces.yaml`):**
-  - AWS IRSA: `eks.amazonaws.com/role-arn: arn:aws:iam::<account_id>:role/<iam_role_name>` — `<account_id>` is the 12-digit prefix from the real ECR URL returned by `execute_terraform` (e.g. `123456789012` from `123456789012.dkr.ecr.eu-central-1.amazonaws.com/...`). `CLOUD_SETUP.ecr_repository_name` in your context is the repo name only — `CLOUD_SETUP.ecr_repository_url` is `RESOLVE_FROM_EXECUTE_TERRAFORM_OUTPUT`, meaning the full URL is **not** available until after Terraform runs. Generate K8s manifests only after `execute_terraform` completes and you have the real URL. **Never write `<AWS_ACCOUNT_ID>` as a literal placeholder** — the validator will reject it.
+  - AWS IRSA: `eks.amazonaws.com/role-arn: arn:aws:iam::<account_id>:role/<iam_role_name>` — `<account_id>` is the 12-digit prefix of the ECR URL that `execute_terraform` returns (the digits before `.dkr.ecr.`). `CLOUD_SETUP.ecr_repository_url` in your context is `RESOLVE_FROM_EXECUTE_TERRAFORM_OUTPUT` — the real URL is not available until after Terraform runs. Use only the actual URL from the terraform output; do not substitute any example or placeholder value. **Never write `<AWS_ACCOUNT_ID>` as a literal placeholder** — the validator will reject it.
   - Azure Workload Identity: `azure.workload.identity/client-id: <client_id>` + label `azure.workload.identity/use: "true"`
   - GCP Workload Identity: `iam.gke.io/gcp-service-account: <gsa_email>`
 
@@ -68,15 +68,16 @@ The following structured context defines your infrastructure mission. All resour
   - `hive-catalog-config` data key MUST be `hive.properties` — NEVER `catalog.properties` or any other name. Trino mounts `/etc/trino/catalog/hive.properties`.
   - **`connector.name=hive` MUST be the FIRST line in `hive.properties`** — Trino ignores the file entirely without it and silently falls back to no connector.
   - Cloud-specific hive connector content: follow `infra_standard_k8s` Section 8.4 verbatim for the active cloud provider.
-  - AWS hive-catalog-config MUST use `hive.metastore=glue` — NEVER `hive.metastore.uri=thrift://...`. Thrift is for standalone Hive servers; AWS uses Glue as the managed metastore. See Section 8.4.
+  - **AWS hive-catalog-config: `hive.metastore=glue` is the ONLY valid metastore setting — `hive.metastore.uri=thrift://...` is FORBIDDEN and causes an immediate Trino startup failure.** Thrift requires a standalone Hive Metastore Server running on a network endpoint; there is no such server in this architecture. AWS Glue IS the metastore. The validator will reject `thrift://` in any AWS configmaps.yaml.
   - **Copy Section 8.4 verbatim — do NOT add properties beyond the standard.** `hive.metastore.glue.catalog.id` is NOT in the standard. It is a cross-account Glue override — same-account deployments do not need it, and the validator will reject it whether the value is a placeholder or a real account ID. Even if you know the AWS account ID from `execute_terraform`, do NOT use it for this property.
   - **Copy ALL properties from Section 8.4 verbatim for the active cloud** — every listed property is required and has a specific runtime effect. Omitting any one (e.g. `hive.metastore.glue.region` on AWS, or the ADLS credential properties on Azure) causes a silent Trino connection failure. The standard is the complete specification — do not cherry-pick.
 
   **`job.yaml` non-negotiables — all required, no exceptions:**
   - `namespace: analytics` in metadata — the Job must co-locate with Trino and the ServiceAccount.
-  - `initContainers:` for init-trino — NEVER place it under `containers:`. Containers[] run in parallel; initContainers run sequentially before the pipeline starts.
+  - **`initContainers:` for init-trino — NEVER place it under `containers:`.** Containers[] run in parallel; initContainers run sequentially before the pipeline starts. The init-trino entry belongs under `initContainers:`, full stop.
+  - **`init-trino` initContainer MUST have a `command:` that runs the Trino CLI against the SQL file** — without it the container uses the Trino image's default CMD (starts a server), which is wrong. Copy the command skeleton from `infra_standard_k8s` Section 2 verbatim. It also needs `volumeMounts` for the `sql-scripts` volume (trino-sql-config ConfigMap at `/scripts`).
+  - **All 5 env vars MUST be on the `pipeline` container:** `PROJECT_ID`, `CLOUD_PROVIDER`, `TRINO_HOST`, `PUSHGATEWAY_URL`, `DESTINATION_URI`. Having them only on init-trino is not sufficient — the pipeline Python script reads them at runtime from its own container environment.
   - `serviceAccountName` — required for workload identity (IRSA/GKE WI/Azure WI) to access S3/GCS/ADLS.
-  - `DESTINATION_URI` env var — the pipeline script reads `os.getenv("DESTINATION_URI")` at runtime; omitting it causes immediate `NoneType` failure.
   - `PUSHGATEWAY_URL` value MUST include `http://` — `push_to_gateway()` requires a full URL, not just a hostname.
 
   **Deployment skeletons are non-negotiable:** Copy `volumeMounts` + `volumes` from `infra_standard_k8s` exactly for every Deployment — Trino, Grafana, and Prometheus each require specific ConfigMap mounts to function. A Deployment generated without its volume mounts starts but silently ignores its configuration.
