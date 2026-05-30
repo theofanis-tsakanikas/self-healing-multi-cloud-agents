@@ -197,7 +197,10 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             #      as fallback for structural rewrites. Never push before validation passes.
             if state.get("medic_fix_requested", False) and state.get("github_done", False):
                 if state.get("healing_context", "").strip():
-                    selected_keys = ["patch_project_file", "generate_k8s_manifest", "push_to_github"]
+                    # patch_project_file only — generate_k8s_manifest is forbidden in fix mode.
+                    # Full rewrites of multi-object files (prometheus: 4 objects, configmaps: 5)
+                    # always risk losing objects not mentioned in the healing_context.
+                    selected_keys = ["patch_project_file", "push_to_github"]
                 else:
                     selected_keys = ["push_to_github"]
 

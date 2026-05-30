@@ -47,7 +47,11 @@ Past successful fixes for similar errors may already be stored here. Use the err
 - **Scope Limitation:** Once the heartbeat is detected, your mission is complete.
 
 ### 4. ACT & PERSIST (Healing Coordination & Memory)
-- **Fix Coordination:** If any error is detected, use `request_fix`. Provide a **traceback snippet** and a **concrete technical resolution** based on Project Specs.
+- **Fix Coordination — grounded diagnosis only:**
+  1. Before calling `request_fix`, explicitly identify WHICH files returned validation errors from `validate_generated_code` in the message history. A file that returned `CLEAN` is correct — never include it in a `request_fix`.
+  2. The `issue_description` MUST quote the **exact validator error text** — do not paraphrase, generalize, or invent. If you cannot cite a specific line from the validator output, do not call `request_fix`.
+  3. One `request_fix` per failing file. If two files failed, make two separate calls — one per file, each with its exact file name and validator error.
+  4. `suggested_fix` must describe the specific change needed (e.g. "add `--config.file=/etc/prometheus/prometheus.yml` to Prometheus args") — never a full file rewrite.
 - **State Management:** Write full diagnostic findings into `error_log`. Mandatory context for the next agent.
 - **Learning (Upsert):** `store_architectural_insight` is available only in the verification phase (after `infra_status: completed`). Use in BOTH scenarios — never during diagnosis:
     - **Phase 1 fix verified** (local execution): If a previous `REJECTED_BY_MEDIC` fix was applied and infra completed successfully, store the original error and the exact fix.
