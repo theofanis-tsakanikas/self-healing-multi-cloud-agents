@@ -109,21 +109,12 @@ The following steps MUST appear in this exact order:
 - name: Create DB Credentials Secret
   run: |
     # Secret name must be RFC 1123 and match job.yaml envFrom.secretRef.name exactly.
-    # cloud_get() resolves: SSM (AWS primary) → bootstrap_outputs → env vars (fallback).
-    # These env vars are the fallback path — required when SSM is not yet populated
-    # (e.g. bootstrap has not run). In full production with bootstrap+SSM, SSM takes
-    # precedence and these values are never read.
-    #
-    # Sensitivity split: HOST/PORT/USER/NAME are not sensitive → GitHub vars.
-    # PASSWORD is sensitive → GitHub secret.
-    # Per cloud:  AWS → POSTGRES_DB_*   Azure → CRM_DB_*   GCP → MYSQL_DB_*
+    # AWS: cloud_get() reads credentials from SSM Parameter Store via IRSA — the secret
+    # is created empty so the pod starts (envFrom: secretRef requires the object to exist).
+    # SSM is the single source of truth; env vars are never needed if bootstrap has run.
+    # GCP/Azure: populate with actual values (MYSQL_DB_* / CRM_DB_*) from GitHub vars/secrets.
     kubectl create secret generic <project_id_rfc1123>-db-credentials \
       -n analytics \
-      --from-literal=POSTGRES_DB_HOST=${{ vars.POSTGRES_DB_HOST }} \
-      --from-literal=POSTGRES_DB_PORT=${{ vars.POSTGRES_DB_PORT }} \
-      --from-literal=POSTGRES_DB_USER=${{ vars.POSTGRES_DB_USER }} \
-      --from-literal=POSTGRES_DB_PASSWORD=${{ secrets.POSTGRES_DB_PASSWORD }} \
-      --from-literal=POSTGRES_DB_NAME=${{ vars.POSTGRES_DB_NAME }} \
       --dry-run=client -o yaml | kubectl apply -f -
 - name: Deploy Pipeline Job to Kubernetes
   run: |
