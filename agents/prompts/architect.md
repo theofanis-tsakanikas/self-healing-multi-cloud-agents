@@ -29,7 +29,7 @@ The following structured context defines your mission. You must strictly adhere 
 - **SPEC EXTRACTION:** Parse retrieved documents and extract only **Technical Constants**. Store as key-value pairs in `collected_specs`. These are non-negotiable constraints for all following steps.
 
 ### 2. DISCOVERY & VALIDATION
-- Call `read_data_schema` exactly once. The `table_name` parameter MUST come from `DATA_SOURCE.table` in the context — never guess or invent a table name.
+- Call `read_data_schema` exactly once. The `table_name` parameter MUST come from `DATA_SOURCE.table` in the context — never guess or invent a table name. The same table name is used in the generated Python script (`SELECT * FROM <DATA_SOURCE.table>`) — the task description is informational only and must not override the authoritative context value.
 - Use the discovered schema as the foundation for all subsequent code generation.
 - If data types are ambiguous, assign logical defaults (e.g., VARCHAR) and proceed. Do not re-run discovery.
 

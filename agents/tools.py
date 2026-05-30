@@ -627,6 +627,18 @@ def validate_generated_code(filename: str) -> str:
                         "Without it Trino does not recognize the file as a Hive connector config. "
                         "See k8s_deployment_rules.md Section 8.4 for the full required property set."
                     )
+                # hive.metastore.glue.catalog.id is not in Section 8.4 and must not be added.
+                # It is a cross-account Glue override. Same-account deployments do not need it,
+                # and adding it (even with a real account ID) drifts from the verbatim standard.
+                if "hive.metastore.glue.catalog.id" in raw:
+                    errors.append(
+                        "K8S configmaps.yaml [project policy]: hive.properties contains "
+                        "'hive.metastore.glue.catalog.id' which is NOT in Section 8.4 of k8s_deployment_rules.md. "
+                        "This is a cross-account Glue override — same-account deployments do not need it. "
+                        "Remove it and copy Section 8.4 verbatim: connector.name=hive, hive.metastore=glue, "
+                        "hive.metastore.glue.region, hive.s3.region, hive.s3.path-style-access, "
+                        "hive.allow-drop-table, hive.allow-rename-table."
+                    )
 
             elif fname in ("trino_deployment.yaml", "grafana_deployment.yaml", "prometheus_deployment.yaml"):
                 # Every deployment file must contain at least one Service — without it the pods are unreachable.
@@ -745,8 +757,15 @@ def validate_generated_code(filename: str) -> str:
                             .get("spec", {})
                             .get("containers", []) or []
                         )
-                        if any("pushgateway" in (c.get("image", "") or "").lower()
-                               for c in _prom_containers):
+                        if len(_prom_containers) > 1:
+                            errors.append(
+                                f"K8S prometheus_deployment.yaml [project policy]: Prometheus Deployment has "
+                                f"{len(_prom_containers)} containers — must have EXACTLY 1 (prometheus). "
+                                "Pushgateway is a separate Deployment, not a sidecar in the Prometheus pod. "
+                                "Remove every container entry other than 'prometheus' from the Prometheus Deployment."
+                            )
+                        elif any("pushgateway" in (c.get("image", "") or "").lower()
+                                 for c in _prom_containers):
                             errors.append(
                                 "K8S prometheus_deployment.yaml [project policy]: Pushgateway is a sidecar "
                                 "inside the Prometheus Deployment — it must be a separate Deployment. "

@@ -7,7 +7,7 @@
 ## 🏗️ 1. ARCHITECT SCOPE (DATA LOGIC)
 
 **DATA PIPELINE (PYTHON):**
-- Source: `postgres` database, table `raw_orders`
+- Source: `postgres` database — table from `DATA_SOURCE.table` in your context (never guess or invent a table name)
 - Output format: parquet/snappy
 - Destination URI: `s3://eu-sales-insights-data/processed/`
 - Idempotency: check `s3://eu-sales-insights-data/processed/run_date=<today>/` before writing. If data exists, exit 0.

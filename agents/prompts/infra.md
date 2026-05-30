@@ -69,7 +69,7 @@ The following structured context defines your infrastructure mission. All resour
   - **`connector.name=hive` MUST be the FIRST line in `hive.properties`** — Trino ignores the file entirely without it and silently falls back to no connector.
   - Cloud-specific hive connector content: follow `infra_standard_k8s` Section 8.4 verbatim for the active cloud provider.
   - AWS hive-catalog-config MUST use `hive.metastore=glue` — NEVER `hive.metastore.uri=thrift://...`. Thrift is for standalone Hive servers; AWS uses Glue as the managed metastore. See Section 8.4.
-  - **Copy Section 8.4 verbatim — do NOT add properties beyond the standard.** `hive.metastore.glue.catalog.id` is NOT in the standard (it is a cross-account Glue override and leaves `<AWS_ACCOUNT_ID>` as an unresolved placeholder). The validator will reject any `<...>` placeholder in a K8s manifest.
+  - **Copy Section 8.4 verbatim — do NOT add properties beyond the standard.** `hive.metastore.glue.catalog.id` is NOT in the standard. It is a cross-account Glue override — same-account deployments do not need it, and the validator will reject it whether the value is a placeholder or a real account ID. Even if you know the AWS account ID from `execute_terraform`, do NOT use it for this property.
   - **Copy ALL properties from Section 8.4 verbatim for the active cloud** — every listed property is required and has a specific runtime effect. Omitting any one (e.g. `hive.metastore.glue.region` on AWS, or the ADLS credential properties on Azure) causes a silent Trino connection failure. The standard is the complete specification — do not cherry-pick.
 
   **`job.yaml` non-negotiables — all required, no exceptions:**
@@ -88,6 +88,7 @@ The following structured context defines your infrastructure mission. All resour
   - `trino-sql-config` → `mountPath: /scripts` — SQL DDL scripts for `init-trino`. These are two different ConfigMaps with two different mount points.
 
   **Prometheus: Pushgateway is a separate Deployment** — NEVER a sidecar container inside the Prometheus pod. `prometheus_deployment.yaml` MUST contain 4 separate objects: Prometheus Deployment + ClusterIP Service + Pushgateway Deployment + Pushgateway ClusterIP Service.
+  - **Prometheus Deployment `spec.template.spec.containers` MUST have EXACTLY ONE entry: `prometheus`.** Never add `pushgateway` (or any other container) as a second entry in the Prometheus Deployment's containers list — even if co-locating seems convenient. The Pushgateway runs in its own pod (separate Deployment).
   - **Prometheus container MUST have `args: ["--config.file=/etc/prometheus/prometheus.yml"]`** — without this arg Prometheus ignores the mounted ConfigMap entirely and uses default settings (no Pushgateway scrape target).
 
 ### 4. CI/CD WORKFLOW (GITHUB ACTIONS)

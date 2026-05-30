@@ -233,14 +233,20 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                     "\n• Pinned images: trinodb/trino:403 | grafana/grafana:10.4.2 | prom/prometheus:v2.51.0 | prom/pushgateway:v1.8.0"
                 ).format(project_id=project_id or "pipeline")
 
+                # When healing_context is present the agent must patch existing files,
+                # not regenerate them. Generate tools are added only for files that are
+                # genuinely absent from written_files — never because medic_triggered_fix
+                # is True, since that flag alone would cause existing files to be rewritten
+                # (overwriting correct content) instead of surgically patched.
+                _has_healing = bool(state.get("healing_context", "").strip())
                 selected_keys = []
-                if not docker_ready or medic_triggered_fix:
+                if not docker_ready or (medic_triggered_fix and not _has_healing):
                     selected_keys.append("generate_dockerfile")
-                if not k8s_ready or medic_triggered_fix:
+                if not k8s_ready or (medic_triggered_fix and not _has_healing):
                     selected_keys.append("generate_k8s_manifest")
                 # generate_github_action unlocks only after K8s manifests and Dockerfile
                 # are fully ready — the workflow references these artifacts.
-                if (k8s_ready and docker_ready and not github_ready) or medic_triggered_fix:
+                if (k8s_ready and docker_ready and not github_ready) or (medic_triggered_fix and not _has_healing):
                     selected_keys.append("generate_github_action")
                 # NOTE: validate_generated_code is NOT added to selected_keys —
                 # it runs automatically in Python after every generate_* call (see
@@ -564,6 +570,15 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                             updated_files.append(tracked)
                         gha_path = os.path.join(str(REPO_ROOT), ".github", "workflows", raw)
                         auto_validate_path = gha_path
+
+                    elif t_name == "patch_project_file":
+                        # Auto-validate the patched file immediately — same guarantee as
+                        # generate_* tools. The patch may have introduced a regression or
+                        # failed to fix the target issue; catching it here prevents a
+                        # silent bad state from reaching push_to_github.
+                        patch_filename = t_args.get("filename", "")
+                        if patch_filename:
+                            auto_validate_path = patch_filename
 
                     # Trigger auto-validation for files that have a validator.
                     # Passing `config` ensures this appears as a distinct ToolRun in
