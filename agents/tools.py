@@ -731,15 +731,28 @@ def validate_generated_code(filename: str) -> str:
                             "Prometheus ignores the mounted config without this flag."
                         )
                     # Pushgateway must be a separate Deployment, not a sidecar inside the Prometheus pod.
-                    # Detect: pushgateway image appears in the first YAML document (Prometheus Deployment).
-                    first_doc = raw.split("---")[0]
-                    if "pushgateway" in first_doc.lower():
-                        errors.append(
-                            "K8S prometheus_deployment.yaml [project policy]: Pushgateway is a sidecar "
-                            "inside the Prometheus Deployment — it must be a separate Deployment. "
-                            "The file must contain 4 objects: Prometheus Deployment + ClusterIP Service "
-                            "+ Pushgateway Deployment + Pushgateway ClusterIP Service (separated by ---)."
+                    # Detect: a pushgateway *image* appears in the containers list of the first YAML doc
+                    # (the Prometheus Deployment). String-matching the first doc is insufficient because
+                    # volume/volumeMount names like "pushgateway-config" trigger false positives.
+                    try:
+                        _first_parsed = yaml.safe_load(raw.split("---")[0])
+                    except yaml.YAMLError:
+                        _first_parsed = None
+                    if _first_parsed:
+                        _prom_containers = (
+                            _first_parsed.get("spec", {})
+                            .get("template", {})
+                            .get("spec", {})
+                            .get("containers", []) or []
                         )
+                        if any("pushgateway" in (c.get("image", "") or "").lower()
+                               for c in _prom_containers):
+                            errors.append(
+                                "K8S prometheus_deployment.yaml [project policy]: Pushgateway is a sidecar "
+                                "inside the Prometheus Deployment — it must be a separate Deployment. "
+                                "The file must contain 4 objects: Prometheus Deployment + ClusterIP Service "
+                                "+ Pushgateway Deployment + Pushgateway ClusterIP Service (separated by ---)."
+                            )
 
     else:
         return f"CLEAN: '{filename}' — no validator for this file type."

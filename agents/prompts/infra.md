@@ -55,7 +55,7 @@ The following structured context defines your infrastructure mission. All resour
   | `job.yaml` | 1 | Job with initContainers (init-trino) + containers (pipeline) |
 
   **Cloud-specific ServiceAccount annotation (`00_namespaces.yaml`):**
-  - AWS IRSA: `eks.amazonaws.com/role-arn: <role_arn>`
+  - AWS IRSA: `eks.amazonaws.com/role-arn: arn:aws:iam::<account_id>:role/<iam_role_name>` — `<account_id>` is the 12-digit prefix from the ECR repository URL returned by `execute_terraform` (e.g. `123456789012` from `123456789012.dkr.ecr.eu-central-1.amazonaws.com/...`). **Never write `<AWS_ACCOUNT_ID>` as a literal placeholder** — the validator will reject it.
   - Azure Workload Identity: `azure.workload.identity/client-id: <client_id>` + label `azure.workload.identity/use: "true"`
   - GCP Workload Identity: `iam.gke.io/gcp-service-account: <gsa_email>`
 
@@ -66,9 +66,11 @@ The following structured context defines your infrastructure mission. All resour
 
   **`configmaps.yaml` critical rules:**
   - `hive-catalog-config` data key MUST be `hive.properties` — NEVER `catalog.properties` or any other name. Trino mounts `/etc/trino/catalog/hive.properties`.
+  - **`connector.name=hive` MUST be the FIRST line in `hive.properties`** — Trino ignores the file entirely without it and silently falls back to no connector.
   - Cloud-specific hive connector content: follow `infra_standard_k8s` Section 8.4 verbatim for the active cloud provider.
   - AWS hive-catalog-config MUST use `hive.metastore=glue` — NEVER `hive.metastore.uri=thrift://...`. Thrift is for standalone Hive servers; AWS uses Glue as the managed metastore. See Section 8.4.
-  - **Copy ALL properties from Section 8.4 verbatim for the active cloud** — every property is required and has a specific runtime effect. Omitting any one (e.g. `hive.metastore.glue.region` on AWS, or the ADLS credential properties on Azure) causes a silent Trino connection failure. The standard is the complete specification — do not cherry-pick.
+  - **Copy Section 8.4 verbatim — do NOT add properties beyond the standard.** `hive.metastore.glue.catalog.id` is NOT in the standard (it is a cross-account Glue override and leaves `<AWS_ACCOUNT_ID>` as an unresolved placeholder). The validator will reject any `<...>` placeholder in a K8s manifest.
+  - **Copy ALL properties from Section 8.4 verbatim for the active cloud** — every listed property is required and has a specific runtime effect. Omitting any one (e.g. `hive.metastore.glue.region` on AWS, or the ADLS credential properties on Azure) causes a silent Trino connection failure. The standard is the complete specification — do not cherry-pick.
 
   **`job.yaml` non-negotiables — all required, no exceptions:**
   - `namespace: analytics` in metadata — the Job must co-locate with Trino and the ServiceAccount.
@@ -86,6 +88,7 @@ The following structured context defines your infrastructure mission. All resour
   - `trino-sql-config` → `mountPath: /scripts` — SQL DDL scripts for `init-trino`. These are two different ConfigMaps with two different mount points.
 
   **Prometheus: Pushgateway is a separate Deployment** — NEVER a sidecar container inside the Prometheus pod. `prometheus_deployment.yaml` MUST contain 4 separate objects: Prometheus Deployment + ClusterIP Service + Pushgateway Deployment + Pushgateway ClusterIP Service.
+  - **Prometheus container MUST have `args: ["--config.file=/etc/prometheus/prometheus.yml"]`** — without this arg Prometheus ignores the mounted ConfigMap entirely and uses default settings (no Pushgateway scrape target).
 
 ### 4. CI/CD WORKFLOW (GITHUB ACTIONS)
 - **MANDATORY:** After calling `generate_github_action`, immediately call `validate_generated_code` on the generated file path (`.github/workflows/{{project_id}}_pipeline.yml`). If it reports unresolved placeholders (e.g. `<AWS_ACCOUNT_ID>`), rewrite the workflow with the actual values from context before proceeding to `push_to_github`.
