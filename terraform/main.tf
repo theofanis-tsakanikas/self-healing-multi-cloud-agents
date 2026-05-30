@@ -81,6 +81,15 @@ resource "aws_iam_policy" "s3_access_policy" {
           "glue:BatchCreatePartition", "glue:BatchDeletePartition"
         ]
         Resource = ["*"]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = "arn:aws:ssm:*:*:parameter/multi-cloud-self-healing-agent/*"
       }
     ]
   })
