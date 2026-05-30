@@ -17,24 +17,24 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+          aws-region: eu-central-1
 
       - name: ECR Login
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and Push Docker Image
         run: |
-          docker build -t ${CLOUD_SETUP.aws_account_id}.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} -f Dockerfile .
-          docker push ${CLOUD_SETUP.aws_account_id}.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}
-          docker tag ${CLOUD_SETUP.aws_account_id}.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} ${CLOUD_SETUP.aws_account_id}.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
-          docker push ${CLOUD_SETUP.aws_account_id}.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
+          docker build -t 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} -f Dockerfile .
+          docker push 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}
+          docker tag 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
+          docker push 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
 
       - name: Update Kubeconfig
-        run: aws eks update-kubeconfig --region ${{ secrets.AWS_DEFAULT_REGION }} --name multi-cloud-agent-cluster
+        run: aws eks update-kubeconfig --region eu-central-1 --name multi-cloud-agent-cluster
 
       - name: Set Image Tag in Job Manifest
         run: |
-          sed -i 's|image: RESOLVE_FROM_EXECUTE_TERRAFORM_OUTPUT|image: ${CLOUD_SETUP.aws_account_id}.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}|' k8s/job.yaml
+          sed -i 's|image: RESOLVE_FROM_EXECUTE_TERRAFORM_OUTPUT|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}|' k8s/job.yaml
 
       - name: Deploy Shared Services to Kubernetes
         run: |
@@ -50,11 +50,6 @@ jobs:
         run: |
           kubectl create secret generic pipe-eu-sales-to-s3-db-credentials \
             -n analytics \
-            --from-literal=POSTGRES_DB_HOST=${{ secrets.POSTGRES_DB_HOST }} \
-            --from-literal=POSTGRES_DB_PORT=${{ secrets.POSTGRES_DB_PORT }} \
-            --from-literal=POSTGRES_DB_USER=${{ secrets.POSTGRES_DB_USER }} \
-            --from-literal=POSTGRES_DB_PASSWORD=${{ secrets.POSTGRES_DB_PASSWORD }} \
-            --from-literal=POSTGRES_DB_NAME=${{ secrets.POSTGRES_DB_NAME }} \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy Pipeline Job to Kubernetes
