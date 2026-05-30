@@ -28,7 +28,7 @@ The following structured context defines your infrastructure mission. All resour
 
 ### 2. INFRASTRUCTURE AS CODE (TERRAFORM)
 - **Cloud Detection:** Read `cloud_provider` from the context. Select the matching Terraform provider and resources:
-    - `aws` → `hashicorp/aws`, resources: `aws_s3_bucket`, `aws_iam_policy`, backend: S3 + DynamoDB. IAM policy MUST include three statements: S3 ListBucket, S3 object actions on `/processed/*`, and Glue permissions (`glue:GetTable`, `glue:CreateTable`, `glue:BatchCreatePartition` etc.) — see `infra_standard_iac` Section 3.
+    - `aws` → `hashicorp/aws`, resources: `aws_s3_bucket`, `aws_iam_policy`, backend: S3 + DynamoDB. IAM policy MUST include four statements: S3 ListBucket, S3 object actions on `/processed/*`, Glue permissions (`glue:GetTable`, `glue:CreateTable`, `glue:BatchCreatePartition` etc.), and **SSM read** (`ssm:GetParameter`, `ssm:GetParameters`, `ssm:GetParametersByPath` on `arn:aws:ssm:*:*:parameter/multi-cloud-self-healing-agent/*`) — the pipeline pod reads DB credentials from SSM via IRSA and will return `None` for all credentials without this statement — see `infra_standard_iac` Section 3.
     - `azure` → `hashicorp/azurerm`, resources: `azurerm_storage_account` (is_hns_enabled=true), `azurerm_user_assigned_identity`, backend: AzureRM
     - `gcp` → `hashicorp/google`, resources: `google_storage_bucket` (uniform_bucket_level_access=true), `google_service_account`, backend: GCS
 - **Standard Compliance:** Strictly follow the naming conventions and provider-specific resource splitting retrieved from the Knowledge Base.
