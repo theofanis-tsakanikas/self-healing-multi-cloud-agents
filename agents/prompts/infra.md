@@ -77,6 +77,8 @@ The following structured context defines your infrastructure mission. All resour
   - `PUSHGATEWAY_URL` value MUST include `http://` — `push_to_gateway()` requires a full URL, not just a hostname.
 
   **Deployment skeletons are non-negotiable:** Copy `volumeMounts` + `volumes` from `infra_standard_k8s` exactly for every Deployment — Trino, Grafana, and Prometheus each require specific ConfigMap mounts to function. A Deployment generated without its volume mounts starts but silently ignores its configuration.
+  - **Grafana `volumeMounts` MUST be inside `containers[0]`** — not at pod spec level (same indentation as `containers:`). Kubernetes silently drops pod-level `volumeMounts`; Grafana won't provision dashboards or datasource.
+  - **Grafana Service `annotations` MUST be under `metadata.annotations`** — NEVER inside `spec.ports[]`. A port entry has no `annotations` field; the `aws-load-balancer-scheme` is silently ignored, leaving the LoadBalancer permanently `<pending>`.
 
   **Trino volume mapping (two distinct volumes, two distinct purposes):**
   - `hive-catalog-config` → `mountPath: /etc/trino/catalog` — Hive connector configuration. NEVER mount at `/etc/trino` (overwrites all of Trino's built-in config).
