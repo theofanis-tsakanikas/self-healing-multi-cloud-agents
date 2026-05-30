@@ -104,13 +104,19 @@ def build_infra_context(pipeline_conf: dict, infra_conf: dict) -> str:
     # Extract only the keys relevant for the target cloud
     infra_setup = {}
     if provider == 'aws':
+        # ecr_repository_name is the repo name only (e.g. "eu-sales-pipeline-repo").
+        # The full ECR URL (account ID + region) is returned by execute_terraform and
+        # stored in state["ecr_repository_url"] — never in this static config.
+        _ecr_raw = cloud_setup.get("ecr_repository_name") or cloud_setup.get("ecr_repository", "")
+        _ecr_name = _ecr_raw.split("/")[-1] if "/" in _ecr_raw else _ecr_raw
         infra_setup = {
             "bucket_name": cloud_setup.get("bucket_name"),
             "state_bucket": cloud_setup.get("state_bucket"),
             "state_key": cloud_setup.get("state_key"),
             "lock_table": cloud_setup.get("lock_table"),
             "eks_cluster_name": cloud_setup.get("eks_cluster_name"),
-            "ecr_repository": cloud_setup.get("ecr_repository"),
+            "ecr_repository_name": _ecr_name,
+            "ecr_repository_url": "RESOLVE_FROM_EXECUTE_TERRAFORM_OUTPUT",
             "iam_role_name": cloud_setup.get("iam_role_name"),
             "object_ownership": infra_conf.get("object_ownership", "BucketOwnerEnforced")
         }

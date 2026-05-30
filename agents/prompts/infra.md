@@ -55,7 +55,7 @@ The following structured context defines your infrastructure mission. All resour
   | `job.yaml` | 1 | Job with initContainers (init-trino) + containers (pipeline) |
 
   **Cloud-specific ServiceAccount annotation (`00_namespaces.yaml`):**
-  - AWS IRSA: `eks.amazonaws.com/role-arn: arn:aws:iam::<account_id>:role/<iam_role_name>` — `<account_id>` is the 12-digit prefix from the ECR repository URL returned by `execute_terraform` (e.g. `123456789012` from `123456789012.dkr.ecr.eu-central-1.amazonaws.com/...`). **Never write `<AWS_ACCOUNT_ID>` as a literal placeholder** — the validator will reject it.
+  - AWS IRSA: `eks.amazonaws.com/role-arn: arn:aws:iam::<account_id>:role/<iam_role_name>` — `<account_id>` is the 12-digit prefix from the real ECR URL returned by `execute_terraform` (e.g. `123456789012` from `123456789012.dkr.ecr.eu-central-1.amazonaws.com/...`). `CLOUD_SETUP.ecr_repository_name` in your context is the repo name only — `CLOUD_SETUP.ecr_repository_url` is `RESOLVE_FROM_EXECUTE_TERRAFORM_OUTPUT`, meaning the full URL is **not** available until after Terraform runs. Generate K8s manifests only after `execute_terraform` completes and you have the real URL. **Never write `<AWS_ACCOUNT_ID>` as a literal placeholder** — the validator will reject it.
   - Azure Workload Identity: `azure.workload.identity/client-id: <client_id>` + label `azure.workload.identity/use: "true"`
   - GCP Workload Identity: `iam.gke.io/gcp-service-account: <gsa_email>`
 

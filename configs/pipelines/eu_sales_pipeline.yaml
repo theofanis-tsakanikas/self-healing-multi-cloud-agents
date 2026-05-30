@@ -1,6 +1,6 @@
 aws_setup:
   bucket_name: eu-sales-insights-data
-  ecr_repository: <AWS_ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/eu-sales-pipeline-repo
+  ecr_repository_name: eu-sales-pipeline-repo
   eks_cluster_name: multi-cloud-agent-cluster
   iam_role_name: eu-sales-insights-role
   k8s_namespace: analytics

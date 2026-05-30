@@ -574,13 +574,9 @@ def _resource_names(slug: str, cloud: str, cloud_outputs: dict) -> dict:
     """
     dash = slug.replace("_", "-")
     if cloud == "aws":
-        ecr_base = cloud_outputs.get(
-            "ecr_base_url",
-            "<AWS_ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com",
-        )
         return {
             "bucket_name": f"{dash}-insights-data",
-            "ecr_repository": f"{ecr_base}/{dash}-pipeline-repo",
+            "ecr_repository_name": f"{dash}-pipeline-repo",
             "iam_role_name": f"{dash}-insights-role",
             "k8s_service_account_name": f"{dash}-insights-sa",
             "state_key": f"terraform/{dash}-insights/terraform.tfstate",
