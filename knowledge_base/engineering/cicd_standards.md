@@ -109,32 +109,22 @@ The following steps MUST appear in this exact order:
 - name: Create DB Credentials Secret
   run: |
     # Secret name must be RFC 1123 and match job.yaml envFrom.secretRef.name exactly.
+    # cloud_get() resolves: SSM (AWS primary) → bootstrap_outputs → env vars (fallback).
+    # These env vars are the fallback path — required when SSM is not yet populated
+    # (e.g. bootstrap has not run). In full production with bootstrap+SSM, SSM takes
+    # precedence and these values are never read.
     #
-    # AWS: cloud_get() reads credentials from SSM Parameter Store via IRSA — the secret
-    # is created empty so the pod starts (envFrom: secretRef requires the object to exist)
-    # but env vars are never used at runtime. Do NOT add --from-literal values for AWS.
-    #
-    # GCP / Azure: cloud_get() reads directly from env vars — populate the secret with
-    # actual values from GitHub vars/secrets so the pipeline can connect to the database.
-    #   GCP   → MYSQL_DB_HOST (vars), MYSQL_DB_PORT (vars), MYSQL_DB_USER (vars),
-    #            MYSQL_DB_PASSWORD (secrets), MYSQL_DB_NAME (vars)
-    #   Azure → CRM_DB_HOST (vars), CRM_DB_PORT (vars), CRM_DB_USER (vars),
-    #            CRM_DB_PASSWORD (secrets), CRM_DB_NAME (vars)
-
-    # AWS — empty secret (credentials come from SSM via IRSA):
+    # Sensitivity split: HOST/PORT/USER/NAME are not sensitive → GitHub vars.
+    # PASSWORD is sensitive → GitHub secret.
+    # Per cloud:  AWS → POSTGRES_DB_*   Azure → CRM_DB_*   GCP → MYSQL_DB_*
     kubectl create secret generic <project_id_rfc1123>-db-credentials \
       -n analytics \
+      --from-literal=POSTGRES_DB_HOST=${{ vars.POSTGRES_DB_HOST }} \
+      --from-literal=POSTGRES_DB_PORT=${{ vars.POSTGRES_DB_PORT }} \
+      --from-literal=POSTGRES_DB_USER=${{ vars.POSTGRES_DB_USER }} \
+      --from-literal=POSTGRES_DB_PASSWORD=${{ secrets.POSTGRES_DB_PASSWORD }} \
+      --from-literal=POSTGRES_DB_NAME=${{ vars.POSTGRES_DB_NAME }} \
       --dry-run=client -o yaml | kubectl apply -f -
-
-    # GCP example (substitute for Azure with CRM_DB_* keys):
-    # kubectl create secret generic <project_id_rfc1123>-db-credentials \
-    #   -n analytics \
-    #   --from-literal=MYSQL_DB_HOST=${{ vars.MYSQL_DB_HOST }} \
-    #   --from-literal=MYSQL_DB_PORT=${{ vars.MYSQL_DB_PORT }} \
-    #   --from-literal=MYSQL_DB_USER=${{ vars.MYSQL_DB_USER }} \
-    #   --from-literal=MYSQL_DB_PASSWORD=${{ secrets.MYSQL_DB_PASSWORD }} \
-    #   --from-literal=MYSQL_DB_NAME=${{ vars.MYSQL_DB_NAME }} \
-    #   --dry-run=client -o yaml | kubectl apply -f -
 - name: Deploy Pipeline Job to Kubernetes
   run: |
     kubectl delete job -l component=pipeline-job -n analytics --ignore-not-found=true
