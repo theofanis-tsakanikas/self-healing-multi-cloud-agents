@@ -34,8 +34,12 @@ The following structured context defines your mission. You must strictly adhere 
 - If data types are ambiguous, assign logical defaults (e.g., VARCHAR) and proceed. Do not re-run discovery.
 
 ### 3. AGNOSTIC REASONING & MAPPING
-- Map every `TRANSFORMATION_LOGIC` item to a discovered column using `target_criteria`. Do not hardcode column names unless they were returned by `read_data_schema`.
-- Translate every `on_failure_action` to real pandas code using the mapping defined in `arch_standard_python`. No rule may appear only as a comment — it must be real, executable code.
+- **Business rule mapping — mandatory 3-step process for every TRANSFORMATION_LOGIC entry:**
+  1. Extract keywords from `target_criteria` (the quoted terms: `'price'`, `'quantity'`, `'order_id'`, etc.).
+  2. Match to the actual column names returned by `read_data_schema` — find columns whose names contain any keyword (case-insensitive). The `target_criteria` is business language, not a column name — always resolve to the real schema.
+  3. Generate real pandas code using the matched column name and the `on_failure_action` pattern from `arch_standard_python`. See the Business Rules Mapping section for the full algorithm and a worked example.
+- A descriptive `target_criteria` is **never** a reason to skip a rule. If the keyword matches a discovered column, the rule applies and must be implemented.
+- No rule may appear only as a comment — every TRANSFORMATION_LOGIC entry must produce real, executable pandas code. If step 3b has no rules, omit the section entirely — never write a placeholder comment.
 - **`is_suspicious` is conditional — not a default column:**
   - `TRANSFORMATION_LOGIC` contains `FLAG_AS_SUSPICIOUS` → implement as `chunk['is_suspicious'] = ~condition` AND add `is_suspicious BOOLEAN` to the SQL DDL.
   - `TRANSFORMATION_LOGIC` has NO `FLAG_AS_SUSPICIOUS` rule → omit `is_suspicious` entirely from both the Python script and the SQL DDL. No placeholder, no default, no column.

@@ -47,6 +47,44 @@ try:
   - No `FLAG_AS_SUSPICIOUS` rule → omit `is_suspicious` entirely. No column, no placeholder.
 - **`chunk['is_suspicious'] = False` is a COMPLIANCE VIOLATION** — never a valid implementation regardless of context.
 
+**Mapping algorithm — `target_criteria` (descriptive) → actual pandas code:**
+
+The config expresses rules in business language. The architect resolves them to actual column names using `read_data_schema` output. For every rule in `TRANSFORMATION_LOGIC`:
+
+1. Extract the keywords embedded in `target_criteria` (e.g. `'price'`, `'quantity'`, `'order_id'`).
+2. Find the matching column(s) from `read_data_schema` whose names contain any keyword (case-insensitive substring match).
+3. Generate pandas code using the **actual discovered column name** and the `on_failure_action` pattern.
+4. A descriptive `target_criteria` is never a reason to skip a rule — if the keyword matches a column, the rule applies.
+
+| `on_failure_action` | Pandas pattern |
+|---|---|
+| `DROP_RECORD` | `chunk = chunk[condition]` |
+| `EXCLUDE_AND_LOG` | `_mask = ~condition`; `logging.warning(f"Excluded {_mask.sum()} rows: <reason>.")`; `chunk = chunk[condition]` |
+| `DEFAULT_VALUE` | `chunk[col] = chunk[col].where(condition, other=default)` |
+| `FLAG_AS_SUSPICIOUS` | accumulate with `\|`: `chunk['is_suspicious'] = flag_rule1 \| flag_rule2` |
+
+**Worked example** — EU Sales pipeline (6 rules → 5 matched columns):
+```python
+# monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
+chunk = chunk[chunk['unit_price'] > 0.0]
+
+# temporal_validity: target_criteria 'date'/'timestamp' → order_date → EXCLUDE_AND_LOG
+_future = chunk['order_date'] > pd.Timestamp.now()
+if _future.any():
+    logging.warning(f"Excluded {_future.sum()} future-dated rows (temporal_validity).")
+chunk = chunk[~_future]
+
+# completeness_enforcement: target_criteria 'identifier'/'order_id' → order_id → DROP_RECORD
+chunk = chunk.dropna(subset=['order_id'])
+
+# currency_standardization: target_criteria 'currency' → currency column → DEFAULT_VALUE 'EUR'
+chunk['currency'] = chunk['currency'].where(chunk['currency'].isin(['EUR', 'GBP']), other='EUR')
+
+# volume_sanity_check + quantity_validity: both target 'quantity' → FLAG_AS_SUSPICIOUS, combine with |
+chunk['is_suspicious'] = (chunk['quantity'] >= 1000) | (chunk['quantity'] <= 0)
+```
+Column names (`unit_price`, `order_date`, `order_id`, `currency`, `quantity`) come from `read_data_schema` — never invented or hardcoded from the `target_criteria` description.
+
 ### Type Casting
 - Cast `float64` → `Int64` for quantity/count columns before every `to_parquet()` call — pandas defaults NULLable integers to float64, causing Trino to read `double` instead of `BIGINT`.
 - This step is **MANDATORY** whenever the schema contains integer/quantity/count columns. It must appear as step 3c inside the chunk loop, before `to_parquet()`:
