@@ -1,0 +1,68 @@
+{
+  "uid": "eu-sales-data-observability",
+  "title": "EU Sales Data Observability",
+  "schemaVersion": 37,
+  "version": 1,
+  "refresh": "5m",
+  "time": { "from": "now-6h", "to": "now" },
+  "tags": ["data-pipeline", "eu-sales", "aws"],
+  "templating": {
+    "list": [
+      {
+        "name": "cloud_provider",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(pipeline_rows_processed_total, cloud_provider)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "label": "Cloud"
+      },
+      {
+        "name": "project_id",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(pipeline_rows_processed_total{cloud_provider=~\"$cloud_provider\"}, project_id)",
+        "refresh": 2,
+        "includeAll": true,
+        "label": "Pipeline Run"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Record Count",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "pipeline_rows_processed_total{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}",
+          "legendFormat": "{{cloud_provider}} / {{project_id}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Freshness",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "pipeline_last_success_timestamp{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}",
+          "legendFormat": "{{cloud_provider}} / {{project_id}}"
+        }
+      ]
+    }
+  ],
+  "alerting": {
+    "name": "EU Sales — Data Silence Alert",
+    "condition": "no data for 60 minutes",
+    "severity": "critical",
+    "for": "60m",
+    "labels": { "severity": "critical", "pipeline": "eu-sales", "cloud_provider": "aws" },
+    "annotations": { "summary": "No data received for EU Sales pipeline (AWS) in the last 60 minutes." }
+  }
+}

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: analytics
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eu-sales-insights-sa
+  namespace: analytics
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::387229419515:role/eu-sales-insights-role
