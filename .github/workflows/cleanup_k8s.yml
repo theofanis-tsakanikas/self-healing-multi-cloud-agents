@@ -1,0 +1,55 @@
+name: Cleanup K8s Workloads
+
+on:
+  workflow_dispatch:
+    inputs:
+      pipeline_id:
+        description: 'Pipeline ID to clean up (RFC 1123 format, e.g. pipe-eu-sales-to-s3)'
+        required: true
+        default: 'pipe-eu-sales-to-s3'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION:    ${{ vars.AWS_DEFAULT_REGION }}
+
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_DEFAULT_REGION }}
+
+      - name: Update Kubeconfig
+        run: aws eks update-kubeconfig --region ${{ vars.AWS_DEFAULT_REGION }} --name multi-cloud-agent-cluster
+
+      - name: Delete pipeline Job and Secret
+        run: |
+          kubectl delete job -l component=pipeline-job -n analytics --ignore-not-found=true
+          kubectl delete secret ${{ inputs.pipeline_id }}-db-credentials -n analytics --ignore-not-found=true
+
+      - name: Delete Deployments
+        run: |
+          kubectl delete deployment trino -n analytics --ignore-not-found=true
+          kubectl delete deployment grafana prometheus pushgateway -n monitoring --ignore-not-found=true
+
+      - name: Delete ConfigMaps
+        run: |
+          kubectl delete configmap trino-sql-config hive-catalog-config -n analytics --ignore-not-found=true
+          kubectl delete configmap grafana-dash-config grafana-datasource-config prometheus-config -n monitoring --ignore-not-found=true
+
+      - name: Delete Services
+        run: |
+          kubectl delete service trino -n analytics --ignore-not-found=true
+          kubectl delete service grafana prometheus pushgateway -n monitoring --ignore-not-found=true
+
+      - name: Verify cleanup
+        run: |
+          echo "=== analytics namespace ==="
+          kubectl get all -n analytics
+          echo "=== monitoring namespace ==="
+          kubectl get all -n monitoring
