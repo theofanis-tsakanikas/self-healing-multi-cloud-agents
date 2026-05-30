@@ -95,7 +95,7 @@ jobs:
       PINECONE_INDEX_NAME: ${{ vars.PINECONE_INDEX_NAME }}
 
       # ── GitHub ───────────────────────────────────────────────────────────────
-      GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN:      ${{ secrets.GH_PAT }}
       GITHUB_REPOSITORY: ${{ github.repository }}
 
       # ── AWS — credentials for SSM access (DB config read from SSM at runtime)

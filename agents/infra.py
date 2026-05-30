@@ -422,6 +422,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     validation_errors: list[str] = []  # Accumulated for error_log → Medic signal
 
     github_success = state.get("github_done", False)
+    push_attempted = False  # True after first push_to_github call — blocks same-turn retry
     last_push_sha = state.get("last_push_sha", "")
     any_tool_error = False
 
@@ -453,10 +454,11 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                             new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
                             logger.info(f"⏭️ Skipping existing terraform file: {tracked}")
                             continue
-                elif t_name == "push_to_github" and github_success:
-                    result = "Skipped: push_to_github already succeeded in this turn."
+                elif t_name == "push_to_github" and (github_success or push_attempted):
+                    reason = "already succeeded" if github_success else "already attempted (failed) — Medic will re-route"
+                    result = f"Skipped: push_to_github {reason} in this turn. Do not retry push in the same turn."
                     new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
-                    logger.info("⏭️ Skipping duplicate push_to_github call.")
+                    logger.info(f"⏭️ Skipping duplicate push_to_github call ({reason}).")
                     continue
                 elif t_name == "generate_k8s_manifest":
                     raw = os.path.basename(t_args.get("filename", ""))
@@ -576,14 +578,16 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                         auto_validate_path = tracked
 
                     elif t_name == "generate_github_action":
-                        raw = t_args.get("workflow_name", "")
-                        if not raw.endswith((".yaml", ".yml")):
-                            raw += ".yaml"
-                        tracked = f".github/workflows/{raw}".replace("\\", "/")
-                        if tracked not in updated_files:
-                            updated_files.append(tracked)
-                        gha_path = os.path.join(str(REPO_ROOT), ".github", "workflows", raw)
-                        auto_validate_path = gha_path
+                        # The tool derives the filename from project_id internally —
+                        # t_args never contains "workflow_name". Mirror the tool's logic.
+                        proj = t_args.get("project_id", "")
+                        raw = f"{proj}_pipeline.yml" if proj else ""
+                        if raw:
+                            tracked = f".github/workflows/{raw}".replace("\\", "/")
+                            if tracked not in updated_files:
+                                updated_files.append(tracked)
+                            gha_path = os.path.join(str(REPO_ROOT), ".github", "workflows", raw)
+                            auto_validate_path = gha_path
 
                     elif t_name == "patch_project_file":
                         # Auto-validate the patched file immediately — same guarantee as
@@ -630,6 +634,8 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
 
                 # C. Execution Tracking & Action Locking (Searching for STATUS: SUCCESS)
                 # This prevents the LLM from looping on the same command.
+                if t_name == "push_to_github":
+                    push_attempted = True
                 if "STATUS: SUCCESS" in result_str.upper():
                     if t_name == "push_to_github":
                         github_success = True

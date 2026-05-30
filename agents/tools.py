@@ -1431,9 +1431,9 @@ def generate_github_action(project_id: str, content: str):
       • kubectl apply: 'k8s/job.yaml'  (not 'projects/.../k8s/job.yaml')
       • on.push.paths: omit entirely or use '**'
 
-    AWS_ACCOUNT_ID: extract the 12-digit prefix from the ECR repository URL returned
-    by execute_terraform (e.g. '123456789012.dkr.ecr.eu-central-1.amazonaws.com/...')
-    — never write <AWS_ACCOUNT_ID> as a literal placeholder.
+    AWS ECR URL: assemble from CLOUD_SETUP.aws_account_id + region + ecr_repository_name
+    (e.g. '<aws_account_id>.dkr.ecr.<region>.amazonaws.com/<ecr_repository_name>').
+    Never write <AWS_ACCOUNT_ID> as a literal placeholder.
     """
     workflow_dir = os.path.join(REPO_ROOT, ".github", "workflows")
     os.makedirs(workflow_dir, exist_ok=True)
@@ -1468,20 +1468,28 @@ def push_to_github(project_id: str, commit_message: str):
         subprocess.run(["git", "config", "user.name", "github-actions[bot]"], cwd=REPO_ROOT, check=True)
         subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], cwd=REPO_ROOT, check=True)
 
-        # 2. Authentication: in CI (GitHub Actions) the default remote URL is HTTPS
-        # without a token embedded, causing 'git push' to fail with exit 128.
-        # Rewrite the remote URL to use GITHUB_TOKEN so the push is authenticated.
-        # Locally, GITHUB_TOKEN / GITHUB_REPOSITORY are not set → this block is skipped
-        # and git uses whatever credentials are configured on the developer's machine.
+        # 2. Authentication: rewrite the remote URL to embed the token so git push
+        # is authenticated. Works in both CI (GITHUB_REPOSITORY set by Actions) and
+        # local dev (GITHUB_REPOSITORY absent — inferred from the existing remote URL).
         github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
         github_repository = os.getenv("GITHUB_REPOSITORY")
+        if github_token and not github_repository:
+            # Infer repo slug from the current remote URL (handles both HTTPS and SSH).
+            _remote_out = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=REPO_ROOT, capture_output=True, text=True
+            )
+            if _remote_out.returncode == 0:
+                _m = re.search(r"github\.com[:/](.+?)(?:\.git)?$", _remote_out.stdout.strip())
+                if _m:
+                    github_repository = _m.group(1)
         if github_token and github_repository:
             authed_url = f"https://x-access-token:{github_token}@github.com/{github_repository}.git"
             subprocess.run(
                 ["git", "remote", "set-url", "origin", authed_url],
                 cwd=REPO_ROOT, check=True
             )
-            logger.info("🔑 CI detected: remote URL configured with GITHUB_TOKEN.")
+            logger.info("🔑 Remote URL configured with token (repo: %s).", github_repository)
 
         # 3. Selective Staging — stage every directory/file that agents generate.
         # REPO_ROOT == PROJECT_ROOT (standalone repo — not a monorepo anymore).

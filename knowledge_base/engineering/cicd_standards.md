@@ -9,7 +9,7 @@ This standard defines the mandatory, modular structure for GitHub Actions workfl
 - **File Location:** `/.github/workflows/{{project_id}}_pipeline.yml`.
 - **Triggers:** This is a **standalone repository** — use `on: push: paths: ['**']` or omit `paths` entirely. Never use `projects/{{project_folder}}/**` or any `projects/...` prefix — this is not a monorepo.
 - **Job Name:** The single job MUST be named `deploy`.
-- **Global Env:** Every job must include `env: GH_TOKEN: ${{ secrets.GH_TOKEN }}`.
+- **Global Env:** No custom `GH_TOKEN` env block needed — this workflow does not use the `gh` CLI. Git authentication is handled by AWS/GCP/Azure credentials. Do not add `GH_TOKEN: ${{ secrets.GH_TOKEN }}` to the job env.
 
 **## STANDALONE REPOSITORY — PATH RULES (mandatory)**
 All file references in the workflow are relative to the repository root — never use `projects/...` prefixes:
@@ -130,10 +130,10 @@ The following steps MUST appear in this exact order:
     for i in $(seq 1 60); do
       SUCCEEDED=$(kubectl get job -l component=pipeline-job -n analytics -o jsonpath='{.items[0].status.succeeded}' 2>/dev/null)
       FAILED=$(kubectl get job -l component=pipeline-job -n analytics -o jsonpath='{.items[0].status.failed}' 2>/dev/null)
-      if [ "$SUCCEEDED" = "1" ]; then
+      if [ "${SUCCEEDED:-0}" = "1" ]; then
         echo "Job completed successfully"; exit 0
       fi
-      if [ -n "$FAILED" ] && [ "$FAILED" -gt 0 ]; then
+      if [ "${FAILED:-0}" -gt 0 ]; then
         echo "Job failed. Fetching logs..."
         echo "=== init-trino logs ==="
         kubectl logs -l component=pipeline-job -n analytics -c init-trino --tail=50 2>/dev/null || echo "(init-trino logs unavailable)"
