@@ -112,7 +112,7 @@ def run():
                 engine="pyarrow",
                 compression="snappy",
                 index=False,
-                storage_options={}
+                storage_options={{}}
             )
             logging.info(f"Chunk {i}: {len(chunk)} rows processed")
             total_rows += len(chunk)
