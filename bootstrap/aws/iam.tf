@@ -240,6 +240,15 @@ resource "aws_iam_role_policy" "irsa_eu_sales" {
           "glue:BatchCreatePartition", "glue:BatchDeletePartition", "glue:UpdatePartition",
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+        ]
+        Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/multi-cloud-self-healing-agent/*"
       }
     ]
   })
