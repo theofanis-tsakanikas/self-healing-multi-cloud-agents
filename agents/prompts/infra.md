@@ -39,7 +39,7 @@ The following structured context defines your infrastructure mission. All resour
 - **Deployment:** Execute `execute_terraform` (init & apply). Do not proceed until infrastructure is physically provisioned.
 
 ### 3. CONTAINERIZATION & ORCHESTRATION
-- **Dockerfile:** Build a `python:3.11-slim` image following the dockerfile standard.
+- **Dockerfile:** Build a `python:3.11-slim` image following the dockerfile standard. **`ENV PYTHONPATH=/app` is mandatory** — without it `from utils.cloud_config import cloud_get` fails at runtime because Python adds `scripts/` not `/app` to sys.path.
     - **MANDATORY:** After generating the Dockerfile, immediately call `validate_generated_code` on it. Fix any errors before proceeding.
 - **K8s Manifest Stack:** Generate in `/k8s`. **After each manifest, immediately call `validate_generated_code` on it — do not proceed to the next file if validation fails.**
 

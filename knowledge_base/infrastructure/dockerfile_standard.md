@@ -7,6 +7,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+ENV PYTHONPATH=/app
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -28,6 +30,7 @@ CMD ["python", "scripts/<pipeline_script_name>.py"]
 - **Selective COPY — MANDATORY list:** Never use `COPY . .`. The following directories MUST ALL be present — omitting any one causes a runtime import error:
     1. `COPY scripts/ scripts/` — the pipeline entry point
     2. `COPY utils/ utils/` — **REQUIRED**: contains `cloud_config.py` which is imported by every pipeline script as `from utils.cloud_config import cloud_get`. Omitting this causes `ModuleNotFoundError: No module named 'utils'` at container startup.
+- **`ENV PYTHONPATH=/app` is MANDATORY** — without it, running `python scripts/script.py` adds `/app/scripts` to `sys.path` instead of `/app`, so `from utils.cloud_config import cloud_get` fails at runtime even though `COPY utils/ utils/` is present. This env var ensures Python always resolves imports relative to the WORKDIR.
     3. `COPY sql/ sql/` — Trino DDL scripts
     4. `COPY dashboards/ dashboards/` — Grafana dashboard JSON
 - **Non-root user:** Always create and switch to a non-root user (`appuser`) before CMD. Kubernetes security policies reject root containers.
