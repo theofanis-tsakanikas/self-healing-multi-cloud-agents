@@ -232,6 +232,19 @@ def validate_generated_code(filename: str) -> str:
                 "COMPLIANCE VIOLATION. See python_standards.md Business Rules section."
             )
 
+        # Cloud guard: cloud_get() for a specific cloud must be inside the matching
+        # if _CLOUD == "..." block. An unguarded call hardcodes a provider and breaks
+        # the script on all other clouds — a fundamental cloud-agnostic violation.
+        for _cld in ("aws", "gcp", "azure"):
+            if f'cloud_get("{_cld}",' in py_content and f'if _CLOUD == "{_cld}"' not in py_content:
+                errors.append(
+                    f'CLOUD GUARD: cloud_get("{_cld}", ...) is called without an '
+                    f'"if _CLOUD == \\"{_cld}\\":" guard — the script uses {_cld.upper()} '
+                    f"credentials unconditionally, breaking deployment on other clouds. "
+                    f"Wrap all cloud_get() calls and the connection_string in cloud-specific "
+                    f"if/elif blocks as shown in arch_standard_python Section 2 skeleton."
+                )
+
     # ── JSON (Grafana dashboard) ──────────────────────────────────────────────
     elif ext == ".json":
         try:

@@ -12,6 +12,23 @@ These violations cause immediate runtime failure. No exceptions.
 - `cloud_get()` is MANDATORY for all DB credentials. `os.getenv()` is FORBIDDEN for host/user/password/db — it bypasses SSM and returns None in production.
 - Import: `from utils.cloud_config import cloud_get` — place after standard library imports, before cloud SDK block.
 - Connection strings MUST use double-quoted outer f-strings to avoid `SyntaxError: f-string: unmatched '('`.
+- Every `cloud_get()` call and the `connection_string` assignment MUST be inside a cloud-specific guard (`if _CLOUD == "aws":` / `elif _CLOUD == "gcp":` / `elif _CLOUD == "azure":`). An unguarded `cloud_get("aws", ...)` hardcodes AWS credentials into a supposedly cloud-agnostic script — it will fail silently when `CLOUD_PROVIDER=gcp` or `CLOUD_PROVIDER=azure` because the wrong credential keys are resolved.
+```python
+# ❌ WRONG — unguarded, breaks on GCP/Azure:
+host = cloud_get("aws", "db_host", db_type="postgres")
+connection_string = f"postgresql+psycopg2://..."
+
+# ✅ CORRECT — each cloud block is self-contained:
+if _CLOUD == "aws":
+    host = cloud_get("aws", "db_host", db_type="postgres")
+    connection_string = f"postgresql+psycopg2://..."
+elif _CLOUD == "gcp":
+    host = cloud_get("gcp", "db_host")
+    connection_string = f"mysql+pymysql://..."
+elif _CLOUD == "azure":
+    host = cloud_get("azure", "db_host")
+    connection_string = f"mssql+pyodbc://..."
+```
 
 ### Storage
 - `storage_options={}` is MANDATORY in every `to_parquet()` call — omitting it causes `TypeError` on cloud storage writes (s3://, gs://, abfss://).
