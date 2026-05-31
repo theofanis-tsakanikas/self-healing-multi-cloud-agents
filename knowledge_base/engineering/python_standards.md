@@ -23,8 +23,8 @@ if _CLOUD == "aws":
     host = cloud_get("aws", "db_host", db_type="postgres")
     connection_string = f"postgresql+psycopg2://..."
 elif _CLOUD == "gcp":
-    host = cloud_get("gcp", "db_host")
-    connection_string = f"mysql+pymysql://..."
+    host = cloud_get("gcp", "db_host", db_type="mysql")
+    connection_string = f"mysql+pymysql://..."   # global_marketing source = GCP MySQL
 elif _CLOUD == "azure":
     host = cloud_get("azure", "db_host", db_type="postgres")
     connection_string = f"postgresql+psycopg2://..."   # us_crm source = Azure Postgres
@@ -214,11 +214,14 @@ def run():
             f"@{host}:{port}/{db}"
         )
     elif _CLOUD == "gcp":
-        host = cloud_get("gcp", "db_host")
-        port = cloud_get("gcp", "db_port") or "3306"
-        user = cloud_get("gcp", "db_user")
-        pw   = cloud_get("gcp", "db_password")
-        db   = cloud_get("gcp", "db_name")
+        # global_marketing's source is GCP Cloud SQL for MySQL → db_type="mysql" so the
+        # credential lookup resolves MYSQL_DB_* (not POSTGRES_DB_*). Driver follows the
+        # source engine, not the cloud — see the AWS/Azure notes above.
+        host = cloud_get("gcp", "db_host",     db_type="mysql")
+        port = cloud_get("gcp", "db_port",     db_type="mysql") or "3306"
+        user = cloud_get("gcp", "db_user",     db_type="mysql")
+        pw   = cloud_get("gcp", "db_password", db_type="mysql")
+        db   = cloud_get("gcp", "db_name",     db_type="mysql")
         connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
     elif _CLOUD == "azure":
         # The DB DRIVER is chosen by the SOURCE engine (DATA_SOURCE.type), NOT the cloud.

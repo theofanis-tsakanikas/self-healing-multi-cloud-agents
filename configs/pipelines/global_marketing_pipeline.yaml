@@ -44,3 +44,13 @@ gcp_setup:
   state_bucket: "multi-cloud-agent-tfstate"
   state_prefix: "gcp/global-marketing-insights/terraform.tfstate"
   schedule: "0 * * * *"  # hourly CronJob
+
+# 7. ARTIFACT PATHS (where the Architect writes generated files)
+project_structure:
+  data_dir: data
+  monitoring_path: dashboards/monitoring_specs.json
+  python_dir: scripts
+  python_script_path: scripts/pipe_mkt_global_to_gcp.py
+  requirements_path: requirements.txt
+  sql_dir: sql
+  trino_setup_path: sql/setup_trino.sql

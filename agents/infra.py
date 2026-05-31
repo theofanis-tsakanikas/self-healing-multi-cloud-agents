@@ -75,9 +75,23 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             # Azure has no SSM. The image registry is the ACR login server created by
             # bootstrap and carried in the pipeline's azure_setup — read it directly.
             ecr_repository_url = (_pipe_conf.get("azure_setup", {}) or {}).get("acr_login_server", "")
+        elif _cloud == "gcp":
+            # GCP has no SSM either. Prefer the registry URL published by bootstrap
+            # (.bootstrap_outputs.json, local dev); otherwise assemble it from the
+            # Artifact Registry coords in gcp_setup + the PROJECT ID *value*.
+            ecr_repository_url = cloud_get_infra("gcp", "artifact_registry_url") or ""
+            if not ecr_repository_url:
+                _gcp = _pipe_conf.get("gcp_setup", {}) or {}
+                _region = _gcp.get("artifact_registry_region", "")
+                _repo = _gcp.get("artifact_registry_repo", "")
+                # project_id_env holds the NAME of the env var (e.g. "GCP_PROJECT_ID");
+                # resolve it to its VALUE. Fall back to GCP_PROJECT_ID directly.
+                _proj = os.getenv(_gcp.get("project_id_env", "GCP_PROJECT_ID")) or os.getenv("GCP_PROJECT_ID", "")
+                if _region and _repo and _proj:
+                    ecr_repository_url = f"{_region}-docker.pkg.dev/{_proj}/{_repo}"
         else:
             # AWS: single source of truth is SSM (bootstrap/aws/ssm.tf), with a
-            # .bootstrap_outputs.json fallback for local dev. GCP falls through here too.
+            # .bootstrap_outputs.json fallback for local dev.
             ecr_repository_url = cloud_get_infra(_cloud, "ecr_repository_url") or ""
         if ecr_repository_url:
             logger.info(f"Image registry resolved for {_cloud}: {ecr_repository_url}")
@@ -227,6 +241,12 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                         f"\nAzure Container Registry login server (tag images as <login_server>/<image>:<sha>): {ecr_repository_url}"
                         if ecr_repository_url else
                         "\nAzure Container Registry: use CLOUD_SETUP.acr_login_server from your context as the image registry host."
+                    )
+                elif cloud_provider == "gcp":
+                    ecr_hint = (
+                        f"\nGCP Artifact Registry (tag images as <registry>/<image>:<sha>): {ecr_repository_url}"
+                        if ecr_repository_url else
+                        "\nGCP Artifact Registry: assemble {artifact_registry_region}-docker.pkg.dev/<GCP_PROJECT_ID>/{artifact_registry_repo} from CLOUD_SETUP."
                     )
                 else:
                     ecr_hint = (

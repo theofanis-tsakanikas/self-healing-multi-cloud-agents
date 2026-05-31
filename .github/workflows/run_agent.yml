@@ -110,6 +110,13 @@ jobs:
       MYSQL_DB_NAME:     ${{ vars.MYSQL_DB_NAME }}
       MYSQL_DB_PASSWORD: ${{ secrets.MYSQL_DB_PASSWORD }}
 
+      # ── GCP — auth for infra-agent Terraform (GCS bucket + SA + IAM) + registry assembly.
+      # The google provider reads GOOGLE_CREDENTIALS as the SA-key JSON *content* (same secret
+      # the bootstrap step writes to a file for GOOGLE_APPLICATION_CREDENTIALS; a static env:
+      # block cannot write a file, so the content form is the correct equivalent here).
+      GCP_PROJECT_ID:     ${{ vars.GCP_PROJECT_ID }}
+      GOOGLE_CREDENTIALS: ${{ secrets.GCP_SA_KEY_JSON }}
+
       # ── Azure — ARM auth (infra agent runs pipeline-level Terraform: storage + MI) ─
       ARM_CLIENT_ID:       ${{ secrets.ARM_CLIENT_ID }}
       ARM_CLIENT_SECRET:   ${{ secrets.ARM_CLIENT_SECRET }}
