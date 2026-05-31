@@ -15,7 +15,7 @@ The dashboard MUST contain **exactly four panels — one per emitted metric — 
 | Panel | Metric | `type` | Color / thresholds |
 |---|---|---|---|
 | Record Count | `pipeline_rows_processed_total` | `stat` (`sparkline` enabled) | Fixed green (`fieldConfig.defaults.color.mode: fixed`, `fixedColor: green`) |
-| Last Success | `pipeline_last_success_timestamp` | `stat` | `fieldConfig.defaults.unit: dateTimeFromNow` → renders "X min ago". Thresholds green→yellow→red on age |
+| Last Success | `pipeline_last_success_timestamp` | `stat` | `unit: dateTimeFromNow` → renders "X minutes ago" (multiply the expr by `* 1000` — Grafana expects ms). Fixed blue color — NO thresholds: a stat panel compares the raw absolute timestamp (~1.7e12), never the age, so any age threshold is permanently exceeded and shows red. Data-silence is handled by the alerting rule, not panel color. |
 | Rejected Rows | `pipeline_rows_rejected_total` | `bargauge` (`orientation: horizontal`) | `color.mode: continuous-GrYlRd` — green at 0, redder as rejections rise |
 | Run Duration | `pipeline_duration_seconds` | `gauge` | `unit: s`; thresholds green `<60`, yellow `60`, red `120` |
 
@@ -132,11 +132,7 @@ Alert labels MUST include both `pipeline` and `cloud_provider` static labels so 
       "fieldConfig": {
         "defaults": {
           "unit": "dateTimeFromNow",
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null },
-            { "color": "yellow", "value": 3600 },
-            { "color": "red", "value": 10800 }
-          ] }
+          "color": { "mode": "fixed", "fixedColor": "blue" }
         }
       },
       "targets": [

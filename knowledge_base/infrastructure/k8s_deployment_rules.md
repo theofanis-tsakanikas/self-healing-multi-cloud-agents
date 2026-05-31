@@ -332,6 +332,11 @@ spec:
         image: grafana/grafana:10.4.2
         ports:
         - containerPort: 3000
+        env:
+        # Lock the UI to English so dateTimeFromNow renders "X minutes ago", not a
+        # browser-locale translation (e.g. Greek "λίγα δευτερόλεπτα πριν").
+        - name: GF_USERS_DEFAULT_LANGUAGE
+          value: "en-US"
         resources:
           requests:
             memory: "512Mi"
