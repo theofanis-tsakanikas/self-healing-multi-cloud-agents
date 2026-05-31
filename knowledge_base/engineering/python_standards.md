@@ -80,27 +80,38 @@ The config expresses rules in business language. The architect resolves them to 
 | `DEFAULT_VALUE` | `chunk[col] = chunk[col].where(condition, other=default)` |
 | `FLAG_AS_SUSPICIOUS` | accumulate with `\|`: `chunk['is_suspicious'] = flag_rule1 \| flag_rule2` |
 
-**Worked example** — EU Sales pipeline (6 rules → 5 matched columns):
+**Worked example** — EU Sales pipeline (6 rules → 5 matched columns). Each row-removing rule attributes its drops to its own `reason` (the `quality_standards` rule name) via a `_before`/`len(chunk)` delta:
 ```python
 # monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
+_before = len(chunk)
 chunk = chunk[chunk['unit_price'] > 0.0]
+rejected_by_reason['monetary_integrity'] = \
+    rejected_by_reason.get('monetary_integrity', 0) + (_before - len(chunk))
 
 # temporal_validity: target_criteria 'date'/'timestamp' → order_date → EXCLUDE_AND_LOG
+_before = len(chunk)
 _future = chunk['order_date'] > pd.Timestamp.now()
 if _future.any():
     logging.warning(f"Excluded {_future.sum()} future-dated rows (temporal_validity).")
 chunk = chunk[~_future]
+rejected_by_reason['temporal_validity'] = \
+    rejected_by_reason.get('temporal_validity', 0) + (_before - len(chunk))
 
 # completeness_enforcement: target_criteria 'identifier'/'order_id' → order_id → DROP_RECORD
+_before = len(chunk)
 chunk = chunk.dropna(subset=['order_id'])
+rejected_by_reason['completeness_enforcement'] = \
+    rejected_by_reason.get('completeness_enforcement', 0) + (_before - len(chunk))
 
 # currency_standardization: target_criteria 'currency' → currency column → DEFAULT_VALUE 'EUR'
+#   (DEFAULT_VALUE does not remove rows → no rejected_by_reason entry)
 chunk['currency'] = chunk['currency'].where(chunk['currency'].isin(['EUR', 'GBP']), other='EUR')
 
 # volume_sanity_check + quantity_validity: both target 'quantity' → FLAG_AS_SUSPICIOUS, combine with |
+#   (FLAG_AS_SUSPICIOUS does not remove rows → no rejected_by_reason entry)
 chunk['is_suspicious'] = (chunk['quantity'] >= 1000) | (chunk['quantity'] <= 0)
 ```
-Column names (`unit_price`, `order_date`, `order_id`, `currency`, `quantity`) come from `read_data_schema` — never invented or hardcoded from the `target_criteria` description.
+Column names (`unit_price`, `order_date`, `order_id`, `currency`, `quantity`) come from `read_data_schema` — never invented or hardcoded from the `target_criteria` description. The `reason` keys (`monetary_integrity`, `temporal_validity`, `completeness_enforcement`) are the rule names straight from `quality_standards` — never hardcoded literals invented by the architect.
 
 ### Type Casting
 - Cast `float64` → `Int64` for quantity/count columns before every `to_parquet()` call — pandas defaults NULLable integers to float64, causing Trino to read `double` instead of `BIGINT`.
@@ -118,8 +129,12 @@ for col in int_cols:
 - The cloud storage SDK (`boto3` / `gcs` / `BlobServiceClient`) MUST be used inside `if _CLOUD == "..."` guards — never called unconditionally after a conditional import.
 
 ### Metrics
-- Emit **exactly four** Gauges to Pushgateway, all with `['project_id', 'cloud_provider']` labels: `pipeline_rows_processed_total` (volume), `pipeline_last_success_timestamp` (freshness), `pipeline_rows_rejected_total` (data quality), `pipeline_duration_seconds` (performance). The Grafana dashboard renders one panel per metric — omitting any leaves a "No data" panel.
-- `rejected_rows` is accumulated in the loop as `_rows_before - len(chunk)` after the row-removing rules; `duration_seconds` is `time.time() - start_time` captured after the extract loop. See the skeleton.
+- Emit **exactly five** Gauges to Pushgateway:
+  - **Four scalar metrics** with `['project_id', 'cloud_provider']` labels: `pipeline_rows_processed_total` (volume), `pipeline_last_success_timestamp` (freshness), `pipeline_rows_rejected_total` (data quality — total), `pipeline_duration_seconds` (performance).
+  - **One labeled metric** `pipeline_rows_rejected_by_reason` with `['project_id', 'cloud_provider', 'reason']` labels — emits **one series per business rule**, where `reason` is the rule name from `quality_standards`. This is the per-rule breakdown of the total `pipeline_rows_rejected_total`.
+  The Grafana dashboard renders one panel per metric — omitting any leaves a "No data" panel.
+- `rejected_rows` (total) is accumulated in the loop as `_rows_before - len(chunk)` after the row-removing rules; `duration_seconds` is `time.time() - start_time` captured after the extract loop. See the skeleton.
+- **Per-rule attribution (pipeline-agnostic — never hardcode reasons):** maintain a `rejected_by_reason` dict (`rule_name → cumulative dropped rows`). Each `DROP_RECORD` / `EXCLUDE_AND_LOG` rule wraps its filter with its own `_before = len(chunk)` and adds the delta under its own rule name. Because rules are sequential filters that only remove rows, `sum(rejected_by_reason.values()) == rejected_rows`. `DEFAULT_VALUE` / `FLAG_AS_SUSPICIOUS` do not remove rows, so they get no entry.
 
 ---
 
@@ -217,7 +232,8 @@ def run():
     # CRITICAL: create_engine AND the loop MUST be in the SAME try block.
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
-    rejected_rows = 0          # rows removed by DROP_RECORD / EXCLUDE_AND_LOG rules
+    rejected_rows = 0          # total rows removed by DROP_RECORD / EXCLUDE_AND_LOG rules
+    rejected_by_reason = {}    # rule_name → cumulative dropped rows (one entry per row-removing rule)
     query = "SELECT * FROM <source_table>"  # replace with actual table from context
 
     try:
@@ -229,19 +245,32 @@ def run():
 
             # 3b. Business rules — translate ALL quality_standards from pipeline config.
             #     NEVER use placeholder values like `is_suspicious = False`.
-            #     Capture the row count BEFORE filtering so rejected rows can be measured:
+            #     Capture the row count BEFORE filtering so total rejected rows can be measured:
             _rows_before = len(chunk)
             #
-            #   DROP_RECORD:      chunk = chunk[condition]
-            #   EXCLUDE_AND_LOG:  excluded = chunk[~condition]
+            #   Each row-removing rule ALSO wraps its filter with a per-rule delta and
+            #   accumulates it under its own quality_standards rule name (pipeline-agnostic —
+            #   the `reason` keys come from config, NEVER hardcoded literals):
+            #
+            #   DROP_RECORD:      _before = len(chunk)
+            #                     chunk = chunk[condition]
+            #                     rejected_by_reason['<rule_name>'] = \
+            #                         rejected_by_reason.get('<rule_name>', 0) + (_before - len(chunk))
+            #   EXCLUDE_AND_LOG:  _before = len(chunk)
+            #                     excluded = chunk[~condition]
             #                     logging.warning(f"Excluded {len(excluded)} rows: <reason>")
             #                     chunk = chunk[condition]
+            #                     rejected_by_reason['<rule_name>'] = \
+            #                         rejected_by_reason.get('<rule_name>', 0) + (_before - len(chunk))
             #   DEFAULT_VALUE:    chunk[col] = chunk[col].where(condition, other=default)
+            #                     # does NOT remove rows → no rejected_by_reason entry
             #   FLAG_AS_SUSPICIOUS: chunk['is_suspicious'] = ~condition
             #                       # Do NOT filter after flagging — keep all rows
+            #                       # does NOT remove rows → no rejected_by_reason entry
             #
-            # After all row-removing rules, accumulate the rejected count.
-            # FLAG_AS_SUSPICIOUS does not remove rows, so it does not affect this delta.
+            # After all row-removing rules, accumulate the TOTAL rejected count.
+            # Invariant: sum(rejected_by_reason.values()) == rejected_rows (sequential filters).
+            # FLAG_AS_SUSPICIOUS / DEFAULT_VALUE do not remove rows, so they do not affect this delta.
             rejected_rows += _rows_before - len(chunk)
 
             # 3c. Type casting — cast float64 → Int64 for integer/count/quantity columns
@@ -282,8 +311,9 @@ def run():
     project_id     = os.getenv("PROJECT_ID", "unknown")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")
 
-    # Emit ALL FOUR metrics — the Grafana dashboard renders one panel per metric
-    # (volume, freshness, data quality, performance). Omitting any leaves a panel with "No data".
+    # Emit ALL FIVE metrics — the Grafana dashboard renders one panel per metric
+    # (volume, freshness, data quality, performance, per-reason breakdown).
+    # Omitting any leaves a panel with "No data".
     registry = CollectorRegistry()
     Gauge('pipeline_rows_processed_total', 'Total rows written to storage after business rules',
           ['project_id', 'cloud_provider'], registry=registry) \
@@ -298,10 +328,20 @@ def run():
           ['project_id', 'cloud_provider'], registry=registry) \
         .labels(project_id=project_id, cloud_provider=cloud_provider).set(duration_seconds)
 
+    # Per-rule breakdown — one series per business rule that removed rows.
+    # `reason` is the quality_standards rule name (never hardcoded). A pipeline with no
+    # DROP_RECORD / EXCLUDE_AND_LOG rules emits zero series here (panel shows "No data").
+    rejected_by_reason_gauge = Gauge(
+        'pipeline_rows_rejected_by_reason', 'Rows rejected per business rule, labelled by rule name',
+        ['project_id', 'cloud_provider', 'reason'], registry=registry)
+    for _reason, _count in rejected_by_reason.items():
+        rejected_by_reason_gauge.labels(
+            project_id=project_id, cloud_provider=cloud_provider, reason=_reason).set(_count)
+
     push_to_gateway(pushgateway_url, job=project_id, registry=registry)
     logging.info(
         f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, "
-        f"duration={duration_seconds:.1f}s, cloud={cloud_provider}"
+        f"by_reason={rejected_by_reason}, duration={duration_seconds:.1f}s, cloud={cloud_provider}"
     )
 
 

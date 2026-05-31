@@ -181,8 +181,8 @@ AWS CLI + kubectl run locally against the cluster using credentials from `.env` 
 
 1. **S3:** `aws s3 ls s3://<bucket>/processed/ --recursive` → expect `run_date=YYYY-MM-DD/part_0.parquet`.
 2. **Glue:** Table `<schema>.<pipeline_id>` exists with correct schema + the `run_date` partition registered (Trino `sync_partition_metadata`).
-3. **Grafana:** LoadBalancer DNS on `:3000`, login `admin`/`admin`, dashboard "…Observability" — **4 panels** populated (Record Count, Last Success, Rejected Rows, Run Duration).
-4. **Metrics:** all four gauges present in Prometheus — `pipeline_rows_processed_total`, `pipeline_last_success_timestamp`, `pipeline_rows_rejected_total`, `pipeline_duration_seconds`.
+3. **Grafana:** LoadBalancer DNS on `:3000`, login `admin`/`admin`, dashboard "…Observability" — **5 panels** populated (Record Count, Last Success, Rejection Rate, Run Duration, Rejections by Reason). The 5th (piechart) shows the per-rule breakdown — empty/"No data" only when the pipeline has no DROP_RECORD/EXCLUDE_AND_LOG rules.
+4. **Metrics:** all five gauges present in Prometheus — `pipeline_rows_processed_total`, `pipeline_last_success_timestamp`, `pipeline_rows_rejected_total`, `pipeline_duration_seconds`, `pipeline_rows_rejected_by_reason` (labeled per `reason`, one series per business rule).
 5. **Cost note:** EKS + node EC2 + ECR persist after a run. `cleanup_k8s.yml` (manual `workflow_dispatch`) tears down only the K8s workloads — it never touches bootstrap infra.
 
 **Grafana shows "No data" but the run succeeded?** The pipeline hit the idempotency check — if `run_date=YYYY-MM-DD` already exists in S3 it logs "already populated. Skipping" and returns *before* emitting metrics. Also the Pushgateway is in-memory, so a Pushgateway pod restart drops all metrics. Delete only that day's partition (`aws s3 rm s3://<bucket>/processed/run_date=YYYY-MM-DD/ --recursive`) and re-run, or wait for the next day's run.
