@@ -11,6 +11,7 @@ from utils.prompt_utils import format_prompt
 from utils.file_utils import read_file
 from utils.message_utils import safe_recent_messages
 from utils.config_utils import build_infra_context, build_databricks_infra_context
+from utils.cloud_config import cloud_get_infra
 
 # Import infrastructure automation tools
 from agents.tools import (
@@ -61,22 +62,17 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     project_id = state.get("project_id")
     collected_specs = dict(state.get("collected_specs", {}))
 
-    # Resolve ECR/registry URL: prefer value already in state, then fall back to
-    # .bootstrap_outputs.json (populated by export_bootstrap_outputs.py after bootstrap).
-    # We do NOT parse execute_terraform output — the infra agent's terraform operates on
-    # pipeline resources; the ECR repo was created during the bootstrap phase.
+    # Resolve ECR/registry URL — single source of truth: the bootstrap phase creates
+    # the ECR repo and publishes its URL to SSM (bootstrap/aws/ssm.tf), so we read it
+    # back from SSM here. cloud_get_infra falls back to .bootstrap_outputs.json for
+    # local dev. We do NOT parse execute_terraform output — the infra agent's terraform
+    # operates on pipeline resources (S3 + IAM), not the ECR repo.
     ecr_repository_url = state.get("ecr_repository_url", "")
     if not ecr_repository_url:
-        _bootstrap_file = REPO_ROOT / ".bootstrap_outputs.json"
-        if _bootstrap_file.exists():
-            try:
-                _bootstrap = json.loads(_bootstrap_file.read_text())
-                _cloud = state.get("raw_configs", {}).get("pipeline", {}).get("cloud_provider", "aws").lower()
-                ecr_repository_url = _bootstrap.get(_cloud, {}).get("ecr_repository_url", "")
-                if ecr_repository_url:
-                    logger.info(f"ECR URL loaded from bootstrap outputs: {ecr_repository_url}")
-            except Exception as _e:
-                logger.warning(f"Could not read bootstrap outputs: {_e}")
+        _cloud = state.get("raw_configs", {}).get("pipeline", {}).get("cloud_provider", "aws").lower()
+        ecr_repository_url = cloud_get_infra(_cloud, "ecr_repository_url") or ""
+        if ecr_repository_url:
+            logger.info(f"ECR URL resolved (SSM/bootstrap): {ecr_repository_url}")
 
     
     # 2. CONTEXT GENERATION

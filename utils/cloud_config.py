@@ -200,3 +200,35 @@ def cloud_get(cloud: str, key: str, db_type: str = "postgres", *, use_ssm: bool 
 
     logger.warning(f"⚠️  No value found for {cloud}/{db_type}/{key}")
     return None
+
+
+def cloud_get_infra(cloud: str, key: str, *, use_ssm: bool = True) -> Optional[str]:
+    """
+    Retrieve a NON-credential infrastructure value (e.g. ecr_repository_url,
+    eks_cluster_name) using the same source chain as cloud_get, minus the
+    DB-engine env-var table.
+
+    Source order:
+      1. AWS SSM Parameter Store (AWS only) — written by bootstrap terraform apply.
+      2. .bootstrap_outputs.json — local dev fallback.
+
+    These values are written to SSM by the bootstrap phase (see bootstrap/aws/ssm.tf)
+    and read here by whoever needs them (the infra agent). Single source of truth:
+    the bootstrap that creates the resource also publishes its identifier.
+
+    Returns the value as a string, or None if not found.
+    """
+    if use_ssm and cloud == "aws":
+        value = _try_ssm(cloud, key)
+        if value is not None:
+            logger.debug(f"📦 SSM (infra): {cloud}/{key}")
+            return value
+
+    outputs = _load_bootstrap_outputs()
+    value = outputs.get(cloud, {}).get(key)
+    if value is not None:
+        logger.debug(f"📄 bootstrap_outputs (infra): {cloud}/{key}")
+        return str(value)
+
+    logger.warning(f"⚠️  No infra value found for {cloud}/{key}")
+    return None

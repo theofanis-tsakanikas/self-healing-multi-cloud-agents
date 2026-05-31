@@ -1431,9 +1431,9 @@ def generate_github_action(project_id: str, content: str):
       • kubectl apply: 'k8s/job.yaml'  (not 'projects/.../k8s/job.yaml')
       • on.push.paths: omit entirely or use '**'
 
-    AWS ECR URL: assemble from CLOUD_SETUP.aws_account_id + region + ecr_repository_name
-    (e.g. '<aws_account_id>.dkr.ecr.<region>.amazonaws.com/<ecr_repository_name>').
-    Never write <AWS_ACCOUNT_ID> as a literal placeholder.
+    AWS ECR URL: use the exact value provided in the orchestration context
+    ("ECR Repository URL: ..."), resolved from SSM by the infra agent. Never write
+    <AWS_ACCOUNT_ID> as a literal placeholder and never self-assemble it.
     """
     workflow_dir = os.path.join(REPO_ROOT, ".github", "workflows")
     os.makedirs(workflow_dir, exist_ok=True)
