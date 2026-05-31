@@ -3,7 +3,12 @@ name: Deploy Pipeline
 on:
   push:
     paths:
-      - '**'
+      - 'Dockerfile'
+      - 'scripts/**'
+      - 'k8s/**'
+      - 'sql/**'
+      - 'dashboards/**'
+      - 'requirements.txt'
 
 jobs:
   deploy:
@@ -17,40 +22,35 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: eu-central-1
+          aws-region: ${{ vars.AWS_DEFAULT_REGION }}
 
       - name: ECR Login
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and Push Docker Image
         run: |
-          docker build -t 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} -f Dockerfile .
-          docker push 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}
-          docker tag 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
+          docker build -t 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest -f Dockerfile .
           docker push 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
 
       - name: Update Kubeconfig
-        run: aws eks update-kubeconfig --region eu-central-1 --name multi-cloud-agent-cluster
+        run: aws eks update-kubeconfig --region ${{ vars.AWS_DEFAULT_REGION }} --name multi-cloud-agent-cluster
 
       - name: Set Image Tag in Job Manifest
         run: |
-          sed -i 's|image: RESOLVE_FROM_EXECUTE_TERRAFORM_OUTPUT|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}|' k8s/job.yaml
-
-      - name: Deploy Shared Services to Kubernetes
-        run: |
-          kubectl apply -f k8s/00_namespaces.yaml
-          kubectl apply -f k8s/configmaps.yaml
-          kubectl apply -f k8s/prometheus_deployment.yaml
-          kubectl apply -f k8s/trino_deployment.yaml
-          kubectl apply -f k8s/grafana_deployment.yaml
-          kubectl rollout restart deployment/trino -n analytics
-          kubectl rollout status deployment/trino -n analytics --timeout=120s
+          sed -i 's|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:.*|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest|' k8s/job.yaml
 
       - name: Create DB Credentials Secret
         run: |
           kubectl create secret generic pipe-eu-sales-to-s3-db-credentials \
             -n analytics \
             --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Shared Services to Kubernetes
+        run: |
+          kubectl apply -f k8s/00_namespaces.yaml
+          kubectl apply -f k8s/configmaps.yaml
+          kubectl apply -f k8s/trino_deployment.yaml
+          kubectl apply -f k8s/grafana_deployment.yaml
 
       - name: Deploy Pipeline Job to Kubernetes
         run: |
