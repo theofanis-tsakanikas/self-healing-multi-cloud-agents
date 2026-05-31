@@ -111,13 +111,15 @@ chunk['currency'] = chunk['currency'].where(chunk['currency'].isin(['EUR', 'GBP'
 #   (FLAG_AS_SUSPICIOUS does not remove rows → no rejected_by_reason entry)
 chunk['is_suspicious'] = (chunk['quantity'] >= 1000) | (chunk['quantity'] <= 0)
 ```
-The scalar total is accumulated separately, once per chunk, from a SINGLE `_rows_before`
-captured at the very top of the chunk (before any rule) minus the final `len(chunk)`:
-`rejected_rows += _rows_before_chunk - len(chunk)`. This top-level reading is correct for
-the *total* (initial minus final = everything dropped) and accumulates across chunks. It is
-a DIFFERENT variable from the per-rule `_before` readings above — do not reuse the per-rule
-`_before` for the scalar, and do not reuse the scalar `_rows_before_chunk` for the per-rule
-deltas. With fresh per-rule `_before` readings, `sum(rejected_by_reason.values()) == rejected_rows`.
+After the chunk loop, DERIVE the scalar total from the per-reason dict — do NOT maintain a
+separate `rejected_rows +=` counter inside the loop (the LLM reliably updates it after only
+one rule, so the scalar disagrees with the per-reason sum):
+```python
+rejected_rows = sum(rejected_by_reason.values())   # single source of truth
+```
+This makes `rejected_rows == sum(rejected_by_reason.values())` true by construction, so the
+Rejection Rate panel (uses the scalar) and the Rejections-by-Reason panel (uses the dict)
+can never disagree.
 Column names (`unit_price`, `order_date`, `order_id`, `currency`, `quantity`) come from `read_data_schema` — never invented or hardcoded from the `target_criteria` description. The `reason` keys (`monetary_integrity`, `temporal_validity`, `completeness_enforcement`) are the rule names straight from `quality_standards` — never hardcoded literals invented by the architect.
 
 ### Type Casting
@@ -140,8 +142,8 @@ for col in int_cols:
   - **Four scalar metrics** with `['project_id', 'cloud_provider']` labels: `pipeline_rows_processed_total` (volume), `pipeline_last_success_timestamp` (freshness), `pipeline_rows_rejected_total` (data quality — total), `pipeline_duration_seconds` (performance).
   - **One labeled metric** `pipeline_rows_rejected_by_reason` with `['project_id', 'cloud_provider', 'reason']` labels — emits **one series per business rule**, where `reason` is the rule name from `quality_standards`. This is the per-rule breakdown of the total `pipeline_rows_rejected_total`.
   The Grafana dashboard renders one panel per metric — omitting any leaves a "No data" panel.
-- `rejected_rows` (total) is accumulated in the loop as `_rows_before - len(chunk)` after the row-removing rules; `duration_seconds` is `time.time() - start_time` captured after the extract loop. See the skeleton.
-- **Per-rule attribution (pipeline-agnostic — never hardcode reasons):** maintain a `rejected_by_reason` dict (`rule_name → cumulative dropped rows`). Each `DROP_RECORD` / `EXCLUDE_AND_LOG` rule wraps its filter with its own `_before = len(chunk)` and adds the delta under its own rule name. Because rules are sequential filters that only remove rows, `sum(rejected_by_reason.values()) == rejected_rows`. `DEFAULT_VALUE` / `FLAG_AS_SUSPICIOUS` do not remove rows, so they get no entry.
+- **Per-rule attribution (pipeline-agnostic — never hardcode reasons):** maintain a `rejected_by_reason` dict (`rule_name → cumulative dropped rows`). Each `DROP_RECORD` / `EXCLUDE_AND_LOG` rule wraps its filter with its OWN FRESH `_before = len(chunk)` (taken immediately before that rule's filter) and adds the delta under its own rule name. `DEFAULT_VALUE` / `FLAG_AS_SUSPICIOUS` do not remove rows, so they get no entry.
+- `rejected_rows` (scalar total) is **DERIVED** after the loop as `sum(rejected_by_reason.values())` — never a separate in-loop `+=` counter (that reliably drifts out of sync). `duration_seconds` is `time.time() - start_time` captured after the extract loop. See the skeleton.
 
 ---
 
@@ -245,8 +247,9 @@ def run():
     # CRITICAL: create_engine AND the loop MUST be in the SAME try block.
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
-    rejected_rows = 0          # total rows removed by DROP_RECORD / EXCLUDE_AND_LOG rules
     rejected_by_reason = {}    # rule_name → cumulative dropped rows (one entry per row-removing rule)
+    # NOTE: rejected_rows is NOT maintained here — it is derived after the loop as
+    # sum(rejected_by_reason.values()) so the scalar and per-reason can never disagree.
     query = "SELECT * FROM <source_table>"  # replace with actual table from context
 
     try:
@@ -307,6 +310,10 @@ def run():
         logging.error(f"Pipeline failed: {e}")
         raise
 
+    # Scalar total DERIVED from the per-reason dict — single source of truth, so the
+    # Rejection Rate panel (which uses rejected_rows) and the Rejections-by-Reason panel
+    # (which uses the dict) can never disagree.
+    rejected_rows = sum(rejected_by_reason.values())
     duration_seconds = time.time() - start_time   # for pipeline_duration_seconds metric
     logging.info(f"Pipeline completed. Rows: {total_rows}, rejected: {rejected_rows}, duration: {duration_seconds:.1f}s")
 

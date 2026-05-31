@@ -270,6 +270,24 @@ def validate_generated_code(filename: str) -> str:
                     )
                     break
 
+            # The scalar rejected_rows MUST be derived from sum(rejected_by_reason.values()),
+            # not accumulated with an in-loop `rejected_rows += ...`. The += pattern reliably
+            # gets placed after only one rule, so the scalar (used by Rejection Rate) ends up
+            # smaller than the per-reason sum (used by Rejections-by-Reason) — the two panels
+            # disagree. Deriving from sum makes them consistent by construction.
+            if "rejected_by_reason" in py_content and "rejected_rows" in py_content:
+                _has_sum = re.search(
+                    r"rejected_rows\s*=\s*sum\s*\(\s*rejected_by_reason\.values\(\)\s*\)", py_content)
+                _has_inloop = re.search(r"rejected_rows\s*\+=", py_content)
+                if not _has_sum or _has_inloop:
+                    errors.append(
+                        "PYTHON [project policy]: rejected_rows must be DERIVED after the loop as "
+                        "'rejected_rows = sum(rejected_by_reason.values())' — not accumulated with "
+                        "an in-loop 'rejected_rows += ...' (that drifts out of sync with the "
+                        "per-reason dict, so the Rejection Rate and Rejections-by-Reason panels "
+                        "disagree). See python_standards.md."
+                    )
+
     # ── JSON (Grafana dashboard) ──────────────────────────────────────────────
     elif ext == ".json":
         try:
