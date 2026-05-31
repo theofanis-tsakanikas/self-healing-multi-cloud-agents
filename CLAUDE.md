@@ -143,6 +143,8 @@ This is **not a monorepo**. All paths are relative to the repo root:
 
 Standards live in `knowledge_base/`. Pinecone loads the full content of each standard (no chunking) — every agent has access to the complete text.
 
+**After editing any `knowledge_base/*.md` standard, the next `run_agent.yml` MUST set `sync_knowledge_base: sync`.** Pinecone serves the *last synced* version — without a re-sync the agents read the OLD standard and your edits are silently ignored. (Exception: the infra agent reads k8s/dockerfile/cicd standards straight from disk, bypassing Pinecone — see `infra.py` `_disk_standards`.)
+
 The validator (`validate_generated_code`) is a **safety net** for architectural issues the LLM can't know from general knowledge (custom modules, cloud-specific quirks). It is not a substitute for correct prompts and standards. Do not add fragile regex checks for general Python best practices.
 
 ---
@@ -175,10 +177,12 @@ Never commit `.env` files or credential JSON.
 
 ## Verifying a Successful Pipeline Run
 
-AWS CLI is available via `~/Library/Python/3.9/bin` using credentials from `.env` (load with `python-dotenv`); `kubectl` is NOT installed locally — use the CI job logs or the Grafana LoadBalancer URL for in-cluster checks.
+AWS CLI + kubectl run locally against the cluster using credentials from `.env` (load with `python-dotenv`; `aws eks update-kubeconfig --name multi-cloud-agent-cluster`). For in-cluster checks the CI job logs work too.
 
 1. **S3:** `aws s3 ls s3://<bucket>/processed/ --recursive` → expect `run_date=YYYY-MM-DD/part_0.parquet`.
 2. **Glue:** Table `<schema>.<pipeline_id>` exists with correct schema + the `run_date` partition registered (Trino `sync_partition_metadata`).
-3. **Grafana:** LoadBalancer DNS on `:3000`, login `admin`/`admin`, dashboard "…Observability" with Record Count + Freshness panels populated.
-4. **Pushgateway:** `pipeline_rows_processed_total` + `pipeline_last_success_timestamp` present.
+3. **Grafana:** LoadBalancer DNS on `:3000`, login `admin`/`admin`, dashboard "…Observability" — **4 panels** populated (Record Count, Last Success, Rejected Rows, Run Duration).
+4. **Metrics:** all four gauges present in Prometheus — `pipeline_rows_processed_total`, `pipeline_last_success_timestamp`, `pipeline_rows_rejected_total`, `pipeline_duration_seconds`.
 5. **Cost note:** EKS + node EC2 + ECR persist after a run. `cleanup_k8s.yml` (manual `workflow_dispatch`) tears down only the K8s workloads — it never touches bootstrap infra.
+
+**Grafana shows "No data" but the run succeeded?** The pipeline hit the idempotency check — if `run_date=YYYY-MM-DD` already exists in S3 it logs "already populated. Skipping" and returns *before* emitting metrics. Also the Pushgateway is in-memory, so a Pushgateway pod restart drops all metrics. Delete only that day's partition (`aws s3 rm s3://<bucket>/processed/run_date=YYYY-MM-DD/ --recursive`) and re-run, or wait for the next day's run.
