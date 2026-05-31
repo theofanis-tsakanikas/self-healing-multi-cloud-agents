@@ -95,22 +95,23 @@ def run():
 
             # 3b. Business rules — translate ALL quality_standards from pipeline config.
             _rows_before = len(chunk)
-            rejected_by_reason = {}
-
             # monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
             chunk = chunk[chunk['unit_price'] > 0.0]
-            rejected_by_reason['monetary_integrity'] = _rows_before - len(chunk)
+            rejected_rows += _rows_before - len(chunk)
+            rejected_by_reason['monetary_integrity'] = rejected_by_reason.get('monetary_integrity', 0) + (_rows_before - len(chunk))
 
             # temporal_validity: target_criteria 'date' → order_date → EXCLUDE_AND_LOG
+            _rows_before = len(chunk)
             _future = chunk['order_date'] > pd.Timestamp.now()
             if _future.any():
                 logging.warning(f"Excluded {_future.sum()} future-dated rows (temporal_validity).")
             chunk = chunk[~_future]
-            rejected_by_reason['temporal_validity'] = _rows_before - len(chunk)
+            rejected_by_reason['temporal_validity'] = rejected_by_reason.get('temporal_validity', 0) + (_rows_before - len(chunk))
 
             # completeness_enforcement: target_criteria 'identifier'/'order_id' → order_id → DROP_RECORD
+            _rows_before = len(chunk)
             chunk = chunk.dropna(subset=['order_id'])
-            rejected_by_reason['completeness_enforcement'] = _rows_before - len(chunk)
+            rejected_by_reason['completeness_enforcement'] = rejected_by_reason.get('completeness_enforcement', 0) + (_rows_before - len(chunk))
 
             # currency_standardization: target_criteria 'currency' → currency column → DEFAULT_VALUE 'EUR'
             chunk['currency'] = chunk['currency'].where(chunk['currency'].isin(['EUR', 'GBP']), other='EUR')
@@ -181,8 +182,10 @@ def run():
 
     push_to_gateway(pushgateway_url, job=project_id, registry=registry)
     logging.info(
-        f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, duration={duration_seconds:.1f}s, cloud={cloud_provider}"
+        f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, "
+        f"by_reason={rejected_by_reason}, duration={duration_seconds:.1f}s, cloud={cloud_provider}"
     )
+
 
 if __name__ == "__main__":
     run()

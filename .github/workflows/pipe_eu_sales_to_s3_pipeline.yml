@@ -46,10 +46,6 @@ jobs:
           kubectl apply -f k8s/trino_deployment.yaml
           kubectl apply -f k8s/grafana_deployment.yaml
           kubectl apply -f k8s/prometheus_deployment.yaml
-          kubectl rollout restart deployment/trino -n analytics
-          kubectl rollout restart deployment/grafana -n monitoring
-          kubectl rollout status deployment/trino -n analytics --timeout=120s
-          kubectl rollout status deployment/grafana -n monitoring --timeout=120s
 
       - name: Create DB Credentials Secret
         run: |
@@ -89,5 +85,4 @@ jobs:
           kubectl logs -l component=pipeline-job -n analytics -c pipeline --tail=100 2>/dev/null || echo "(pipeline logs unavailable)"
           exit 1
 
-      - name: Heartbeat
-        run: echo "Deployment Complete"
+      - run: echo "Deployment Complete"
