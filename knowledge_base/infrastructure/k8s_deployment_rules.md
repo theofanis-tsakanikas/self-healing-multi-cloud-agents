@@ -160,6 +160,17 @@ metadata:
   labels:
     project_id: <project_id>
 data:
+  dashboard-provider.yaml: |
+    apiVersion: 1
+    providers:
+    - name: default
+      orgId: 1
+      folder: ''
+      type: file
+      disableDeletion: false
+      editable: true
+      options:
+        path: /etc/grafana/provisioning/dashboards
   monitoring_specs.json: |
     <ACTUAL CONTENT OF dashboards/monitoring_specs.json>
 ---
