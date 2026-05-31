@@ -4,9 +4,9 @@ CREATE TABLE hive.sales_eu.pipe_eu_sales_to_s3 (
     order_id    VARCHAR,
     unit_price  DECIMAL(18,2),
     quantity    INTEGER,
+    order_date  TIMESTAMP,
     currency    VARCHAR,
-    run_date    DATE,
-    is_suspicious BOOLEAN
+    run_date    DATE
 ) WITH (
     format            = 'PARQUET',
     external_location = 's3://eu-sales-insights-data/processed/',

@@ -72,12 +72,12 @@ def run():
         db   = cloud_get("gcp", "db_name")
         connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
     elif _CLOUD == "azure":
-        host = cloud_get("azure", "db_host")
-        port = cloud_get("azure", "db_port") or "1433"
-        user = cloud_get("azure", "db_user")
-        pw   = cloud_get("azure", "db_password")
-        db   = cloud_get("azure", "db_name")
-        connection_string = f"mssql+pyodbc://{user}:{pw}@{host}:{port}/{db}?driver=ODBC+Driver+18+for+SQL+Server"
+        host = cloud_get("azure", "db_host",     db_type="postgres")
+        port = cloud_get("azure", "db_port",     db_type="postgres") or "5432"
+        user = cloud_get("azure", "db_user",     db_type="postgres")
+        pw   = cloud_get("azure", "db_password", db_type="postgres")
+        db   = cloud_get("azure", "db_name",     db_type="postgres")
+        connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
 
     # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
     start_time = time.time()   # for pipeline_duration_seconds metric
@@ -108,7 +108,7 @@ def run():
             chunk = chunk[~_future]
             rejected_by_reason['temporal_validity'] = rejected_by_reason.get('temporal_validity', 0) + (_rows_before - len(chunk))
 
-            # completeness_enforcement: target_criteria 'identifier' → order_id → DROP_RECORD
+            # completeness_enforcement: target_criteria 'identifier'/'order_id' → order_id → DROP_RECORD
             chunk = chunk.dropna(subset=['order_id'])
             rejected_by_reason['completeness_enforcement'] = rejected_by_reason.get('completeness_enforcement', 0) + (_rows_before - len(chunk))
 
