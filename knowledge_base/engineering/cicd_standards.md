@@ -37,9 +37,9 @@ The Agent MUST select the logic block that matches the `target_cloud` identifier
 - **Auth:** Use `aws-actions/configure-aws-credentials@v4` with:
     - `aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}`
     - `aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}`
-    - `aws-region: ${{ vars.AWS_DEFAULT_REGION }}`
+    - `aws-region: ${{ vars.AWS_DEFAULT_REGION }}` — **NEVER substitute a literal region string (e.g. `eu-central-1`). Always use `${{ vars.AWS_DEFAULT_REGION }}` verbatim — the operator sets the region as a GitHub Variable.**
 - **Registry:** `aws-actions/amazon-ecr-login@v2`.
-- **Kubeconfig:** `aws eks update-kubeconfig --region ${{ vars.AWS_DEFAULT_REGION }} --name {{eks_cluster_name}}`
+- **Kubeconfig:** `aws eks update-kubeconfig --region ${{ vars.AWS_DEFAULT_REGION }} --name {{eks_cluster_name}}` — same rule: `${{ vars.AWS_DEFAULT_REGION }}`, never a literal.
 
 ### 3.2 Module: GCP (target_cloud: gcp)
 - **Auth:** Use `google-github-actions/auth@v2` (via Workload Identity Federation or Service Account JSON secrets).

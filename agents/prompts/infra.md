@@ -96,7 +96,7 @@ The following structured context defines your infrastructure mission. All resour
 - **MANDATORY:** After calling `generate_github_action`, immediately call `validate_generated_code` on the generated file path (`.github/workflows/{{project_id}}_pipeline.yml`). If it reports unresolved placeholders (e.g. `<AWS_ACCOUNT_ID>`), rewrite the workflow with the actual values from context before proceeding to `push_to_github`.
 - **File Location:** `/.github/workflows/{{project_id}}_pipeline.yml`
 - **Cloud-Specific Auth:** Use the correct module from `infra_standard_cicd`:
-    - AWS: `aws-actions/configure-aws-credentials@v4` + ECR login + `aws eks update-kubeconfig`
+    - AWS: `aws-actions/configure-aws-credentials@v4` + ECR login + `aws eks update-kubeconfig`. Region MUST be `${{ vars.AWS_DEFAULT_REGION }}` — never substitute the literal region value from context (e.g. never write `eu-central-1` directly).
     - Azure: `azure/login@v2` + `azure/docker-login@v1` + `az aks get-credentials`
     - GCP: `google-github-actions/auth@v2` + `gcloud auth configure-docker` + `gcloud container clusters get-credentials`
 - **Heartbeat Signal:** Final step MUST be `run: echo "Deployment Complete"`.
