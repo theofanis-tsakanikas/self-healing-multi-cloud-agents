@@ -126,14 +126,26 @@ The following steps MUST appear in this exact order:
     kubectl rollout status deployment/grafana -n monitoring --timeout=120s
 - name: Create DB Credentials Secret
   run: |
-    # Secret name must be RFC 1123 and match job.yaml envFrom.secretRef.name exactly.
-    # AWS: cloud_get() reads credentials from SSM Parameter Store via IRSA — the secret
-    # is created empty so the pod starts (envFrom: secretRef requires the object to exist).
-    # SSM is the single source of truth; env vars are never needed if bootstrap has run.
-    # GCP/Azure: populate with actual values (MYSQL_DB_* / CRM_DB_*) from GitHub vars/secrets.
+    # Name must be RFC 1123 and match job.yaml envFrom.secretRef.name exactly.
+    # Generate the variant for the TARGET cloud — do NOT copy the AWS empty form for Azure/GCP.
+    #
+    # ── AWS — EMPTY secret. cloud_get() reads creds from SSM via IRSA; the object only
+    #          needs to exist for envFrom: secretRef. SSM is the single source of truth:
     kubectl create secret generic <project_id_rfc1123>-db-credentials \
       -n analytics \
       --dry-run=client -o yaml | kubectl apply -f -
+    #
+    # ── Azure / GCP — POPULATED secret. There is NO SSM; an empty secret means
+    #    cloud_get() returns None → `host name "None"`. You MUST pass --from-literal for
+    #    every key (per-cloud key mapping table below). Azure (CRM_DB_*) example:
+    # kubectl create secret generic <project_id_rfc1123>-db-credentials -n analytics \
+    #   --from-literal=CRM_DB_HOST=${{ vars.CRM_DB_HOST }} \
+    #   --from-literal=CRM_DB_PORT=${{ vars.CRM_DB_PORT }} \
+    #   --from-literal=CRM_DB_USER=${{ vars.CRM_DB_USER }} \
+    #   --from-literal=CRM_DB_NAME=${{ vars.CRM_DB_NAME }} \
+    #   --from-literal=CRM_DB_PASSWORD=${{ secrets.CRM_DB_PASSWORD }} \
+    #   --dry-run=client -o yaml | kubectl apply -f -
+    # GCP uses the same pattern with the MYSQL_DB_* keys (PASSWORD from secrets, rest from vars).
 - name: Deploy Pipeline Job to Kubernetes
   run: |
     kubectl delete job -l component=pipeline-job -n analytics --ignore-not-found=true

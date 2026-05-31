@@ -26,8 +26,8 @@ elif _CLOUD == "gcp":
     host = cloud_get("gcp", "db_host")
     connection_string = f"mysql+pymysql://..."
 elif _CLOUD == "azure":
-    host = cloud_get("azure", "db_host")
-    connection_string = f"mssql+pyodbc://..."
+    host = cloud_get("azure", "db_host", db_type="postgres")
+    connection_string = f"postgresql+psycopg2://..."   # us_crm source = Azure Postgres
 ```
 
 ### Storage
@@ -221,12 +221,15 @@ def run():
         db   = cloud_get("gcp", "db_name")
         connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
     elif _CLOUD == "azure":
-        host = cloud_get("azure", "db_host")
-        port = cloud_get("azure", "db_port") or "1433"
-        user = cloud_get("azure", "db_user")
-        pw   = cloud_get("azure", "db_password")
-        db   = cloud_get("azure", "db_name")
-        connection_string = f"mssql+pyodbc://{user}:{pw}@{host}:{port}/{db}?driver=ODBC+Driver+18+for+SQL+Server"
+        # The DB DRIVER is chosen by the SOURCE engine (DATA_SOURCE.type), NOT the cloud.
+        # us_crm's source is Azure Database for PostgreSQL → postgresql+psycopg2 (port 5432).
+        # Use mssql+pyodbc (port 1433) ONLY if the source is Azure SQL / MSSQL.
+        host = cloud_get("azure", "db_host",     db_type="postgres")
+        port = cloud_get("azure", "db_port",     db_type="postgres") or "5432"
+        user = cloud_get("azure", "db_user",     db_type="postgres")
+        pw   = cloud_get("azure", "db_password", db_type="postgres")
+        db   = cloud_get("azure", "db_name",     db_type="postgres")
+        connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
 
     # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
     # CRITICAL: create_engine AND the loop MUST be in the SAME try block.
@@ -377,7 +380,8 @@ trino
 prometheus-client
 # AWS:   boto3, s3fs, psycopg2-binary
 # GCP:   google-cloud-storage, gcsfs, pymysql
-# Azure: azure-storage-blob, adlfs, pyodbc
+# Azure: azure-storage-blob, adlfs, psycopg2-binary   (us_crm source = Azure Postgres;
+#        use pyodbc instead only if the source is Azure SQL / MSSQL)
 ```
 `trino` is always required. Include only the packages for the active cloud provider.
 
