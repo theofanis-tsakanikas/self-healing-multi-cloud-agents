@@ -16,7 +16,7 @@ The dashboard MUST contain **exactly four panels — one per emitted metric — 
 |---|---|---|---|
 | Record Count | `pipeline_rows_processed_total` | `stat` (`sparkline` enabled) | Fixed green (`fieldConfig.defaults.color.mode: fixed`, `fixedColor: green`) |
 | Last Success | `pipeline_last_success_timestamp` | `stat` | `unit: dateTimeFromNow` → renders "X minutes ago" (multiply the expr by `* 1000` — Grafana expects ms). Fixed blue color — NO thresholds: a stat panel compares the raw absolute timestamp (~1.7e12), never the age, so any age threshold is permanently exceeded and shows red. Data-silence is handled by the alerting rule, not panel color. |
-| Rejected Rows | `pipeline_rows_rejected_total` | `bargauge` (`orientation: horizontal`) | `color.mode: continuous-GrYlRd` — green at 0, redder as rejections rise |
+| Rejection Rate | `rejected / (processed + rejected) * 100` | `bargauge` (`orientation: horizontal`) | `unit: percent`, `min: 0`, `max: 100`, `color.mode: continuous-GrYlRd`. Show a RATE not the absolute count — a bargauge needs a fixed `max` to fill correctly, and percentage gives a natural 0–100 scale (an absolute count has no meaningful max). Use `clamp_min(..., 1)` in the denominator to avoid divide-by-zero on an empty run. |
 | Run Duration | `pipeline_duration_seconds` | `gauge` | `unit: s`; thresholds green `<60`, yellow `60`, red `120` |
 
 **2×2 layout (`gridPos`):** Record Count `{x:0,y:0,w:12,h:8}` · Last Success `{x:12,y:0,w:12,h:8}` · Rejected Rows `{x:0,y:8,w:12,h:8}` · Run Duration `{x:12,y:8,w:12,h:8}`.
@@ -144,15 +144,22 @@ Alert labels MUST include both `pipeline` and `cloud_provider` static labels so 
     },
     {
       "id": 3,
-      "title": "Rejected Rows",
+      "title": "Rejection Rate",
       "type": "bargauge",
       "datasource": "Prometheus",
       "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
       "options": { "orientation": "horizontal" },
-      "fieldConfig": { "defaults": { "color": { "mode": "continuous-GrYlRd" } } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "continuous-GrYlRd" }
+        }
+      },
       "targets": [
         {
-          "expr": "pipeline_rows_rejected_total{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}",
+          "expr": "pipeline_rows_rejected_total{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"} / clamp_min(pipeline_rows_processed_total{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"} + pipeline_rows_rejected_total{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}, 1) * 100",
           "legendFormat": "{{cloud_provider}} / {{project_id}}"
         }
       ]
