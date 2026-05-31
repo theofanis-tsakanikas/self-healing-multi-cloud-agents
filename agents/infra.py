@@ -69,17 +69,26 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     # operates on pipeline resources (S3 + IAM), not the ECR repo.
     ecr_repository_url = state.get("ecr_repository_url", "")
     if not ecr_repository_url:
-        _cloud = state.get("raw_configs", {}).get("pipeline", {}).get("cloud_provider", "aws").lower()
-        ecr_repository_url = cloud_get_infra(_cloud, "ecr_repository_url") or ""
+        _pipe_conf = state.get("raw_configs", {}).get("pipeline", {})
+        _cloud = _pipe_conf.get("cloud_provider", "aws").lower()
+        if _cloud == "azure":
+            # Azure has no SSM. The image registry is the ACR login server created by
+            # bootstrap and carried in the pipeline's azure_setup — read it directly.
+            ecr_repository_url = (_pipe_conf.get("azure_setup", {}) or {}).get("acr_login_server", "")
+        else:
+            # AWS: single source of truth is SSM (bootstrap/aws/ssm.tf), with a
+            # .bootstrap_outputs.json fallback for local dev. GCP falls through here too.
+            ecr_repository_url = cloud_get_infra(_cloud, "ecr_repository_url") or ""
         if ecr_repository_url:
-            logger.info(f"ECR URL resolved (SSM/bootstrap): {ecr_repository_url}")
+            logger.info(f"Image registry resolved for {_cloud}: {ecr_repository_url}")
 
     
     # 2. CONTEXT GENERATION
     raw_configs = state.get("raw_configs", {})
     pipeline_conf = raw_configs.get("pipeline", {})
     infra_conf = raw_configs.get("infrastructure", {})
-    
+    cloud_provider = pipeline_conf.get("cloud_provider", "aws").lower()
+
     provider = infra_conf.get("provider", "kubernetes").lower()
     is_databricks = provider == "databricks"
 
@@ -213,11 +222,18 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                 if k8s_ready and docker_ready and not github_ready:
                     missing_orchestration.append(".github/workflows/<project_id>_pipeline.yaml")
 
-                ecr_hint = (
-                    f"\nECR Repository URL (use this exact value, never write <AWS_ACCOUNT_ID>): {ecr_repository_url}"
-                    if ecr_repository_url else
-                    "\nECR Repository URL: not yet available — extract it from the execute_terraform output in conversation history."
-                )
+                if cloud_provider == "azure":
+                    ecr_hint = (
+                        f"\nAzure Container Registry login server (tag images as <login_server>/<image>:<sha>): {ecr_repository_url}"
+                        if ecr_repository_url else
+                        "\nAzure Container Registry: use CLOUD_SETUP.acr_login_server from your context as the image registry host."
+                    )
+                else:
+                    ecr_hint = (
+                        f"\nECR Repository URL (use this exact value, never write <AWS_ACCOUNT_ID>): {ecr_repository_url}"
+                        if ecr_repository_url else
+                        "\nECR Repository URL: not yet available — extract it from the execute_terraform output in conversation history."
+                    )
                 orchestration_phase_instruction = (
                     f"CURRENT OPERATIONAL PHASE: IMPLEMENTATION — ORCHESTRATION. "
                     f"Generate ONLY these missing files: {missing_orchestration}. "

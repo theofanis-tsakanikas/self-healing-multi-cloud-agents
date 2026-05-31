@@ -45,7 +45,9 @@ _SSM_PREFIX = "/multi-cloud-self-healing-agent"
 # by passing db_type to cloud_get() — see below.
 #
 # Convention:
-#   postgres / any SQL on AWS/Azure → POSTGRES_DB_*
+#   postgres on AWS                 → POSTGRES_DB_*
+#   postgres on Azure (us_crm)      → CRM_DB_*    (matches bootstrap/azure outputs,
+#                                                  cicd_standards secret keys, seed_chaos.py)
 #   mysql on GCP                    → MYSQL_DB_*
 #   mysql on AWS/Azure              → MYSQL_DB_*   (via db_type="mysql")
 _ENV_FALLBACKS: dict[tuple[str, str, str], str] = {
@@ -72,11 +74,13 @@ _ENV_FALLBACKS: dict[tuple[str, str, str], str] = {
     ("gcp", "mysql",    "db_password"): "MYSQL_DB_PASSWORD",
     ("gcp", "mysql",    "db_name"):     "MYSQL_DB_NAME",
     # ── Azure ─────────────────────────────────────────────────────────────────
-    ("azure", "postgres", "db_host"):     "POSTGRES_DB_HOST",
-    ("azure", "postgres", "db_port"):     "POSTGRES_DB_PORT",
-    ("azure", "postgres", "db_user"):     "POSTGRES_DB_USER",
-    ("azure", "postgres", "db_password"): "POSTGRES_DB_PASSWORD",
-    ("azure", "postgres", "db_name"):     "POSTGRES_DB_NAME",
+    # Azure has no SSM; the K8s secret is populated from GitHub vars/secrets under the
+    # CRM_DB_* names (see bootstrap/azure/outputs.tf, cicd_standards.md, seed_chaos.py).
+    ("azure", "postgres", "db_host"):     "CRM_DB_HOST",
+    ("azure", "postgres", "db_port"):     "CRM_DB_PORT",
+    ("azure", "postgres", "db_user"):     "CRM_DB_USER",
+    ("azure", "postgres", "db_password"): "CRM_DB_PASSWORD",
+    ("azure", "postgres", "db_name"):     "CRM_DB_NAME",
     ("azure", "mysql",    "db_host"):     "MYSQL_DB_HOST",
     ("azure", "mysql",    "db_port"):     "MYSQL_DB_PORT",
     ("azure", "mysql",    "db_user"):     "MYSQL_DB_USER",

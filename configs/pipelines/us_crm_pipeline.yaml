@@ -45,3 +45,13 @@ azure_setup:
   state_container: "tfstate"
   state_key: "azure/us-crm-insights/terraform.tfstate"
   subscription_id_env: "AZURE_SUBSCRIPTION_ID"
+
+# 7. ARTIFACT PATHS (where the Architect writes generated files)
+project_structure:
+  data_dir: data
+  monitoring_path: dashboards/monitoring_specs.json
+  python_dir: scripts
+  python_script_path: scripts/pipe_crm_us_to_azure.py
+  requirements_path: requirements.txt
+  sql_dir: sql
+  trino_setup_path: sql/setup_trino.sql

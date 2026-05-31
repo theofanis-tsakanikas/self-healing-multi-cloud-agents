@@ -112,6 +112,8 @@ This is **not a monorepo**. All paths are relative to the repo root:
 - **GitHub Secrets** (sensitive): `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `*_DB_PASSWORD`, `AZURE_CREDENTIALS`, `GH_PAT`.
 - **GitHub Variables** (`${{ vars.* }}`, non-sensitive): `AWS_DEFAULT_REGION`, DB `HOST`/`PORT`/`USER`/`NAME`. Never write a literal region (`eu-central-1`) — always `${{ vars.AWS_DEFAULT_REGION }}`.
 
+**Azure `us_crm` prerequisites (run plumbing wired, not yet e2e-validated):** Before running `pipeline: us_crm`, the azure bootstrap (`bootstrap/azure/`) MUST have applied (AKS + ACR + storage + Postgres + managed identity). Required repo **Secrets**: `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_SUBSCRIPTION_ID`, `ARM_TENANT_ID`, `CRM_DB_PASSWORD`, `AZURE_DB_PASSWORD`. Required **Variables**: `CRM_DB_HOST`, `CRM_DB_PORT`, `CRM_DB_USER`, `CRM_DB_NAME`. Azure resolves DB creds via `CRM_DB_*` (no SSM) — see `_ENV_FALLBACKS` in `utils/cloud_config.py`.
+
 **`GH_PAT` (classic PAT, scopes `repo` + `workflow`):** Used by both `actions/checkout` (in `run_agent.yml`) and `push_to_github`, NOT the built-in `GITHUB_TOKEN` — the built-in lacks `workflow` scope (403 on `.github/workflows/` pushes) and its pushes don't re-trigger workflows. Set as `GH_PAT` in repo Secrets AND `GITHUB_TOKEN=<same PAT>` in local `.env`; `push_to_github` infers the repo slug from the remote URL when `GITHUB_REPOSITORY` is absent.
 
 **The generated pipeline workflow does NOT use the `gh` CLI** — no `GH_TOKEN` env block in the job. Git auth in the deploy workflow is handled by the cloud (AWS/GCP/Azure) credentials.
