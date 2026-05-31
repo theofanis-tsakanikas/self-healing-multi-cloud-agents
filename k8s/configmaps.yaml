@@ -14,7 +14,8 @@ data:
         unit_price  DECIMAL(18,2),
         quantity    INTEGER,
         order_date  TIMESTAMP,
-        currency    VARCHAR,
+        currency     VARCHAR,
+        is_suspicious BOOLEAN,
         run_date    DATE
     ) WITH (
         format            = 'PARQUET',
@@ -196,7 +197,7 @@ data:
         "labels": { "severity": "critical", "pipeline": "eu-sales", "cloud_provider": "aws" },
         "annotations": { "summary": "No data received for EU Sales pipeline (AWS) in the last 60 minutes." }
       }
-    };
+    }
 ---
 apiVersion: v1
 kind: ConfigMap

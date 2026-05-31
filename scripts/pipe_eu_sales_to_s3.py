@@ -65,11 +65,11 @@ def run():
             f"@{host}:{port}/{db}"
         )
     elif _CLOUD == "gcp":
-        host = cloud_get("gcp", "db_host")
-        port = cloud_get("gcp", "db_port") or "3306"
-        user = cloud_get("gcp", "db_user")
-        pw   = cloud_get("gcp", "db_password")
-        db   = cloud_get("gcp", "db_name")
+        host = cloud_get("gcp", "db_host",     db_type="mysql")
+        port = cloud_get("gcp", "db_port",     db_type="mysql") or "3306"
+        user = cloud_get("gcp", "db_user",     db_type="mysql")
+        pw   = cloud_get("gcp", "db_password", db_type="mysql")
+        db   = cloud_get("gcp", "db_name",     db_type="mysql")
         connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
     elif _CLOUD == "azure":
         host = cloud_get("azure", "db_host",     db_type="postgres")
@@ -95,22 +95,22 @@ def run():
 
             # 3b. Business rules — translate ALL quality_standards from pipeline config.
             _rows_before = len(chunk)
-            
+            rejected_by_reason = {}
+
             # monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
             chunk = chunk[chunk['unit_price'] > 0.0]
-            rejected_rows += _rows_before - len(chunk)
-            rejected_by_reason['monetary_integrity'] = rejected_by_reason.get('monetary_integrity', 0) + (_rows_before - len(chunk))
+            rejected_by_reason['monetary_integrity'] = _rows_before - len(chunk)
 
             # temporal_validity: target_criteria 'date' → order_date → EXCLUDE_AND_LOG
             _future = chunk['order_date'] > pd.Timestamp.now()
             if _future.any():
                 logging.warning(f"Excluded {_future.sum()} future-dated rows (temporal_validity).")
             chunk = chunk[~_future]
-            rejected_by_reason['temporal_validity'] = rejected_by_reason.get('temporal_validity', 0) + (_rows_before - len(chunk))
+            rejected_by_reason['temporal_validity'] = _rows_before - len(chunk)
 
             # completeness_enforcement: target_criteria 'identifier'/'order_id' → order_id → DROP_RECORD
             chunk = chunk.dropna(subset=['order_id'])
-            rejected_by_reason['completeness_enforcement'] = rejected_by_reason.get('completeness_enforcement', 0) + (_rows_before - len(chunk))
+            rejected_by_reason['completeness_enforcement'] = _rows_before - len(chunk)
 
             # currency_standardization: target_criteria 'currency' → currency column → DEFAULT_VALUE 'EUR'
             chunk['currency'] = chunk['currency'].where(chunk['currency'].isin(['EUR', 'GBP']), other='EUR')
@@ -156,7 +156,7 @@ def run():
     project_id     = os.getenv("PROJECT_ID", "unknown")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")
 
-    # Emit ALL FIVE metrics — the Grafana dashboard renders one panel per metric
+    # Emit ALL FIVE metrics
     registry = CollectorRegistry()
     Gauge('pipeline_rows_processed_total', 'Total rows written to storage after business rules',
           ['project_id', 'cloud_provider'], registry=registry) \
@@ -171,7 +171,7 @@ def run():
           ['project_id', 'cloud_provider'], registry=registry) \
         .labels(project_id=project_id, cloud_provider=cloud_provider).set(duration_seconds)
 
-    # Per-rule breakdown — one series per business rule that removed rows.
+    # Per-rule breakdown
     rejected_by_reason_gauge = Gauge(
         'pipeline_rows_rejected_by_reason', 'Rows rejected per business rule, labelled by rule name',
         ['project_id', 'cloud_provider', 'reason'], registry=registry)
@@ -181,10 +181,8 @@ def run():
 
     push_to_gateway(pushgateway_url, job=project_id, registry=registry)
     logging.info(
-        f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, "
-        f"by_reason={rejected_by_reason}, duration={duration_seconds:.1f}s, cloud={cloud_provider}"
+        f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, duration={duration_seconds:.1f}s, cloud={cloud_provider}"
     )
-
 
 if __name__ == "__main__":
     run()

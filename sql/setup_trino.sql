@@ -5,7 +5,8 @@ CREATE TABLE hive.sales_eu.pipe_eu_sales_to_s3 (
     unit_price  DECIMAL(18,2),
     quantity    INTEGER,
     order_date  TIMESTAMP,
-    currency    VARCHAR,
+    currency     VARCHAR,
+    is_suspicious BOOLEAN,
     run_date    DATE
 ) WITH (
     format            = 'PARQUET',
