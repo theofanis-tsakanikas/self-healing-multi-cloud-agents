@@ -117,6 +117,10 @@ for col in int_cols:
 ### Cloud SDK
 - The cloud storage SDK (`boto3` / `gcs` / `BlobServiceClient`) MUST be used inside `if _CLOUD == "..."` guards — never called unconditionally after a conditional import.
 
+### Metrics
+- Emit **exactly four** Gauges to Pushgateway, all with `['project_id', 'cloud_provider']` labels: `pipeline_rows_processed_total` (volume), `pipeline_last_success_timestamp` (freshness), `pipeline_rows_rejected_total` (data quality), `pipeline_duration_seconds` (performance). The Grafana dashboard renders one panel per metric — omitting any leaves a "No data" panel.
+- `rejected_rows` is accumulated in the loop as `_rows_before - len(chunk)` after the row-removing rules; `duration_seconds` is `time.time() - start_time` captured after the extract loop. See the skeleton.
+
 ---
 
 ## MANDATORY SCRIPT STRUCTURE
@@ -211,7 +215,9 @@ def run():
 
     # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
     # CRITICAL: create_engine AND the loop MUST be in the SAME try block.
+    start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
+    rejected_rows = 0          # rows removed by DROP_RECORD / EXCLUDE_AND_LOG rules
     query = "SELECT * FROM <source_table>"  # replace with actual table from context
 
     try:
@@ -223,7 +229,8 @@ def run():
 
             # 3b. Business rules — translate ALL quality_standards from pipeline config.
             #     NEVER use placeholder values like `is_suspicious = False`.
-            #     Every rule MUST be real executable pandas code:
+            #     Capture the row count BEFORE filtering so rejected rows can be measured:
+            _rows_before = len(chunk)
             #
             #   DROP_RECORD:      chunk = chunk[condition]
             #   EXCLUDE_AND_LOG:  excluded = chunk[~condition]
@@ -232,6 +239,10 @@ def run():
             #   DEFAULT_VALUE:    chunk[col] = chunk[col].where(condition, other=default)
             #   FLAG_AS_SUSPICIOUS: chunk['is_suspicious'] = ~condition
             #                       # Do NOT filter after flagging — keep all rows
+            #
+            # After all row-removing rules, accumulate the rejected count.
+            # FLAG_AS_SUSPICIOUS does not remove rows, so it does not affect this delta.
+            rejected_rows += _rows_before - len(chunk)
 
             # 3c. Type casting — cast float64 → Int64 for integer/count/quantity columns
             int_cols = [c for c in chunk.select_dtypes(include='float64').columns
@@ -254,7 +265,8 @@ def run():
         logging.error(f"Pipeline failed: {e}")
         raise
 
-    logging.info(f"Pipeline completed. Total rows processed: {total_rows}")
+    duration_seconds = time.time() - start_time   # for pipeline_duration_seconds metric
+    logging.info(f"Pipeline completed. Rows: {total_rows}, rejected: {rejected_rows}, duration: {duration_seconds:.1f}s")
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
@@ -270,16 +282,27 @@ def run():
     project_id     = os.getenv("PROJECT_ID", "unknown")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")
 
+    # Emit ALL FOUR metrics — the Grafana dashboard renders one panel per metric
+    # (volume, freshness, data quality, performance). Omitting any leaves a panel with "No data".
     registry = CollectorRegistry()
-    Gauge('pipeline_rows_processed_total', 'Total rows processed',
+    Gauge('pipeline_rows_processed_total', 'Total rows written to storage after business rules',
           ['project_id', 'cloud_provider'], registry=registry) \
         .labels(project_id=project_id, cloud_provider=cloud_provider).set(total_rows)
     Gauge('pipeline_last_success_timestamp', 'Unix timestamp of last successful run',
           ['project_id', 'cloud_provider'], registry=registry) \
         .labels(project_id=project_id, cloud_provider=cloud_provider).set(time.time())
+    Gauge('pipeline_rows_rejected_total', 'Rows removed by DROP_RECORD / EXCLUDE_AND_LOG rules',
+          ['project_id', 'cloud_provider'], registry=registry) \
+        .labels(project_id=project_id, cloud_provider=cloud_provider).set(rejected_rows)
+    Gauge('pipeline_duration_seconds', 'Wall-clock duration of the extract-transform-write phase',
+          ['project_id', 'cloud_provider'], registry=registry) \
+        .labels(project_id=project_id, cloud_provider=cloud_provider).set(duration_seconds)
 
     push_to_gateway(pushgateway_url, job=project_id, registry=registry)
-    logging.info(f"Metrics pushed to Pushgateway: rows={total_rows}, cloud={cloud_provider}")
+    logging.info(
+        f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, "
+        f"duration={duration_seconds:.1f}s, cloud={cloud_provider}"
+    )
 
 
 if __name__ == "__main__":
