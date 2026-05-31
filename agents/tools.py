@@ -282,6 +282,28 @@ def validate_generated_code(filename: str) -> str:
         elif cloud == "azure" and ("S3://" in content or "GS://" in content):
             errors.append("SQL: S3/GCS protocol in an Azure pipeline — use abfss://.")
 
+        # Partition columns MUST be the LAST columns in the CREATE TABLE list, in the
+        # same order as partitioned_by. Trino rejects any other order at runtime:
+        # "Partition keys must be the last columns in the table". The LLM intermittently
+        # appends a conditional column (e.g. is_suspicious) after run_date. Parse the raw
+        # (non-upper) text so column names stay intact.
+        with open(filename, encoding="utf-8") as _f:
+            _raw_sql = _f.read()
+        _part_m = re.search(r"partitioned_by\s*=\s*ARRAY\s*\[([^\]]+)\]", _raw_sql, re.IGNORECASE)
+        _cols_m = re.search(r"CREATE\s+TABLE[^(]*\((.*?)\)\s*WITH", _raw_sql, re.IGNORECASE | re.DOTALL)
+        if _part_m and _cols_m:
+            _part_keys = [p.strip().strip("'\"") for p in _part_m.group(1).split(",") if p.strip()]
+            _col_lines = [c.strip() for c in _cols_m.group(1).split(",") if c.strip()]
+            _col_names = [c.split()[0].strip("'\"") for c in _col_lines if c.split()]
+            _n = len(_part_keys)
+            if _n and _col_names[-_n:] != _part_keys:
+                errors.append(
+                    f"SQL: partition key(s) {_part_keys} must be the LAST column(s) in the "
+                    f"CREATE TABLE list, in the same order. Found last column(s): "
+                    f"{_col_names[-_n:]}. Move the partition column(s) to the end — Trino "
+                    f"fails at runtime with 'Partition keys must be the last columns in the table'."
+                )
+
     # ── requirements.txt ─────────────────────────────────────────────────────
     elif base == "requirements.txt":
         with open(filename, encoding="utf-8") as f:
