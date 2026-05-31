@@ -80,7 +80,7 @@ The config expresses rules in business language. The architect resolves them to 
 | `DEFAULT_VALUE` | `chunk[col] = chunk[col].where(condition, other=default)` |
 | `FLAG_AS_SUSPICIOUS` | accumulate with `\|`: `chunk['is_suspicious'] = flag_rule1 \| flag_rule2` |
 
-**Worked example** — EU Sales pipeline (6 rules → 5 matched columns). Each row-removing rule attributes its drops to its own `reason` (the `quality_standards` rule name) via a `_before`/`len(chunk)` delta:
+**Worked example** — EU Sales pipeline (6 rules → 5 matched columns). **CRITICAL: each row-removing rule MUST take a FRESH `_before = len(chunk)` immediately before ITS OWN filter.** A single shared `_before` captured once at the top is the most common bug — it makes every rule report the *cumulative* drop so far (`_before - len(chunk)`), so the deltas double-count and `sum(by_reason)` explodes far above the real total. The fresh-per-rule reading is what guarantees the invariant `sum(rejected_by_reason.values()) == rejected_rows`.
 ```python
 # monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
 _before = len(chunk)
@@ -89,7 +89,7 @@ rejected_by_reason['monetary_integrity'] = \
     rejected_by_reason.get('monetary_integrity', 0) + (_before - len(chunk))
 
 # temporal_validity: target_criteria 'date'/'timestamp' → order_date → EXCLUDE_AND_LOG
-_before = len(chunk)
+_before = len(chunk)                       # FRESH reading — NOT the value from the rule above
 _future = chunk['order_date'] > pd.Timestamp.now()
 if _future.any():
     logging.warning(f"Excluded {_future.sum()} future-dated rows (temporal_validity).")
@@ -98,7 +98,7 @@ rejected_by_reason['temporal_validity'] = \
     rejected_by_reason.get('temporal_validity', 0) + (_before - len(chunk))
 
 # completeness_enforcement: target_criteria 'identifier'/'order_id' → order_id → DROP_RECORD
-_before = len(chunk)
+_before = len(chunk)                       # FRESH reading
 chunk = chunk.dropna(subset=['order_id'])
 rejected_by_reason['completeness_enforcement'] = \
     rejected_by_reason.get('completeness_enforcement', 0) + (_before - len(chunk))
@@ -111,6 +111,13 @@ chunk['currency'] = chunk['currency'].where(chunk['currency'].isin(['EUR', 'GBP'
 #   (FLAG_AS_SUSPICIOUS does not remove rows → no rejected_by_reason entry)
 chunk['is_suspicious'] = (chunk['quantity'] >= 1000) | (chunk['quantity'] <= 0)
 ```
+The scalar total is accumulated separately, once per chunk, from a SINGLE `_rows_before`
+captured at the very top of the chunk (before any rule) minus the final `len(chunk)`:
+`rejected_rows += _rows_before_chunk - len(chunk)`. This top-level reading is correct for
+the *total* (initial minus final = everything dropped) and accumulates across chunks. It is
+a DIFFERENT variable from the per-rule `_before` readings above — do not reuse the per-rule
+`_before` for the scalar, and do not reuse the scalar `_rows_before_chunk` for the per-rule
+deltas. With fresh per-rule `_before` readings, `sum(rejected_by_reason.values()) == rejected_rows`.
 Column names (`unit_price`, `order_date`, `order_id`, `currency`, `quantity`) come from `read_data_schema` — never invented or hardcoded from the `target_criteria` description. The `reason` keys (`monetary_integrity`, `temporal_validity`, `completeness_enforcement`) are the rule names straight from `quality_standards` — never hardcoded literals invented by the architect.
 
 ### Type Casting
