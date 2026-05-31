@@ -7,7 +7,21 @@ This standard defines the mandatory, modular structure for GitHub Actions workfl
 
 **## 1. WORKFLOW TRIGGER & STRUCTURE**
 - **File Location:** `/.github/workflows/{{project_id}}_pipeline.yml`.
-- **Triggers:** This is a **standalone repository** — use `on: push: paths: ['**']` or omit `paths` entirely. Never use `projects/{{project_folder}}/**` or any `projects/...` prefix — this is not a monorepo.
+- **Triggers:** This is a **standalone repository** — but the pipeline must redeploy ONLY when a deployable artifact changes, never on every commit (standards, prompts, agent code, and docs must NOT trigger a deploy). Use this exact `paths` filter:
+
+  ```yaml
+  on:
+    push:
+      paths:
+        - 'Dockerfile'
+        - 'scripts/**'
+        - 'k8s/**'
+        - 'sql/**'
+        - 'dashboards/**'
+        - 'requirements.txt'
+  ```
+
+  Never use `paths: ['**']` (triggers on every commit, including standards/prompt edits) and never use `projects/{{project_folder}}/**` or any `projects/...` prefix — this is not a monorepo.
 - **Job Name:** The single job MUST be named `deploy`.
 - **Global Env:** No custom `GH_TOKEN` env block needed — this workflow does not use the `gh` CLI. Git authentication is handled by AWS/GCP/Azure credentials. Do not add `GH_TOKEN: ${{ secrets.GH_TOKEN }}` to the job env.
 
