@@ -10,7 +10,18 @@ The Prometheus datasource is automatically wired into Grafana via the `grafana-d
 - **tags**: Use static tags only. MUST include three tags: the generic pipeline type, the pipeline name slug, and the cloud provider. e.g. `["data-pipeline", "eu-sales", "aws"]` for AWS, `["data-pipeline", "us-crm", "azure"]` for Azure, `["data-pipeline", "global-marketing", "gcp"]` for GCP. Never include `project_id`.
 
 ## Panel Types
-All panels MUST use `"type": "timeseries"`. The `"graph"` type is deprecated and forbidden in Grafana 8+. Every panel must include `id`, `datasource`, `gridPos`, and `targets` with at least one `expr`.
+The dashboard MUST contain **exactly four panels — one per emitted metric — each a distinct visualization type**. Never render all panels as `timeseries`. The deprecated `"graph"` type is forbidden in Grafana 8+. Every panel must include `id`, `title`, `type`, `datasource`, `gridPos`, and `targets` with at least one `expr`.
+
+| Panel | Metric | `type` | Color / thresholds |
+|---|---|---|---|
+| Record Count | `pipeline_rows_processed_total` | `stat` (`sparkline` enabled) | Fixed green (`fieldConfig.defaults.color.mode: fixed`, `fixedColor: green`) |
+| Last Success | `pipeline_last_success_timestamp` | `stat` | `fieldConfig.defaults.unit: dateTimeFromNow` → renders "X min ago". Thresholds green→yellow→red on age |
+| Rejected Rows | `pipeline_rows_rejected_total` | `bargauge` (`orientation: horizontal`) | `color.mode: continuous-GrYlRd` — green at 0, redder as rejections rise |
+| Run Duration | `pipeline_duration_seconds` | `gauge` | `unit: s`; thresholds green `<60`, yellow `60`, red `120` |
+
+**2×2 layout (`gridPos`):** Record Count `{x:0,y:0,w:12,h:8}` · Last Success `{x:12,y:0,w:12,h:8}` · Rejected Rows `{x:0,y:8,w:12,h:8}` · Run Duration `{x:12,y:8,w:12,h:8}`.
+
+Thresholds go in `fieldConfig.defaults.thresholds` with `mode: absolute` and `steps` (each `{color, value}`, base step `value: null`). Colors are Grafana named colors (`green`, `yellow`, `red`).
 
 ---
 
@@ -101,9 +112,10 @@ Alert labels MUST include both `pipeline` and `cloud_provider` static labels so 
     {
       "id": 1,
       "title": "Record Count",
-      "type": "timeseries",
+      "type": "stat",
       "datasource": "Prometheus",
       "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" }, "graphMode": "area" } },
       "targets": [
         {
           "expr": "pipeline_rows_processed_total{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}",
@@ -113,13 +125,61 @@ Alert labels MUST include both `pipeline` and `cloud_provider` static labels so 
     },
     {
       "id": 2,
-      "title": "Freshness",
-      "type": "timeseries",
+      "title": "Last Success",
+      "type": "stat",
       "datasource": "Prometheus",
       "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeFromNow",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 3600 },
+            { "color": "red", "value": 10800 }
+          ] }
+        }
+      },
       "targets": [
         {
-          "expr": "pipeline_last_success_timestamp{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}",
+          "expr": "pipeline_last_success_timestamp{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"} * 1000",
+          "legendFormat": "{{cloud_provider}} / {{project_id}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Rejected Rows",
+      "type": "bargauge",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "options": { "orientation": "horizontal" },
+      "fieldConfig": { "defaults": { "color": { "mode": "continuous-GrYlRd" } } },
+      "targets": [
+        {
+          "expr": "pipeline_rows_rejected_total{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}",
+          "legendFormat": "{{cloud_provider}} / {{project_id}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Run Duration",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 60 },
+            { "color": "red", "value": 120 }
+          ] }
+        }
+      },
+      "targets": [
+        {
+          "expr": "pipeline_duration_seconds{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}",
           "legendFormat": "{{cloud_provider}} / {{project_id}}"
         }
       ]
