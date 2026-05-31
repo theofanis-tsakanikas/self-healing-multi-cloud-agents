@@ -23,6 +23,9 @@ spec:
         image: grafana/grafana:10.4.2
         ports:
         - containerPort: 3000
+        env:
+        - name: GF_USERS_DEFAULT_LANGUAGE
+          value: "en-US"
         resources:
           requests:
             memory: "512Mi"

@@ -45,6 +45,7 @@ jobs:
           kubectl apply -f k8s/configmaps.yaml
           kubectl apply -f k8s/trino_deployment.yaml
           kubectl apply -f k8s/grafana_deployment.yaml
+          kubectl apply -f k8s/prometheus_deployment.yaml
 
       - name: Create DB Credentials Secret
         run: |
@@ -84,4 +85,5 @@ jobs:
           kubectl logs -l component=pipeline-job -n analytics -c pipeline --tail=100 2>/dev/null || echo "(pipeline logs unavailable)"
           exit 1
 
-      - run: echo "Deployment Complete"
+      - name: Heartbeat
+        run: echo "Deployment Complete"
