@@ -245,6 +245,31 @@ def validate_generated_code(filename: str) -> str:
                     f"if/elif blocks as shown in arch_standard_python Section 2 skeleton."
                 )
 
+        # rejected_by_reason per-rule attribution must use a FRESH baseline per rule.
+        # Bug: one shared baseline (e.g. _rows_before captured once at the top of the chunk)
+        # reused by every per-rule delta makes the deltas cumulative — each rule reports
+        # total-dropped-so-far, so sum(by_reason) explodes above the real total and breaks
+        # the dashboard's Rejection Rate / Rejections-by-Reason panels.
+        if "rejected_by_reason" in py_content:
+            _n_sites = len(re.findall(r"rejected_by_reason\s*\[[^\]]+\]\s*=", py_content))
+            _delta_bases = re.findall(
+                r"rejected_by_reason\s*\[[^\]]+\]\s*=.*?\(\s*(\w+)\s*-\s*len\(chunk\)\)",
+                py_content, re.DOTALL,
+            )
+            for _var in set(_delta_bases):
+                _fresh = len(re.findall(
+                    rf"(?:^|[^\w]){re.escape(_var)}\s*=\s*len\(chunk\)", py_content, re.MULTILINE))
+                if _n_sites >= 2 and _fresh < _n_sites:
+                    errors.append(
+                        f"PYTHON [project policy]: rejected_by_reason deltas reuse one baseline "
+                        f"'{_var}' across {_n_sites} rules but only {_fresh} fresh "
+                        f"'{_var} = len(chunk)' reading(s) exist. Each per-rule delta needs its "
+                        f"OWN '_before = len(chunk)' immediately before its filter, otherwise the "
+                        f"per-reason counts double-count (sum exceeds the real total). "
+                        f"See python_standards.md."
+                    )
+                    break
+
     # ── JSON (Grafana dashboard) ──────────────────────────────────────────────
     elif ext == ".json":
         try:
