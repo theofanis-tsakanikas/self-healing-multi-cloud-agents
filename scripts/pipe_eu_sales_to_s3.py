@@ -80,7 +80,9 @@ def run():
         connection_string = f"mssql+pyodbc://{user}:{pw}@{host}:{port}/{db}?driver=ODBC+Driver+18+for+SQL+Server"
 
     # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
+    start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
+    rejected_rows = 0          # rows removed by DROP_RECORD / EXCLUDE_AND_LOG rules
     query = "SELECT * FROM raw_eu_sales"  # source table from context
 
     try:
@@ -91,6 +93,7 @@ def run():
             chunk['order_date'] = pd.to_datetime(chunk['order_date'])
 
             # 3b. Business rules — translate ALL quality_standards from pipeline config.
+            _rows_before = len(chunk)
             chunk = chunk[chunk['unit_price'] > 0.0]  # monetary_integrity
             _future = chunk['order_date'] > pd.Timestamp.now()  # temporal_validity
             if _future.any():
@@ -100,13 +103,15 @@ def run():
             chunk['currency'] = chunk['currency'].where(chunk['currency'].isin(['EUR', 'GBP']), other='EUR')  # currency_standardization
             chunk['is_suspicious'] = (chunk['quantity'] >= 1000) | (chunk['quantity'] <= 0)  # volume_sanity_check + quantity_validity
 
+            rejected_rows += _rows_before - len(chunk)
+
             # 3c. Type casting — cast float64 → Int64 for integer/count/quantity columns
             int_cols = [c for c in chunk.select_dtypes(include='float64').columns
                         if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
             for col in int_cols:
                 chunk[col] = chunk[col].astype('Int64')
 
-            # 3d. Write — storage_options={} is MANDATORY, do not omit it
+            # 3d. Write — storage_options={} is MANDATORY
             chunk.to_parquet(
                 f"{partition_uri}part_{i}.parquet",
                 engine="pyarrow",
@@ -121,7 +126,8 @@ def run():
         logging.error(f"Pipeline failed: {e}")
         raise
 
-    logging.info(f"Pipeline completed. Total rows processed: {total_rows}")
+    duration_seconds = time.time() - start_time   # for pipeline_duration_seconds metric
+    logging.info(f"Pipeline completed. Rows: {total_rows}, rejected: {rejected_rows}, duration: {duration_seconds:.1f}s")
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
@@ -137,16 +143,26 @@ def run():
     project_id     = os.getenv("PROJECT_ID", "unknown")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")
 
+    # Emit ALL FOUR metrics
     registry = CollectorRegistry()
-    Gauge('pipeline_rows_processed_total', 'Total rows processed',
+    Gauge('pipeline_rows_processed_total', 'Total rows written to storage after business rules',
           ['project_id', 'cloud_provider'], registry=registry) \
         .labels(project_id=project_id, cloud_provider=cloud_provider).set(total_rows)
     Gauge('pipeline_last_success_timestamp', 'Unix timestamp of last successful run',
           ['project_id', 'cloud_provider'], registry=registry) \
         .labels(project_id=project_id, cloud_provider=cloud_provider).set(time.time())
+    Gauge('pipeline_rows_rejected_total', 'Rows removed by DROP_RECORD / EXCLUDE_AND_LOG rules',
+          ['project_id', 'cloud_provider'], registry=registry) \
+        .labels(project_id=project_id, cloud_provider=cloud_provider).set(rejected_rows)
+    Gauge('pipeline_duration_seconds', 'Wall-clock duration of the extract-transform-write phase',
+          ['project_id', 'cloud_provider'], registry=registry) \
+        .labels(project_id=project_id, cloud_provider=cloud_provider).set(duration_seconds)
 
     push_to_gateway(pushgateway_url, job=project_id, registry=registry)
-    logging.info(f"Metrics pushed to Pushgateway: rows={total_rows}, cloud={cloud_provider}")
+    logging.info(
+        f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, "
+        f"duration={duration_seconds:.1f}s, cloud={cloud_provider}"
+    )
 
 
 if __name__ == "__main__":
