@@ -1,5 +1,3 @@
-name: Deploy Pipeline
-
 on:
   push:
     paths:
@@ -16,47 +14,38 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_DEFAULT_REGION }}
-
       - name: ECR Login
         uses: aws-actions/amazon-ecr-login@v2
-
       - name: Build and Push Docker Image
         run: |
           docker build -t 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest -f Dockerfile .
           docker push 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
-
       - name: Update Kubeconfig
         run: aws eks update-kubeconfig --region ${{ vars.AWS_DEFAULT_REGION }} --name multi-cloud-agent-cluster
-
       - name: Set Image Tag in Job Manifest
         run: |
           sed -i 's|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:.*|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest|' k8s/job.yaml
-
-      - name: Create DB Credentials Secret
-        run: |
-          kubectl create secret generic pipe-eu-sales-to-s3-db-credentials \
-            -n analytics \
-            --dry-run=client -o yaml | kubectl apply -f -
-
       - name: Deploy Shared Services to Kubernetes
         run: |
           kubectl apply -f k8s/00_namespaces.yaml
           kubectl apply -f k8s/configmaps.yaml
           kubectl apply -f k8s/trino_deployment.yaml
           kubectl apply -f k8s/grafana_deployment.yaml
-
+      - name: Create DB Credentials Secret
+        run: |
+          kubectl create secret generic pipe-eu-sales-to-s3-db-credentials \
+            -n analytics \
+            --dry-run=client -o yaml | kubectl apply -f -
       - name: Deploy Pipeline Job to Kubernetes
         run: |
           kubectl delete job -l component=pipeline-job -n analytics --ignore-not-found=true
           kubectl apply -f k8s/job.yaml
-
       - name: Check Deployment Status
         run: |
           kubectl get pods -n analytics
@@ -83,6 +72,4 @@ jobs:
           echo "=== pipeline logs ==="
           kubectl logs -l component=pipeline-job -n analytics -c pipeline --tail=100 2>/dev/null || echo "(pipeline logs unavailable)"
           exit 1
-
-      - name: Heartbeat
-        run: echo "Deployment Complete"
+      - run: echo "Deployment Complete"

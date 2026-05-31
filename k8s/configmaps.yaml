@@ -127,7 +127,7 @@ data:
         "labels": { "severity": "critical", "pipeline": "eu-sales", "cloud_provider": "aws" },
         "annotations": { "summary": "No data received for EU Sales pipeline (AWS) in the last 60 minutes." }
       }
-    };
+    }
 ---
 apiVersion: v1
 kind: ConfigMap
