@@ -29,9 +29,7 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
-          docker build -t 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} -f Dockerfile .
-          docker push 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}
-          docker tag 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
+          docker build -t 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest -f Dockerfile .
           docker push 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
 
       - name: Update Kubeconfig
@@ -39,7 +37,7 @@ jobs:
 
       - name: Set Image Tag in Job Manifest
         run: |
-          sed -i 's|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:.*|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}|' k8s/job.yaml
+          sed -i 's|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:.*|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest|' k8s/job.yaml
 
       - name: Deploy Shared Services to Kubernetes
         run: |
@@ -47,11 +45,6 @@ jobs:
           kubectl apply -f k8s/configmaps.yaml
           kubectl apply -f k8s/trino_deployment.yaml
           kubectl apply -f k8s/grafana_deployment.yaml
-          kubectl apply -f k8s/prometheus_deployment.yaml
-          kubectl rollout restart deployment/trino -n analytics
-          kubectl rollout restart deployment/grafana -n monitoring
-          kubectl rollout status deployment/trino -n analytics --timeout=120s
-          kubectl rollout status deployment/grafana -n monitoring --timeout=120s
 
       - name: Create DB Credentials Secret
         run: |
@@ -91,5 +84,4 @@ jobs:
           kubectl logs -l component=pipeline-job -n analytics -c pipeline --tail=100 2>/dev/null || echo "(pipeline logs unavailable)"
           exit 1
 
-      - name: Heartbeat
-        run: echo "Deployment Complete"
+      - run: echo "Deployment Complete"

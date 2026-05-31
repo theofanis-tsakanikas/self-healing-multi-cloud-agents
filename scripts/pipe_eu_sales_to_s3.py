@@ -111,7 +111,7 @@ def run():
             for col in int_cols:
                 chunk[col] = chunk[col].astype('Int64')
 
-            # 3d. Write — storage_options={} is MANDATORY
+            # 3d. Write — storage_options={} is MANDATORY, do not omit it
             chunk.to_parquet(
                 f"{partition_uri}part_{i}.parquet",
                 engine="pyarrow",
