@@ -45,7 +45,6 @@ jobs:
           kubectl apply -f k8s/configmaps.yaml
           kubectl apply -f k8s/trino_deployment.yaml
           kubectl apply -f k8s/grafana_deployment.yaml
-          kubectl apply -f k8s/prometheus_deployment.yaml
 
       - name: Create DB Credentials Secret
         run: |

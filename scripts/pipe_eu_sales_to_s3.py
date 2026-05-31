@@ -108,7 +108,7 @@ def run():
             chunk = chunk[~_future]
             rejected_by_reason['temporal_validity'] = rejected_by_reason.get('temporal_validity', 0) + (_rows_before - len(chunk))
 
-            # completeness_enforcement: target_criteria 'identifier'/'order_id' → order_id → DROP_RECORD
+            # completeness_enforcement: target_criteria 'identifier' → order_id → DROP_RECORD
             chunk = chunk.dropna(subset=['order_id'])
             rejected_by_reason['completeness_enforcement'] = rejected_by_reason.get('completeness_enforcement', 0) + (_rows_before - len(chunk))
 
