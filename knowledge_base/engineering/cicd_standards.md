@@ -118,8 +118,12 @@ The following steps MUST appear in this exact order:
     kubectl apply -f k8s/prometheus_deployment.yaml
     kubectl apply -f k8s/trino_deployment.yaml
     kubectl apply -f k8s/grafana_deployment.yaml
+    # Restart so pods re-read updated ConfigMaps (Trino: hive catalog/SQL; Grafana: dashboard provider + JSON).
+    # ConfigMaps mounted as volumes are read only at container startup — kubectl apply alone does not reload them.
     kubectl rollout restart deployment/trino -n analytics
+    kubectl rollout restart deployment/grafana -n monitoring
     kubectl rollout status deployment/trino -n analytics --timeout=120s
+    kubectl rollout status deployment/grafana -n monitoring --timeout=120s
 - name: Create DB Credentials Secret
   run: |
     # Secret name must be RFC 1123 and match job.yaml envFrom.secretRef.name exactly.
