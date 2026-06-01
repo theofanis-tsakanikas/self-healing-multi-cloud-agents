@@ -1,8 +1,0 @@
-pandas
-sqlalchemy
-pyarrow
-trino
-prometheus-client
-azure-storage-blob
-psycopg2-binary
-s3fs
