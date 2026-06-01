@@ -209,6 +209,17 @@ def validate_generated_code(filename: str) -> str:
                 "Without it, pyarrow cannot write to s3://, gs://, or abfss:// URIs."
             )
 
+        # storage_options={{}} (double braces) is valid Python syntax — a set containing
+        # an empty dict — so py_compile/ruff pass, but it crashes at runtime with
+        # "TypeError: unhashable type: 'dict'". The LLM occasionally double-braces it,
+        # over-escaping because the same script uses f-string {placeholders}. Must be {}.
+        if re.search(r"storage_options\s*=\s*\{\{\s*\}\}", py_content):
+            errors.append(
+                "STORAGE: storage_options={{}} (double braces) is invalid — it is a set "
+                "containing a dict and raises 'TypeError: unhashable type: dict' at runtime. "
+                "Use exactly storage_options={} (single braces, an empty dict)."
+            )
+
         # destination_uri must come from os.getenv("DESTINATION_URI") — the K8s Job
         # injects it at runtime. A hardcoded URI string makes the script un-deployable
         # to a different bucket without a code change.
