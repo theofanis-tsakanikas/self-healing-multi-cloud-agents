@@ -28,9 +28,9 @@ When generating `setup_trino.sql`, ensure the following:
 - **Data Types**:
     - Column names and types MUST be derived from the schema returned by `read_data_schema` PLUS any columns added by business rules.
     - `is_suspicious BOOLEAN`: add this column **only if** at least one `FLAG_AS_SUSPICIOUS` rule is defined in `TRANSFORMATION_LOGIC`. If no such rule exists, omit the column entirely from the DDL — adding it without a corresponding pipeline implementation creates a schema/data mismatch. Do not add it as a default or placeholder.
-    - Map discovered types as follows:
+    - Map discovered types as follows. **Preserve the type `read_data_schema` actually reports** — it returns the real SQL type per column (e.g. `cust_id (BIGINT)`), so use it directly instead of re-guessing from the column's meaning:
         - String / text → `VARCHAR`
-        - Integer / count / quantity → `INTEGER` or `BIGINT`
+        - Integer / count / quantity / **identifier** (e.g. `cust_id`, `customer_id`) → keep the discovered integer type: `INTEGER` stays `INTEGER`, `BIGINT` stays `BIGINT`. **NEVER downgrade an integer/BIGINT column to `VARCHAR`** just because it is an ID.
         - Floating-point / financial amount → `DECIMAL(18,2)`
         - Date-time → `TIMESTAMP`
         - Boolean → `BOOLEAN`

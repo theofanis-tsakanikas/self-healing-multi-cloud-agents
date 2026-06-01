@@ -8,6 +8,16 @@ After writing any `.py` file, you MUST call `validate_generated_code` on it — 
 
 These violations cause immediate runtime failure. No exceptions.
 
+### Code syntax — single braces only
+- The generated file is a plain Python script — it is NOT a template and is NOT passed through `.format()`. Use **single** braces everywhere: `f"{var}"` for f-string placeholders and `{}` for empty dicts.
+- **NEVER double braces.** `storage_options={{}}` is a set containing a dict → `TypeError: unhashable type: dict`. `f"part_{{i}}.parquet"` produces the literal text `part_{i}.parquet` (no substitution) and trips ruff `F541`.
+```python
+# ❌ WRONG — double braces:
+chunk.to_parquet(f"{partition_uri}part_{{i}}.parquet", storage_options={{}})
+# ✅ CORRECT — single braces:
+chunk.to_parquet(f"{partition_uri}part_{i}.parquet", storage_options={})
+```
+
 ### Credentials
 - `cloud_get()` is MANDATORY for all DB credentials. `os.getenv()` is FORBIDDEN for host/user/password/db — it bypasses SSM and returns None in production.
 - Import: `from utils.cloud_config import cloud_get` — place after standard library imports, before cloud SDK block.
@@ -256,8 +266,12 @@ def run():
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
 
-            # 3a. Date conversion — ALWAYS before any date comparison
-            chunk['<date_col>'] = pd.to_datetime(chunk['<date_col>'])
+            # 3a. Date conversion — ONLY when the discovered schema actually HAS a date/
+            #     timestamp column that a business rule compares against. If the table has no
+            #     date column (e.g. a CRM customers table: id/name/email/phone), OMIT this
+            #     step entirely. NEVER force pd.to_datetime on a non-date column (e.g. a name)
+            #     — it raises ValueError / yields NaT and crashes the run.
+            chunk['<date_col>'] = pd.to_datetime(chunk['<date_col>'])   # delete if no date column exists
 
             # 3b. Business rules — translate ALL quality_standards from pipeline config.
             #     NEVER use placeholder values like `is_suspicious = False`.

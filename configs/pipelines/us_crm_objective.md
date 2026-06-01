@@ -18,19 +18,18 @@
 **## 2. DATA ENGINEERING & PII HANDLING (PYTHON)**
 * **Base Image:** Use the shared `Dockerfile` including drivers specified in `{{target_infra_config}}` (`azure-storage-blob`, `psycopg2-binary`).
 * **Extraction:** Extract customer data from Postgres (per `{{source_config}}`).
-* **Anonymization (Compliance):** Since `pii_sensitive` is `true`, apply **masking** or **hashing** to email and phone number columns as defined in `{{business_rules_config}}`.
-* **Output:** Convert the anonymized dataset to the format specified in infra standards (**{{target_infra_config.format_standard}}**).
-* **Upload:** Store the output in Azure Blob Storage under the path: `crm-processed/{{project_id}}/`.
+* **Anonymization (Compliance):** Since `pii_sensitive` is `true`, apply SHA-256 **hashing** to the customer name column and **masking** to the email and phone columns (e.g. `a***@b.com`). This is an unconditional transform applied to every row — it is NOT a `quality_standards` rule.
+* **Output:** Write the anonymized dataset as **Parquet** (snappy compression), per the infra standards.
+* **Upload:** Write to the destination injected as `DESTINATION_URI` (the standard `…/processed/` prefix), partitioned by `run_date=YYYY-MM-DD/` per the python standard. NEVER hardcode a bucket path or add `project_id` as a path component.
 
 **## 3. SHARED SERVICES INTEGRATION (TRINO & GRAFANA)**
 * **Trino Validation:**
     * Use the `target_uri_pattern` from `{{target_infra_config}}` to construct the ABFS path.
-    * Path: `abfss://{{azure_setup.container_name}}@{{azure_setup.storage_account_name}}.dfs.core.windows.net/crm-processed/{{project_id}}/`.
+    * Path (the table `external_location`): `abfss://{{azure_setup.container_name}}@{{azure_setup.storage_account_name}}.dfs.core.windows.net/processed/` — the stable `…/processed/` parent (matches `LOGICAL_DESTINATION.uri`), NEVER a `project_id`-suffixed folder, so Trino discovers every `run_date=` partition.
 * **Grafana Monitoring:**
     * Connect to `{{shared_services.grafana.url}}`.
-    * Dashboard: Update/Create **"US CRM Business Insights"**.
-    * Setup metrics for **"Customer Retention Rate"** and **"Regional Sync Health"**.
-    * Set an alert for any data volume drop larger than 20% compared to the previous run.
+    * Dashboard: Update/Create **"US CRM Business Insights"** following the Grafana standard EXACTLY — the mandatory **five panels** (Record Count, Last Success, Rejection Rate, Run Duration, Rejections by Reason), one per emitted metric. Do NOT invent custom panels (e.g. "Retention Rate") that are not backed by an emitted Prometheus metric.
+    * Alert: the standard 60-minute Data Silence rule (severity critical).
 
 **## 4. DEPLOYMENT ENGINEERING (KUBERNETES)**
 * **K8s Job:** Deploy as a Kubernetes Job named `us-crm-insights-job-{{project_id}}`.
