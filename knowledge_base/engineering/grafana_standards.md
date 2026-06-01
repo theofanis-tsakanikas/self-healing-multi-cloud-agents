@@ -16,7 +16,7 @@ The dashboard MUST contain **exactly five panels — one per emitted metric — 
 |---|---|---|---|
 | Record Count | `pipeline_rows_processed_total` | `stat` (`sparkline` enabled) | Fixed green (`fieldConfig.defaults.color.mode: fixed`, `fixedColor: green`) |
 | Last Success | `pipeline_last_success_timestamp` | `stat` | `unit: "time:YYYY-MM-DD HH:mm:ss"` (multiply the expr by `* 1000` — Grafana time units expect ms). Fixed blue color, NO thresholds. **Do NOT use `dateTimeFromNow`** — its "X ago" text is rendered by moment.js from the viewer's browser locale (e.g. Greek "λίγα δευτερόλεπτα πριν") and CANNOT be forced to English by any server setting (`GF_USERS_DEFAULT_LANGUAGE`, user preference — both verified ineffective). An absolute timestamp is locale-independent. Data-silence is handled by the alerting rule, not panel color. |
-| Rejection Rate | `rejected / (processed + rejected) * 100` | `bargauge` (`orientation: horizontal`) | `unit: percent`, `min: 0`, `max: 100`, `color.mode: continuous-GrYlRd`. Show a RATE not the absolute count — a bargauge needs a fixed `max` to fill correctly, and percentage gives a natural 0–100 scale (an absolute count has no meaningful max). Use `clamp_min(..., 1)` in the denominator to avoid divide-by-zero on an empty run. |
+| Rejection Rate | `rejected / (processed + rejected) * 100` | `stat` (`colorMode: value`) | `unit: percent`, thresholds green `<20`, yellow `20`, red `50` — the big number changes colour with the rate (a real data-quality signal). Show a RATE not the absolute count (a count has no meaningful scale). Use `clamp_min(..., 1)` in the denominator to avoid divide-by-zero on an empty run. NOT a `bargauge` — a single-series horizontal bargauge leaves most of the panel empty (dead space) and reads poorly. |
 | Run Duration | `pipeline_duration_seconds` | `gauge` | `unit: s`; thresholds green `<60`, yellow `60`, red `120` |
 | Rejections by Reason | `pipeline_rows_rejected_by_reason` | `piechart` (`pieType: pie`) | One slice per business rule. `legendFormat: "{{reason}}"` so each slice is labelled by the `quality_standards` rule name. Legend `displayMode: table`, `placement: right`, `values: ["value", "percent"]`; `reduceOptions.calcs: ["lastNotNull"]`. This breaks the total Rejection Rate down per rule. A pipeline with no row-removing rules emits zero series → panel shows "No data" (expected, not a bug). |
 
@@ -146,16 +146,20 @@ Alert labels MUST include both `pipeline` and `cloud_provider` static labels so 
     {
       "id": 3,
       "title": "Rejection Rate",
-      "type": "bargauge",
+      "type": "stat",
       "datasource": "Prometheus",
       "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
-      "options": { "orientation": "horizontal" },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" },
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
           "min": 0,
           "max": 100,
-          "color": { "mode": "continuous-GrYlRd" }
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 20 },
+            { "color": "red", "value": 50 }
+          ] }
         }
       },
       "targets": [
