@@ -312,51 +312,63 @@ def validate_generated_code(filename: str) -> str:
         except _json.JSONDecodeError as e:
             errors.append(f"JSON SYNTAX ERROR: {e}")
 
-    # ── SQL (Trino DDL) ───────────────────────────────────────────────────────
+    # ── SQL (Trino DDL  —  or Databricks Unity Catalog Delta DDL) ─────────────
     elif ext == ".sql":
         with open(filename, encoding="utf-8") as f:
             content = f.read().upper()
-        if "CREATE TABLE" not in content:
-            errors.append("SQL: missing CREATE TABLE statement.")
-        if "EXTERNAL_LOCATION" not in content:
-            errors.append("SQL: missing EXTERNAL_LOCATION in WITH clause.")
-        if "PARTITIONED_BY" not in content:
-            errors.append("SQL: missing PARTITIONED_BY = ARRAY['run_date'].")
-        if "FORMAT" not in content:
-            errors.append("SQL: missing FORMAT = 'PARQUET' in WITH clause.")
-        if "CREATE EXTERNAL TABLE" in content:
-            errors.append("SQL: 'CREATE EXTERNAL TABLE' is Hive/HQL syntax — use plain 'CREATE TABLE' in Trino.")
-        if "S3A://" in content:
-            errors.append("SQL: s3a:// is Hadoop/Spark only — Trino uses s3:// (AWS), gs:// (GCP), abfss:// (Azure).")
-        cloud = os.getenv("CLOUD_PROVIDER", "").lower()
-        if cloud == "aws" and ("GS://" in content or "ABFSS://" in content):
-            errors.append("SQL: GCS/Azure protocol in an AWS pipeline — use s3://.")
-        elif cloud == "gcp" and ("S3://" in content or "ABFSS://" in content):
-            errors.append("SQL: S3/Azure protocol in a GCP pipeline — use gs://.")
-        elif cloud == "azure" and ("S3://" in content or "GS://" in content):
-            errors.append("SQL: S3/GCS protocol in an Azure pipeline — use abfss://.")
 
-        # Partition columns MUST be the LAST columns in the CREATE TABLE list, in the
-        # same order as partitioned_by. Trino rejects any other order at runtime:
-        # "Partition keys must be the last columns in the table". The LLM intermittently
-        # appends a conditional column (e.g. is_suspicious) after run_date. Parse the raw
-        # (non-upper) text so column names stay intact.
-        with open(filename, encoding="utf-8") as _f:
-            _raw_sql = _f.read()
-        _part_m = re.search(r"partitioned_by\s*=\s*ARRAY\s*\[([^\]]+)\]", _raw_sql, re.IGNORECASE)
-        _cols_m = re.search(r"CREATE\s+TABLE[^(]*\((.*?)\)\s*WITH", _raw_sql, re.IGNORECASE | re.DOTALL)
-        if _part_m and _cols_m:
-            _part_keys = [p.strip().strip("'\"") for p in _part_m.group(1).split(",") if p.strip()]
-            _col_lines = [c.strip() for c in _cols_m.group(1).split(",") if c.strip()]
-            _col_names = [c.split()[0].strip("'\"") for c in _col_lines if c.split()]
-            _n = len(_part_keys)
-            if _n and _col_names[-_n:] != _part_keys:
-                errors.append(
-                    f"SQL: partition key(s) {_part_keys} must be the LAST column(s) in the "
-                    f"CREATE TABLE list, in the same order. Found last column(s): "
-                    f"{_col_names[-_n:]}. Move the partition column(s) to the end — Trino "
-                    f"fails at runtime with 'Partition keys must be the last columns in the table'."
-                )
+        # Databricks Unity Catalog DDL uses `USING DELTA` / `CREATE CATALOG` — a completely
+        # different dialect from Trino-Hive. Skip ALL Trino-specific structural checks for it
+        # (external_location / PARTITIONED_BY = ARRAY[...] / FORMAT = 'PARQUET' do not apply).
+        _is_delta_ddl = "USING DELTA" in content or "CREATE CATALOG" in content
+        if _is_delta_ddl:
+            if "CREATE TABLE" not in content:
+                errors.append("SQL (Delta): missing CREATE TABLE ... USING DELTA statement.")
+            if "EXTERNAL_LOCATION" in content or "PARTITIONED_BY = ARRAY" in content or "FORMAT = 'PARQUET'" in content:
+                errors.append("SQL (Delta): Trino-Hive syntax (external_location / PARTITIONED_BY = ARRAY[...] / FORMAT='PARQUET') is invalid in Unity Catalog — use USING DELTA + PARTITIONED BY (run_date).")
+            # Skip the Trino structural checks below — they do not apply to Delta.
+        else:
+            if "CREATE TABLE" not in content:
+                errors.append("SQL: missing CREATE TABLE statement.")
+            if "EXTERNAL_LOCATION" not in content:
+                errors.append("SQL: missing EXTERNAL_LOCATION in WITH clause.")
+            if "PARTITIONED_BY" not in content:
+                errors.append("SQL: missing PARTITIONED_BY = ARRAY['run_date'].")
+            if "FORMAT" not in content:
+                errors.append("SQL: missing FORMAT = 'PARQUET' in WITH clause.")
+            if "CREATE EXTERNAL TABLE" in content:
+                errors.append("SQL: 'CREATE EXTERNAL TABLE' is Hive/HQL syntax — use plain 'CREATE TABLE' in Trino.")
+            if "S3A://" in content:
+                errors.append("SQL: s3a:// is Hadoop/Spark only — Trino uses s3:// (AWS), gs:// (GCP), abfss:// (Azure).")
+            cloud = os.getenv("CLOUD_PROVIDER", "").lower()
+            if cloud == "aws" and ("GS://" in content or "ABFSS://" in content):
+                errors.append("SQL: GCS/Azure protocol in an AWS pipeline — use s3://.")
+            elif cloud == "gcp" and ("S3://" in content or "ABFSS://" in content):
+                errors.append("SQL: S3/Azure protocol in a GCP pipeline — use gs://.")
+            elif cloud == "azure" and ("S3://" in content or "GS://" in content):
+                errors.append("SQL: S3/GCS protocol in an Azure pipeline — use abfss://.")
+
+            # Partition columns MUST be the LAST columns in the CREATE TABLE list, in the
+            # same order as partitioned_by. Trino rejects any other order at runtime:
+            # "Partition keys must be the last columns in the table". The LLM intermittently
+            # appends a conditional column (e.g. is_suspicious) after run_date. Parse the raw
+            # (non-upper) text so column names stay intact.
+            with open(filename, encoding="utf-8") as _f:
+                _raw_sql = _f.read()
+            _part_m = re.search(r"partitioned_by\s*=\s*ARRAY\s*\[([^\]]+)\]", _raw_sql, re.IGNORECASE)
+            _cols_m = re.search(r"CREATE\s+TABLE[^(]*\((.*?)\)\s*WITH", _raw_sql, re.IGNORECASE | re.DOTALL)
+            if _part_m and _cols_m:
+                _part_keys = [p.strip().strip("'\"") for p in _part_m.group(1).split(",") if p.strip()]
+                _col_lines = [c.strip() for c in _cols_m.group(1).split(",") if c.strip()]
+                _col_names = [c.split()[0].strip("'\"") for c in _col_lines if c.split()]
+                _n = len(_part_keys)
+                if _n and _col_names[-_n:] != _part_keys:
+                    errors.append(
+                        f"SQL: partition key(s) {_part_keys} must be the LAST column(s) in the "
+                        f"CREATE TABLE list, in the same order. Found last column(s): "
+                        f"{_col_names[-_n:]}. Move the partition column(s) to the end — Trino "
+                        f"fails at runtime with 'Partition keys must be the last columns in the table'."
+                    )
 
     # ── requirements.txt ─────────────────────────────────────────────────────
     elif base == "requirements.txt":

@@ -13,6 +13,7 @@ on:
           - eu_sales
           - global_marketing
           - us_crm
+          - eu_sales_delta
         default: eu_sales
 
       bootstrap_cloud:
@@ -129,6 +130,11 @@ jobs:
       CRM_DB_USER:     ${{ vars.CRM_DB_USER }}
       CRM_DB_NAME:     ${{ vars.CRM_DB_NAME }}
       CRM_DB_PASSWORD: ${{ secrets.CRM_DB_PASSWORD }}
+
+      # ── Databricks — provider auth for the infra agent's pipeline-level Terraform
+      # (databricks_job + secret scope) and the databricks-cli deploy workflow.
+      DATABRICKS_HOST:  ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
 
       # ── Trino & Prometheus ────────────────────────────────────────────────────
       TRINO_HOST:     ${{ vars.TRINO_HOST }}

@@ -1,0 +1,49 @@
+pipeline_id: "pipe_eu_sales_to_delta"
+owner: "analytics_team"
+project_name: "eu-sales-delta-insights"
+project_folder_name: "multi-cloud-self-healing-agent"
+
+# 1. SOURCE (reuse EU Sales Postgres — same source as pipe_eu_sales_to_s3)
+source_config: "configs/databases/postgres_sales.yaml"
+
+# 2. LOGIC (reuse EU Sales business rules)
+business_rules_config: "configs/business_rules/sales_logic.yaml"
+
+# 3. DESTINATION (Databricks Delta Lake on Unity Catalog)
+target_infra_config: "configs/infra/databricks.yaml"
+
+# 4. METADATA
+data_domain: "sales"
+priority: "high"
+update_frequency: "daily"
+# Databricks host_cloud = aws → storage is S3, jobs cluster runs on AWS.
+# cloud_provider stays "aws" for any unbranched host-cloud code path; the
+# Databricks-ness is signalled by target_infra_config.provider == "databricks".
+cloud_provider: "aws"
+
+# 5. DATABRICKS HOST INFRASTRUCTURE (host_cloud = aws → aws_setup)
+aws_setup:
+  bucket_name: "eu-sales-insights-data"        # Delta external-location root (S3)
+  region: "eu-central-1"
+  state_bucket: "multi-cloud-agent-tf-state-bucket"
+  state_key: "terraform/eu-sales-delta/terraform.tfstate"
+  lock_table: "terraform-state-lock"
+
+# 6. UNITY CATALOG / DELTA TARGET (concrete coords created by bootstrap/databricks)
+databricks_target:
+  catalog: "multi_cloud_agent_workspace"   # = replace(workspace_name, "-", "_")
+  schema: "raw"
+  table_name: "pipe_eu_sales_to_delta"
+
+# 7. ARTIFACT PATHS — Databricks needs ONLY a Spark job + Unity Catalog DDL.
+#    NO Trino SQL, NO Grafana JSON, NO requirements.txt, NO K8s/Dockerfile.
+project_structure:
+  python_dir: scripts
+  python_script_path: scripts/pipe_eu_sales_to_delta.py
+  sql_dir: sql
+  unity_catalog_sql_path: sql/setup_unity_catalog.sql
+
+# Databricks artifact set — overrides DEFAULT_REQUIRED_ARTIFACTS (which is K8s/Trino-centric).
+required_artifacts:
+  - scripts/pipe_eu_sales_to_delta.py
+  - sql/setup_unity_catalog.sql

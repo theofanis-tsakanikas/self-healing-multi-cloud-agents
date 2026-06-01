@@ -18,7 +18,7 @@ from agents.constants import (
 from utils.prompt_utils import format_prompt
 from utils.file_utils import read_file
 from utils.message_utils import safe_recent_messages
-from utils.config_utils import build_architect_context
+from utils.config_utils import build_architect_context, build_databricks_architect_context
 from agents.tools import read_data_schema, write_project_file, patch_project_file, query_vector_store, validate_generated_code
 
 # Logger configuration
@@ -122,10 +122,19 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     rules_conf = raw_configs.get("rules", {})
     infra_conf = raw_configs.get("infrastructure", {})
 
+    # Databricks is a distinct architecture (Spark/Delta/Unity Catalog) — NOT parquet/Trino/Grafana.
+    # Detected from the infra provider; every databricks-specific branch below is guarded by it,
+    # so the AWS/Azure/GCP path is completely unaffected.
+    is_databricks = infra_conf.get("provider", "").lower() == "databricks"
+
     # 3. CONTEXT GENERATION
     try:
-        architect_context = build_architect_context(pipe_conf, db_conf, rules_conf, infra_conf)
-        target_infra_name = infra_conf.get('service_name', 'generic-service')
+        if is_databricks:
+            architect_context = build_databricks_architect_context(pipe_conf, db_conf, rules_conf, infra_conf)
+            target_infra_name = "databricks"
+        else:
+            architect_context = build_architect_context(pipe_conf, db_conf, rules_conf, infra_conf)
+            target_infra_name = infra_conf.get('service_name', 'generic-service')
     except Exception as e:
         logger.error(f"Critical Context Error: {str(e)}")
         architect_context = json.dumps({"error": str(e)})
@@ -140,7 +149,11 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
         "validate_generated_code": validate_generated_code,
     }
 
-    required_knowledge_keys = ["arch_standard_trino", "arch_standard_grafana", "arch_standard_python"]
+    # Databricks needs ONLY the Spark/Delta standard — no Trino DDL, no Grafana, no pandas standard.
+    if is_databricks:
+        required_knowledge_keys = ["arch_standard_databricks"]
+    else:
+        required_knowledge_keys = ["arch_standard_trino", "arch_standard_grafana", "arch_standard_python"]
     is_fix_mode = state.get("medic_fix_requested", False) or state.get("last_agent") == "medic"
     has_all_standards = all(key in collected_specs for key in required_knowledge_keys)
     schema_discovered = state.get("schema_discovered", False)
@@ -258,17 +271,23 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     # safe_recent_messages trims discovery ToolMessages out of context by the time
     # write_project_file is available — without this the LLM writes from general knowledge.
     if has_all_standards and "write_project_file" in allowed_tool_names:
-        needs_python = any(a.endswith(".py") for a in missing_artifacts)
-        needs_sql = any(a.endswith(".sql") for a in missing_artifacts)
-        needs_grafana = any(a.endswith(".json") for a in missing_artifacts)
-
         system_prompt += "\n\n## ENGINEERING STANDARDS — follow these exactly:\n"
-        if needs_python and "arch_standard_python" in collected_specs:
-            system_prompt += f"\n### arch_standard_python\n{collected_specs['arch_standard_python']}\n"
-        if needs_sql and "arch_standard_trino" in collected_specs:
-            system_prompt += f"\n### arch_standard_trino\n{collected_specs['arch_standard_trino']}\n"
-        if needs_grafana and "arch_standard_grafana" in collected_specs:
-            system_prompt += f"\n### arch_standard_grafana\n{collected_specs['arch_standard_grafana']}\n"
+        if is_databricks:
+            # Databricks: inject ONLY the Spark/Delta standard (covers both the .py job
+            # and the Unity Catalog .sql). No pandas/Trino/Grafana standards.
+            if "arch_standard_databricks" in collected_specs:
+                system_prompt += f"\n### arch_standard_databricks\n{collected_specs['arch_standard_databricks']}\n"
+        else:
+            needs_python = any(a.endswith(".py") for a in missing_artifacts)
+            needs_sql = any(a.endswith(".sql") for a in missing_artifacts)
+            needs_grafana = any(a.endswith(".json") for a in missing_artifacts)
+
+            if needs_python and "arch_standard_python" in collected_specs:
+                system_prompt += f"\n### arch_standard_python\n{collected_specs['arch_standard_python']}\n"
+            if needs_sql and "arch_standard_trino" in collected_specs:
+                system_prompt += f"\n### arch_standard_trino\n{collected_specs['arch_standard_trino']}\n"
+            if needs_grafana and "arch_standard_grafana" in collected_specs:
+                system_prompt += f"\n### arch_standard_grafana\n{collected_specs['arch_standard_grafana']}\n"
 
     # 6. PREPARE CONVERSATION
     recent_messages = safe_recent_messages(state["messages"])
@@ -318,24 +337,34 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                         # "Catch-All" strategy: scan the response content
                         # Regardless of what was asked, if the response contains the knowledge, we store it.
 
-                        # 1. Check for Python Standards
-                        if any(word in res_lower for word in [
-                            "sqlalchemy", "pandas", "chunksize", "os.getenv",
-                            "python", "def ", "import ", "logging", ".py",
-                            "etl", "ingestion", "script", "boto3", "pyspark",
-                        ]):
-                            collected_specs["arch_standard_python"] = str(result)
-                            logger.info("🎯 Smart Mapping: Python Standards Secured.")
+                        if is_databricks:
+                            # Databricks discovery captures ONLY the Spark/Delta standard.
+                            # The Trino/Grafana/pandas mappings below are skipped — they are
+                            # irrelevant to the Delta/Unity Catalog architecture.
+                            if any(word in res_lower for word in [
+                                "spark", "delta", "unity catalog", "databricks", "dbutils", ".write.format",
+                            ]):
+                                collected_specs["arch_standard_databricks"] = str(result)
+                                logger.info("🎯 Smart Mapping: Databricks Spark Standard Secured.")
+                        else:
+                            # 1. Check for Python Standards
+                            if any(word in res_lower for word in [
+                                "sqlalchemy", "pandas", "chunksize", "os.getenv",
+                                "python", "def ", "import ", "logging", ".py",
+                                "etl", "ingestion", "script", "boto3", "pyspark",
+                            ]):
+                                collected_specs["arch_standard_python"] = str(result)
+                                logger.info("🎯 Smart Mapping: Python Standards Secured.")
 
-                        # 2. Check for Trino Standards
-                        if any(word in res_lower for word in ["trino", "ddl", "create table", "varchar"]):
-                            collected_specs["arch_standard_trino"] = str(result)
-                            logger.info("🎯 Smart Mapping: Trino Standards Secured.")
+                            # 2. Check for Trino Standards
+                            if any(word in res_lower for word in ["trino", "ddl", "create table", "varchar"]):
+                                collected_specs["arch_standard_trino"] = str(result)
+                                logger.info("🎯 Smart Mapping: Trino Standards Secured.")
 
-                        # 3. Check for Grafana Standards
-                        if any(word in res_lower for word in ["grafana", "schemaversion", "json dashboard"]):
-                            collected_specs["arch_standard_grafana"] = str(result)
-                            logger.info("🎯 Smart Mapping: Grafana Standards Secured.")
+                            # 3. Check for Grafana Standards
+                            if any(word in res_lower for word in ["grafana", "schemaversion", "json dashboard"]):
+                                collected_specs["arch_standard_grafana"] = str(result)
+                                logger.info("🎯 Smart Mapping: Grafana Standards Secured.")
 
                         # Fallback: if smart mapping still didn't capture a missing key
                         # and the result is non-empty, store it for the first missing key.

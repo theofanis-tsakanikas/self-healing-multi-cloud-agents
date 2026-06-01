@@ -1,0 +1,123 @@
+name: Destroy AWS Infrastructure
+
+# Tears down the ENTIRE AWS footprint — EKS, RDS, ECR, IAM, the pipeline S3 data
+# bucket, and the agent + bootstrap terraform state buckets — leaving ONLY the
+# manually-created `multi-cloud-agent-bootstrap-state` bucket (the bootstrap backend).
+#
+# Destroy order is dependency-driven and MUST NOT be reordered:
+#   0. Delete K8s LoadBalancer Services  → frees the Grafana ELB that would otherwise
+#                                          orphan and block VPC/subnet deletion.
+#   1. Agent terraform destroy           → S3 data bucket + IAM policy (uses the
+#                                          tf-state-bucket backend, which still exists).
+#   2. Empty tf-state-bucket             → bootstrap can only delete it once empty.
+#   3. Bootstrap terraform destroy       → EKS + RDS + ECR + tf-state-bucket + lock.
+#
+# Uses the BOOTSTRAP admin credentials (full perms), not the SSM-only runtime user.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type exactly "destroy-aws" to confirm — this is irreversible.'
+        required: true
+        default: ''
+
+jobs:
+  destroy:
+    if: inputs.confirm == 'destroy-aws'
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID:     ${{ secrets.BOOTSTRAP_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.BOOTSTRAP_AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION:    ${{ vars.AWS_DEFAULT_REGION }}
+      DATA_BUCKET:    eu-sales-insights-data
+      STATE_BUCKET:   multi-cloud-agent-tf-state-bucket
+      CLUSTER_NAME:   multi-cloud-agent-cluster
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      # ── Phase 0: delete K8s LoadBalancer Services so their ELBs don't orphan ──
+      # An orphaned ELB keeps ENIs attached to the VPC subnets and makes the EKS
+      # VPC destroy hang. Best-effort — the cluster may already be gone.
+      - name: Delete K8s LoadBalancer Services
+        continue-on-error: true
+        run: |
+          if aws eks update-kubeconfig --region "$AWS_DEFAULT_REGION" --name "$CLUSTER_NAME" 2>/dev/null; then
+            kubectl delete svc --all -n monitoring --ignore-not-found=true || true
+            kubectl delete svc --all -n analytics  --ignore-not-found=true || true
+            echo "Waiting 30s for the load balancers to deprovision..."
+            sleep 30
+          else
+            echo "Cluster not reachable (already destroyed?) — skipping LB cleanup."
+          fi
+
+      # ── Phase 1: destroy the agent pipeline terraform (S3 data bucket + IAM) ──
+      # The data bucket carries `prevent_destroy = true`, so terraform will refuse
+      # to delete it. Empty it, drop it (and its sub-resources) from state, delete it
+      # via the CLI, then terraform-destroy whatever remains (the IAM policy).
+      - name: Destroy agent pipeline infra (S3 + IAM)
+        working-directory: terraform
+        run: |
+          terraform init -input=false
+
+          echo "Emptying data bucket $DATA_BUCKET (objects + all versions)..."
+          aws s3 rm "s3://$DATA_BUCKET" --recursive || true
+
+          # Drop every prevent_destroy-guarded resource from state so destroy won't block.
+          for res in \
+            aws_s3_bucket.data_bucket \
+            aws_s3_bucket_ownership_controls.ownership_controls \
+            aws_s3_bucket_public_access_block.public_access_block \
+            aws_s3_bucket_versioning.versioning \
+            aws_s3_bucket_server_side_encryption_configuration.encryption \
+            aws_s3_bucket_lifecycle_configuration.lifecycle ; do
+            terraform state rm "$res" 2>/dev/null || true
+          done
+
+          # CLI-delete the now-empty, state-detached bucket.
+          aws s3api delete-bucket --bucket "$DATA_BUCKET" --region "$AWS_DEFAULT_REGION" || true
+
+          # Destroy the rest (IAM policy etc.).
+          terraform destroy -auto-approve -input=false || true
+          echo "✅ Agent pipeline infra destroyed."
+
+      # ── Phase 2: empty the agent state bucket so bootstrap can delete it ──
+      - name: Empty agent terraform state bucket
+        run: |
+          echo "Emptying $STATE_BUCKET (all object versions + delete markers)..."
+          # Versioned bucket: remove every version and delete marker.
+          aws s3api list-object-versions --bucket "$STATE_BUCKET" \
+            --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json > versions.json || echo '{}' > versions.json
+          if [ -s versions.json ] && grep -q '"Key"' versions.json; then
+            aws s3api delete-objects --bucket "$STATE_BUCKET" --delete file://versions.json || true
+          fi
+          aws s3api list-object-versions --bucket "$STATE_BUCKET" \
+            --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json > markers.json || echo '{}' > markers.json
+          if [ -s markers.json ] && grep -q '"Key"' markers.json; then
+            aws s3api delete-objects --bucket "$STATE_BUCKET" --delete file://markers.json || true
+          fi
+          echo "✅ State bucket emptied."
+
+      # ── Phase 3: destroy the bootstrap (EKS + RDS + ECR + state bucket + lock) ──
+      - name: Destroy bootstrap infra (EKS + RDS + ECR)
+        working-directory: bootstrap/aws
+        env:
+          TF_VAR_rds_allowed_cidrs: ${{ vars.TF_VAR_RDS_ALLOWED_CIDRS }}
+          TF_VAR_pipeline_iam_arn:  ${{ vars.TF_VAR_PIPELINE_IAM_ARN }}
+        run: |
+          terraform init -input=false
+          terraform destroy -auto-approve -input=false
+          echo "✅ Bootstrap infra destroyed. Only multi-cloud-agent-bootstrap-state remains."
+
+      - name: Summary
+        run: |
+          echo "AWS teardown complete."
+          echo "KEPT (intentional): s3://multi-cloud-agent-bootstrap-state (manual state backend)."
+          echo "To rebuild: run_agent.yml with bootstrap_cloud: aws."

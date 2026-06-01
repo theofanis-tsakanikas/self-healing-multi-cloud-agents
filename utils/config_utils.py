@@ -81,6 +81,63 @@ def build_architect_context(pipeline_conf: dict, db_conf: dict, rules_conf: dict
     
     return json.dumps(context, indent=2)
 
+def build_databricks_architect_context(pipeline_conf: dict, db_conf: dict, rules_conf: dict, infra_conf: dict) -> str:
+    """
+    Architect context for a DATABRICKS pipeline.
+
+    Fundamentally different from build_architect_context: the destination is a Delta table
+    in Unity Catalog (not parquet on object storage), there is no Trino catalog and no Grafana
+    dashboard, and observability is a Delta audit table instead of Prometheus gauges.
+    """
+    host_cloud = infra_conf.get("host_cloud", "aws").lower()
+    cloud_setup = pipeline_conf.get(f"{host_cloud}_setup", {})
+    pipeline_id = pipeline_conf.get("pipeline_id", "pipeline")
+
+    # Delta storage URI resolves to the host_cloud's object storage.
+    if host_cloud == "aws":
+        delta_uri = f"s3://{cloud_setup.get('bucket_name')}/{pipeline_id}/"
+    elif host_cloud == "azure":
+        container = cloud_setup.get("container_name")
+        account = cloud_setup.get("storage_account_name")
+        delta_uri = f"abfss://{container}@{account}.dfs.core.windows.net/{pipeline_id}/"
+    else:  # gcp
+        delta_uri = f"gs://{cloud_setup.get('bucket_name')}/{pipeline_id}/"
+
+    target = pipeline_conf.get("databricks_target", {})
+    catalog = target.get("catalog")
+    schema = target.get("schema", "raw")
+    table_name = target.get("table_name", pipeline_id)
+    fq_table = f"{catalog}.{schema}.{table_name}"
+
+    context = {
+        "PROJECT_METADATA": {
+            "id": pipeline_id,
+            "domain": pipeline_conf.get("data_domain"),
+            "platform": "databricks",
+            "host_cloud": host_cloud,
+        },
+        "DATA_SOURCE": {
+            "type": db_conf.get("db_type"),
+            "table": db_conf.get("default_table"),
+            "connection_vars": {k: v for k, v in db_conf.items() if k.startswith("env_var_")},
+        },
+        "TRANSFORMATION_LOGIC": rules_conf.get("quality_standards", []),
+        "DELTA_DESTINATION": {
+            "format": "delta",
+            "delta_uri": delta_uri,
+            "unity_catalog": {"catalog": catalog, "schema": schema, "table": fq_table},
+            "partition_by": infra_conf.get("delta_storage", {}).get("partition_by", "run_date"),
+        },
+        "OBSERVABILITY": {
+            "audit_table": f"{fq_table}_audit",
+            "metrics": ["run_timestamp", "rows_processed", "rows_rejected", "duration_seconds", "rejected_by_reason"],
+            "note": "Databricks has no Prometheus/Grafana — the Spark job MUST append one row to "
+                    "the Delta audit table per run. This is the Databricks-native equivalent of the gauges.",
+        },
+    }
+    return json.dumps(context, indent=2)
+
+
 def build_infra_context(pipeline_conf: dict, infra_conf: dict) -> str:
     """
     Unified context for the Infra Engineer.

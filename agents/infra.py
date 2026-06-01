@@ -133,7 +133,13 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     # infra_standard_service_account is NOT a separate required key —
     # k8s_deployment_rules.md (Section 8) already contains the cloud-specific
     # ServiceAccount / IRSA / Workload Identity spec inside infra_standard_k8s.
-    required_standards = ["infra_standard_iac", "infra_standard_k8s", "infra_standard_cicd", "infra_standard_dockerfile"]
+    # Databricks needs ONLY IaC (databricks_job) + CI/CD (databricks-cli) standards —
+    # no Kubernetes manifests, no Dockerfile. Forcing k8s/dockerfile discovery would make
+    # the gate unsatisfiable with irrelevant standards. AWS/Azure/GCP keep the full set.
+    if is_databricks:
+        required_standards = ["infra_standard_iac", "infra_standard_cicd"]
+    else:
+        required_standards = ["infra_standard_iac", "infra_standard_k8s", "infra_standard_cicd", "infra_standard_dockerfile"]
     has_all_standards = all(key in collected_specs for key in required_standards)
 
     selected_keys = []

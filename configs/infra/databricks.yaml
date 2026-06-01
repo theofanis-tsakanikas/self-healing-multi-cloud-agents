@@ -1,8 +1,10 @@
 provider: databricks
 
-# Host cloud — Databricks runs ON one of the 3 clouds
-host_cloud: azure          # aws | azure | gcp
-host_region: westeurope    # matches host_cloud region
+# Host cloud — Databricks runs ON one of the 3 clouds.
+# Pinned to aws: bootstrap/databricks/main.tf provisions AWS resources (S3 DBFS root,
+# cross-account IAM) and variables.tf cloud_type defaults to aws — keep all three consistent.
+host_cloud: aws            # aws | azure | gcp
+host_region: eu-central-1  # matches host_cloud region (AWS)
 
 # Databricks workspace
 workspace_name: "${pipeline_id}-workspace"
@@ -10,7 +12,7 @@ databricks_tier: premium   # standard | premium (Unity Catalog requires premium)
 
 # Compute — Jobs cluster (batch pipelines)
 jobs_cluster:
-  node_type: Standard_DS3_v2   # Azure VM type (2 vCPU, 14 GB RAM)
+  node_type: m5.xlarge         # AWS EC2 instance (4 vCPU, 16 GB RAM) — host_cloud=aws
   num_workers: 2
   autoscale_min: 1
   autoscale_max: 4

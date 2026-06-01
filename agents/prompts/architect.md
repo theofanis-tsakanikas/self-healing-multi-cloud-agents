@@ -22,7 +22,11 @@ The following structured context defines your mission. You must strictly adhere 
 
 ### 1. KNOWLEDGE RETRIEVAL & SPEC EXTRACTION
 - **PRIORITY 1:** Before analyzing any project data, you MUST call `query_vector_store` using the `engineering-standards` namespace.
-- **MANDATORY:** Execute three (3) distinct tool calls with these exact query strings if the keys are missing from state:
+- **🧱 DATABRICKS BRANCH:** If the context's `PROJECT_METADATA.platform == "databricks"`, this is a Delta/Unity Catalog pipeline — **NOT** parquet/Trino/Grafana. Execute exactly **ONE** discovery query and SKIP the three below:
+    - `query="STANDARD DATABRICKS PYSPARK DELTA: SparkSession read jdbc, dbutils.secrets credentials, business rules filter withColumn, write.format delta saveAsTable Unity Catalog partitionBy run_date, mandatory Delta audit table rows_processed rows_rejected duration, setup_unity_catalog.sql USING DELTA"` → stores as **arch_standard_databricks**
+    - Then go straight to schema discovery and code generation. Do NOT query for python/trino/grafana standards.
+    - **Databricks artifacts (generate EXACTLY these two, per `required_artifacts`):** `scripts/<pipeline_id>.py` (the PySpark/Delta job, including the MANDATORY Delta audit-table write) and `sql/setup_unity_catalog.sql` (`USING DELTA`, both the data table and the `_audit` table). Generate **NO** Trino DDL, **NO** Grafana JSON, **NO** `requirements.txt`, **NO** K8s/Dockerfile. Credentials use `dbutils.secrets` — never `cloud_get()`/`os.getenv()`.
+- **MANDATORY (non-Databricks only):** Execute three (3) distinct tool calls with these exact query strings if the keys are missing from state:
     1. `query="STANDARD PYTHON DATA PIPELINES CRITICAL RULES: cloud_get mandatory credentials, storage_options to_parquet, create_engine extraction loop same try block, FLAG_AS_SUSPICIOUS is_suspicious quality_standards pandas, type casting float64 Int64 quantity columns, destination_uri os.getenv DESTINATION_URI, idempotency partition run_date, push_to_gateway prometheus_client, requirements.txt repo root"` → stores as **arch_standard_python**
     2. `query="STANDARD TRINO DDL GENERATION setup_trino.sql: CREATE SCHEMA DROP TABLE CREATE TABLE 3-part catalog.schema.table, external_location PARQUET partitioned_by ARRAY run_date, data types VARCHAR DECIMAL INTEGER TIMESTAMP BOOLEAN, hive external table s3 gs abfss protocol"` → stores as **arch_standard_trino**
     3. `query="grafana dashboard json specifications. Panels, fields, alerting rules."` → stores as **arch_standard_grafana**
