@@ -1,0 +1,6 @@
+pandas
+sqlalchemy
+pyarrow
+trino
+prometheus-client
+azure-storage-blob
