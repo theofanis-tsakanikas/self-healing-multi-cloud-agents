@@ -2,5 +2,5 @@ db_id: "postgres_crm_us"
 db_type: "postgresql"
 connection_type: "network"
 env_var_url: "POSTGRES_CRM_URL"      # e.g. postgresql://user:pass@localhost:5432/crm
-default_table: "customers"
+default_table: "raw_us_crm"   # MUST match the table seed_chaos writes (raw_<target>)
 description: "Global CRM containing sensitive customer profiles and loyalty data."
