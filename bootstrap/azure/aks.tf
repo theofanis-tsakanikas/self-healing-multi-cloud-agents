@@ -29,7 +29,10 @@ resource "azurerm_kubernetes_cluster" "main" {
   default_node_pool {
     name       = "system"
     node_count = 2
-    vm_size    = "Standard_DS2_v2"
+    # Standard_DS2_v2 is restricted on trial/free subscriptions in some regions.
+    # B4s_v2 (4 vCPU / 16 GB, burstable) is verified unrestricted in westeurope and
+    # gives the monitoring stack + pipeline job comfortable headroom.
+    vm_size = "Standard_B4s_v2"
 
     upgrade_settings {
       max_surge = "10%"
