@@ -89,10 +89,10 @@ def run():
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
 
-            # 3a. Date conversion — ALWAYS before any date comparison
+            # 3a. Date conversion
             chunk['order_date'] = pd.to_datetime(chunk['order_date'])
 
-            # 3b. Business rules — translate ALL quality_standards from pipeline config.
+            # 3b. Business rules
             _rows_before = len(chunk)
             chunk = chunk[chunk['unit_price'] > 0.0]
             rejected_by_reason['monetary_integrity'] = rejected_by_reason.get('monetary_integrity', 0) + (_rows_before - len(chunk))
@@ -109,19 +109,19 @@ def run():
             _rows_before = len(chunk)
             chunk['is_suspicious'] = (chunk['quantity'] >= 1000) | (chunk['quantity'] <= 0)
 
-            # 3c. Type casting — cast float64 → Int64 for integer/count/quantity columns
+            # 3c. Type casting
             int_cols = [c for c in chunk.select_dtypes(include='float64').columns
                         if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
             for col in int_cols:
                 chunk[col] = chunk[col].astype('Int64')
 
-            # 3d. Write — storage_options={} is MANDATORY
+            # 3d. Write
             chunk.to_parquet(
                 f"{partition_uri}part_{i}.parquet",
                 engine="pyarrow",
                 compression="snappy",
                 index=False,
-                storage_options={{}}
+                storage_options={}
             )
             logging.info(f"Chunk {i}: {len(chunk)} rows processed")
             total_rows += len(chunk)
@@ -136,7 +136,7 @@ def run():
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
-    catalog, schema, table = "hive", "sales_eu", "pipe_eu_sales_to_s3"  # from CATALOG_AND_MONITORING.trino_metadata
+    catalog, schema, table = "hive", "sales_eu", "pipe_eu_sales_to_s3"  # from context
     conn = trino_connect(host=trino_host, port=8080, user="pipeline")
     cursor = conn.cursor()
     cursor.execute(f"CALL {catalog}.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
