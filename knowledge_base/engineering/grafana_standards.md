@@ -15,7 +15,7 @@ The dashboard MUST contain **exactly five panels — one per emitted metric — 
 | Panel | Metric | `type` | Color / thresholds |
 |---|---|---|---|
 | Record Count | `pipeline_rows_processed_total` | `stat` (`sparkline` enabled) | Fixed green (`fieldConfig.defaults.color.mode: fixed`, `fixedColor: green`) |
-| Last Success | `pipeline_last_success_timestamp` | `stat` | `unit: dateTimeFromNow` → renders "X minutes ago" (multiply the expr by `* 1000` — Grafana expects ms). Fixed blue color — NO thresholds: a stat panel compares the raw absolute timestamp (~1.7e12), never the age, so any age threshold is permanently exceeded and shows red. Data-silence is handled by the alerting rule, not panel color. |
+| Last Success | `pipeline_last_success_timestamp` | `stat` | `unit: "time:YYYY-MM-DD HH:mm:ss"` (multiply the expr by `* 1000` — Grafana time units expect ms). Fixed blue color, NO thresholds. **Do NOT use `dateTimeFromNow`** — its "X ago" text is rendered by moment.js from the viewer's browser locale (e.g. Greek "λίγα δευτερόλεπτα πριν") and CANNOT be forced to English by any server setting (`GF_USERS_DEFAULT_LANGUAGE`, user preference — both verified ineffective). An absolute timestamp is locale-independent. Data-silence is handled by the alerting rule, not panel color. |
 | Rejection Rate | `rejected / (processed + rejected) * 100` | `bargauge` (`orientation: horizontal`) | `unit: percent`, `min: 0`, `max: 100`, `color.mode: continuous-GrYlRd`. Show a RATE not the absolute count — a bargauge needs a fixed `max` to fill correctly, and percentage gives a natural 0–100 scale (an absolute count has no meaningful max). Use `clamp_min(..., 1)` in the denominator to avoid divide-by-zero on an empty run. |
 | Run Duration | `pipeline_duration_seconds` | `gauge` | `unit: s`; thresholds green `<60`, yellow `60`, red `120` |
 | Rejections by Reason | `pipeline_rows_rejected_by_reason` | `piechart` (`pieType: pie`) | One slice per business rule. `legendFormat: "{{reason}}"` so each slice is labelled by the `quality_standards` rule name. Legend `displayMode: table`, `placement: right`, `values: ["value", "percent"]`; `reduceOptions.calcs: ["lastNotNull"]`. This breaks the total Rejection Rate down per rule. A pipeline with no row-removing rules emits zero series → panel shows "No data" (expected, not a bug). |
@@ -132,7 +132,7 @@ Alert labels MUST include both `pipeline` and `cloud_provider` static labels so 
       "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
       "fieldConfig": {
         "defaults": {
-          "unit": "dateTimeFromNow",
+          "unit": "time:YYYY-MM-DD HH:mm:ss",
           "color": { "mode": "fixed", "fixedColor": "blue" }
         }
       },
