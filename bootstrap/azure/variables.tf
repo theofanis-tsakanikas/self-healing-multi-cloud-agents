@@ -10,7 +10,7 @@ variable "resource_group_name" {
 
 variable "location" {
   description = "Azure region for all resources"
-  default     = "eastus"
+  default     = "westeurope"
 }
 
 variable "aks_cluster_name" {
@@ -18,14 +18,9 @@ variable "aks_cluster_name" {
   default     = "multi-cloud-agent-aks"
 }
 
-variable "kubernetes_version" {
-  description = "Kubernetes version for AKS"
-  default     = "1.30"
-}
-
 variable "acr_name" {
   description = "Azure Container Registry name (globally unique, alphanumeric only)"
-  default     = "multicloudagentacr"
+  default     = "mcselfhealagentacr"
 }
 
 variable "state_storage_account" {

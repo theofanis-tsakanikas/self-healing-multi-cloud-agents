@@ -88,12 +88,12 @@ _CLOUD_DEFAULTS = {
     },
     "azure": {
         "aks_cluster_name": "multi-cloud-agent-aks",
-        "acr_login_server": "multicloudagentacr.azurecr.io",
+        "acr_login_server": "mcselfhealagentacr.azurecr.io",
         "resource_group_name": "multi-cloud-agent-rg",
         "state_storage_account": "multicloudagenttfstate",
         "state_container": "tfstate",
         "subscription_id_env": "AZURE_SUBSCRIPTION_ID",
-        "default_region": "eastus",
+        "default_region": "westeurope",
         "trino_catalog": "azure_catalog",
     },
     "gcp": {

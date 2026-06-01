@@ -8,12 +8,19 @@ resource "azurerm_resource_group" "main" {
   }
 }
 
+# Resolve the latest non-preview Kubernetes version actually supported in this region.
+# Pinning a literal (e.g. "1.30") breaks when Azure moves it to LTS-only.
+data "azurerm_kubernetes_service_versions" "current" {
+  location        = var.location
+  include_preview = false
+}
+
 resource "azurerm_kubernetes_cluster" "main" {
   name                = var.aks_cluster_name
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   dns_prefix          = var.aks_cluster_name
-  kubernetes_version  = var.kubernetes_version
+  kubernetes_version  = data.azurerm_kubernetes_service_versions.current.latest_version
 
   # Enable OIDC issuer — required for workload identity federation
   oidc_issuer_enabled       = true
