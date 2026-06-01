@@ -15,7 +15,6 @@ data:
         quantity    INTEGER,
         order_date  TIMESTAMP,
         currency    VARCHAR,
-        is_suspicious BOOLEAN,
         run_date    DATE
     ) WITH (
         format            = 'PARQUET',
@@ -114,7 +113,7 @@ data:
           "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
           "fieldConfig": {
             "defaults": {
-              "unit": "dateTimeFromNow",
+              "unit": "time:YYYY-MM-DD HH:mm:ss",
               "color": { "mode": "fixed", "fixedColor": "blue" }
             }
           },
@@ -128,16 +127,20 @@ data:
         {
           "id": 3,
           "title": "Rejection Rate",
-          "type": "bargauge",
+          "type": "stat",
           "datasource": "Prometheus",
           "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
-          "options": { "orientation": "horizontal" },
+          "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" },
           "fieldConfig": {
             "defaults": {
               "unit": "percent",
               "min": 0,
               "max": 100,
-              "color": { "mode": "continuous-GrYlRd" }
+              "thresholds": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 20 },
+                { "color": "red", "value": 50 }
+              ] }
             }
           },
           "targets": [
