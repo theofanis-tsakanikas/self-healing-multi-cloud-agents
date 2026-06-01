@@ -7,14 +7,13 @@
 * **Storage Account:** Provision the account named `{{azure_setup.storage_account_name}}` in region `{{azure_setup.region}}`.
 * **Container:** Create the blob container `{{azure_setup.container_name}}` within the account.
 * **Security (PII):** * **Access Level:** Ensure the container is strictly **Private** as per infra standards.
-    * **Encryption:** Implement **Customer-Managed Keys (CMK)** via Azure Key Vault as specified in the configuration.
+    * **Encryption:** Rely on Azure Storage **platform-managed encryption at rest** (always on). Customer-Managed Keys are out of scope — bootstrap provisions no Key Vault, so do NOT generate `azurerm_key_vault` / CMK resources.
 * **Idempotency:** Verify that the existing infrastructure matches both the project-specific values and the `{{target_infra_config}}` standards.
 
 **Identity & Access Management (Azure & K8s)**
-* **Managed Identity:** Create a User-Assigned Managed Identity named `{{azure_setup.managed_identity_name}}`.
-* **RBAC Permissions:** Assign the **'Storage Blob Data Contributor'** role to this identity, scoped strictly to `{{azure_setup.container_name}}`.
-* **Kubernetes Integration:** * Create a Service Account named `{{azure_setup.k8s_service_account_name}}` in namespace `{{azure_setup.k8s_namespace}}`.
-    * Configure **Azure AD Workload Identity** (federation) to bind the K8s SA with the Azure Managed Identity for passwordless authentication.
+* **Managed Identity (bootstrap-owned — reference only):** The User-Assigned Managed Identity `{{azure_setup.managed_identity_name}}` is created by bootstrap. Reference it via a Terraform `data` source — do NOT create an `azurerm_user_assigned_identity`.
+* **RBAC Permissions:** Assign the **'Storage Blob Data Contributor'** role to that identity, scoped to the data storage account this pipeline provisions.
+* **Kubernetes Integration:** Create a Service Account named `{{azure_setup.k8s_service_account_name}}` in namespace `{{azure_setup.k8s_namespace}}` carrying the workload-identity annotation/label. The AKS→identity federation is provisioned by bootstrap — do NOT create an `azurerm_federated_identity_credential`.
 
 **## 2. DATA ENGINEERING & PII HANDLING (PYTHON)**
 * **Base Image:** Use the shared `Dockerfile` including drivers specified in `{{target_infra_config}}` (`azure-storage-blob`, `psycopg2-binary`).
