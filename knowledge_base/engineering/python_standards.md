@@ -261,20 +261,19 @@ def run():
 
             # 3b. Business rules — translate ALL quality_standards from pipeline config.
             #     NEVER use placeholder values like `is_suspicious = False`.
-            #     Capture the row count BEFORE filtering so total rejected rows can be measured:
-            _rows_before = len(chunk)
-            #
-            #   Each row-removing rule ALSO wraps its filter with a per-rule delta and
-            #   accumulates it under its own quality_standards rule name (pipeline-agnostic —
-            #   the `reason` keys come from config, NEVER hardcoded literals):
+            #     Each row-removing rule takes its OWN FRESH `_before = len(chunk)` immediately
+            #     before ITS filter and accumulates the delta under its own quality_standards
+            #     rule name (the `reason` keys come from config — NEVER hardcoded literals).
+            #     A single shared `_before` captured once at the top double-counts — see the
+            #     Worked Example above.
             #
             #   DROP_RECORD:      _before = len(chunk)
             #                     chunk = chunk[condition]
             #                     rejected_by_reason['<rule_name>'] = \
             #                         rejected_by_reason.get('<rule_name>', 0) + (_before - len(chunk))
             #   EXCLUDE_AND_LOG:  _before = len(chunk)
-            #                     excluded = chunk[~condition]
-            #                     logging.warning(f"Excluded {len(excluded)} rows: <reason>")
+            #                     _mask = ~condition
+            #                     logging.warning(f"Excluded {_mask.sum()} rows: <reason>")
             #                     chunk = chunk[condition]
             #                     rejected_by_reason['<rule_name>'] = \
             #                         rejected_by_reason.get('<rule_name>', 0) + (_before - len(chunk))
@@ -284,10 +283,9 @@ def run():
             #                       # Do NOT filter after flagging — keep all rows
             #                       # does NOT remove rows → no rejected_by_reason entry
             #
-            # After all row-removing rules, accumulate the TOTAL rejected count.
-            # Invariant: sum(rejected_by_reason.values()) == rejected_rows (sequential filters).
-            # FLAG_AS_SUSPICIOUS / DEFAULT_VALUE do not remove rows, so they do not affect this delta.
-            rejected_rows += _rows_before - len(chunk)
+            # Do NOT keep an in-loop `rejected_rows += ...` counter — the scalar total is
+            # DERIVED after the loop as sum(rejected_by_reason.values()) (see below), so the
+            # two can never drift out of sync.
 
             # 3c. Type casting — cast float64 → Int64 for integer/count/quantity columns
             int_cols = [c for c in chunk.select_dtypes(include='float64').columns

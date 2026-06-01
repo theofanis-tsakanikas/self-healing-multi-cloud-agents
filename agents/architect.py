@@ -479,9 +479,18 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                     elif tool_name == "read_data_schema":
                         if not schema_discovered:
                             result = tool_func.invoke(tool_args)
-                            schema_discovered = True
                             all_skipped_this_iter = False
-                            logger.info("✅ Schema discovered. Unlocking Implementation phase.")
+                            # Only unlock implementation if the read actually SUCCEEDED.
+                            # read_data_schema returns a dict on success and an error STRING
+                            # ("Database Error...", "Table '...' not found") on failure.
+                            # Proceeding on a failed read makes the architect generate from no
+                            # schema (skeleton regurgitation) — surface the error instead.
+                            if isinstance(result, dict) and result.get("status") == "success":
+                                schema_discovered = True
+                                logger.info("✅ Schema discovered. Unlocking Implementation phase.")
+                            else:
+                                any_tool_error = True
+                                logger.error(f"❌ Schema discovery FAILED — staying in Schema Phase. {result}")
                         else:
                             result = "Skipped: schema already discovered this turn."
                             logger.info("⏭️ Skipping redundant read_data_schema call.")

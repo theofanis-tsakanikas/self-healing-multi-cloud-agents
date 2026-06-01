@@ -48,6 +48,12 @@ def _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
 
     os.environ["PROJECT_ID"] = unique_project_id
 
+    # CLOUD_PROVIDER drives every agent-runtime cloud_get() call (e.g. read_data_schema's
+    # schema introspection). It is read from the pipeline config — NEVER assumed. Without
+    # this, tools default to "aws" and resolve the wrong credential keys on GCP/Azure
+    # (e.g. POSTGRES_DB_HOST instead of CRM_DB_HOST → host "None").
+    os.environ["CLOUD_PROVIDER"] = pipe_conf.get("cloud_provider", "aws")
+
     initial_state = {
         "task": task,
         "messages": [],
