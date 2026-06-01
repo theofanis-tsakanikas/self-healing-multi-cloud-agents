@@ -29,10 +29,11 @@ resource "azurerm_kubernetes_cluster" "main" {
   default_node_pool {
     name       = "system"
     node_count = 2
-    # Standard_DS2_v2 is restricted on trial/free subscriptions in some regions.
-    # B4s_v2 (4 vCPU / 16 GB, burstable) is verified unrestricted in westeurope and
-    # gives the monitoring stack + pipeline job comfortable headroom.
-    vm_size = "Standard_B4s_v2"
+    # Trial/free subscriptions cap "Total Regional vCPUs" at 10 and give 0 quota to the
+    # Bsv2 family. Standard_D2s_v6 (Dsv6 family) is verified unrestricted WITH quota in
+    # westeurope. 2 nodes x 2 vCPU = 4 vCPU total — matches the original design and leaves
+    # headroom under the regional cap (incl. the upgrade surge node, which also bills vCPU).
+    vm_size = "Standard_D2s_v6"
 
     upgrade_settings {
       max_surge = "10%"

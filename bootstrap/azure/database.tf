@@ -23,6 +23,13 @@ resource "azurerm_postgresql_flexible_server" "main" {
     Project   = "multi-cloud-agent"
     ManagedBy = "terraform-bootstrap"
   }
+
+  # Azure auto-assigns an availability zone when none is specified. Without this,
+  # every subsequent apply tries to "reset" the zone and fails with
+  # "zone can only be changed when exchanged with standby_availability_zone".
+  lifecycle {
+    ignore_changes = [zone]
+  }
 }
 
 resource "azurerm_postgresql_flexible_server_database" "main" {
