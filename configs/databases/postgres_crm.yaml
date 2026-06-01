@@ -1,5 +1,5 @@
 db_id: "postgres_crm_us"
-db_type: "postgresql"
+db_type: "postgres"
 connection_type: "network"
 env_var_url: "POSTGRES_CRM_URL"      # e.g. postgresql://user:pass@localhost:5432/crm
 default_table: "raw_us_crm"   # MUST match the table seed_chaos writes (raw_<target>)
