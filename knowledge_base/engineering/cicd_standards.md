@@ -143,7 +143,7 @@ The following steps MUST appear in this exact order:
     #   --from-literal=CRM_DB_PORT=${{ vars.CRM_DB_PORT }} \
     #   --from-literal=CRM_DB_USER=${{ vars.CRM_DB_USER }} \
     #   --from-literal=CRM_DB_NAME=${{ vars.CRM_DB_NAME }} \
-    #   --from-literal=CRM_DB_PASSWORD=${{ secrets.CRM_DB_PASSWORD }} \
+    #   --from-literal=CRM_DB_PASSWORD=${{ secrets.AZURE_DB_PASSWORD }} \
     #   --dry-run=client -o yaml | kubectl apply -f -
     # GCP uses the same pattern with the MYSQL_DB_* keys (PASSWORD from secrets, rest from vars).
 - name: Deploy Pipeline Job to Kubernetes
