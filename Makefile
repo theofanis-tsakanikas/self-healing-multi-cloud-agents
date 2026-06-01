@@ -43,6 +43,18 @@ destroy-gcp: ## DANGER: Tear down all baseline GCP infrastructure
 
 ## Single source of truth: pyproject.toml
 ## Before running: cp .env.example .env  (then fill in your credentials)
+.PHONY: azure-pause
+azure-pause: ## Stop AKS + Postgres to cut cost between sessions (keeps everything)
+	@bash bootstrap/azure/power.sh pause
+
+.PHONY: azure-resume
+azure-resume: ## Start AKS + Postgres to resume work
+	@bash bootstrap/azure/power.sh resume
+
+.PHONY: azure-status
+azure-status: ## Show Azure baseline power state (AKS + Postgres)
+	@bash bootstrap/azure/power.sh status
+
 .PHONY: install
 install: ## Install all dependencies using uv
 	@echo "Installing dependencies..."
