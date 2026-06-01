@@ -60,15 +60,33 @@ jobs:
 
       # ── Phase 1: destroy the agent pipeline terraform (S3 data bucket + IAM) ──
       # The data bucket carries `prevent_destroy = true`, so terraform will refuse
-      # to delete it. Empty it, drop it (and its sub-resources) from state, delete it
-      # via the CLI, then terraform-destroy whatever remains (the IAM policy).
+      # to delete it. Empty it FULLY (it is versioned — current versions alone are not
+      # enough), drop it and its sub-resources from state, delete it via the CLI, then
+      # terraform-destroy whatever remains (the IAM policy).
       - name: Destroy agent pipeline infra (S3 + IAM)
         working-directory: terraform
         run: |
           terraform init -input=false
 
-          echo "Emptying data bucket $DATA_BUCKET (objects + all versions)..."
+          # The data bucket has versioning ON, so a plain `s3 rm --recursive` leaves old
+          # versions + delete markers behind and delete-bucket then fails "not empty".
+          # Remove current objects first, then every version and delete marker.
+          echo "Emptying data bucket $DATA_BUCKET (current objects)..."
           aws s3 rm "s3://$DATA_BUCKET" --recursive || true
+
+          echo "Removing all object versions..."
+          aws s3api list-object-versions --bucket "$DATA_BUCKET" \
+            --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json > dv.json 2>/dev/null || echo '{}' > dv.json
+          if grep -q '"Key"' dv.json; then
+            aws s3api delete-objects --bucket "$DATA_BUCKET" --delete file://dv.json || true
+          fi
+
+          echo "Removing all delete markers..."
+          aws s3api list-object-versions --bucket "$DATA_BUCKET" \
+            --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json > dm.json 2>/dev/null || echo '{}' > dm.json
+          if grep -q '"Key"' dm.json; then
+            aws s3api delete-objects --bucket "$DATA_BUCKET" --delete file://dm.json || true
+          fi
 
           # Drop every prevent_destroy-guarded resource from state so destroy won't block.
           for res in \
@@ -81,11 +99,12 @@ jobs:
             terraform state rm "$res" 2>/dev/null || true
           done
 
-          # CLI-delete the now-empty, state-detached bucket.
-          aws s3api delete-bucket --bucket "$DATA_BUCKET" --region "$AWS_DEFAULT_REGION" || true
-
-          # Destroy the rest (IAM policy etc.).
+          # Destroy the non-bucket resources (IAM policy etc.) BEFORE deleting the bucket,
+          # so a terraform refresh can't re-assert the bucket after we remove it.
           terraform destroy -auto-approve -input=false || true
+
+          # CLI-delete the now-empty, state-detached bucket last.
+          aws s3api delete-bucket --bucket "$DATA_BUCKET" --region "$AWS_DEFAULT_REGION" || true
           echo "✅ Agent pipeline infra destroyed."
 
       # ── Phase 2: empty the agent state bucket so bootstrap can delete it ──
