@@ -19,18 +19,18 @@ quality_standards:
 
   - capability: "contact_format_integrity"
     description: "Removes records whose email is structurally invalid and therefore unusable."
-    target_criteria: "Columns representing an email address."
+    target_criteria: "Columns whose name contains 'email'."
     logic: "Email value must contain an '@' character."
     on_failure_action: "EXCLUDE_AND_LOG"
 
   - capability: "mandatory_contact_info"
     description: "Every customer must have at least one usable contact channel."
-    target_criteria: "Email and phone number columns."
+    target_criteria: "Columns whose name contains 'email' or 'phone'."
     logic: "At least one of the email or phone columns must be non-NULL."
     on_failure_action: "DROP_RECORD"
 
   - capability: "entity_uniqueness"
     description: "Detects duplicate customer identifiers that break single-source-of-truth."
-    target_criteria: "The primary customer identifier column (e.g. cust_id)."
+    target_criteria: "Identifier columns whose name contains 'cust_id' or 'id'."
     logic: "Flag rows whose identifier value is duplicated within the dataset."
     on_failure_action: "FLAG_AS_SUSPICIOUS"

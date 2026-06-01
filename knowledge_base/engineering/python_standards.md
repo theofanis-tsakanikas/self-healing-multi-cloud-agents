@@ -132,6 +132,19 @@ Rejection Rate panel (uses the scalar) and the Rejections-by-Reason panel (uses 
 can never disagree.
 Column names (`unit_price`, `order_date`, `order_id`, `currency`, `quantity`) come from `read_data_schema` — never invented or hardcoded from the `target_criteria` description. The `reason` keys (`monetary_integrity`, `temporal_validity`, `completeness_enforcement`) are the rule names straight from `quality_standards` — never hardcoded literals invented by the architect.
 
+### PII anonymization (ONLY when `pii_sensitive: true`)
+When the pipeline config sets `pii_sensitive: true`, anonymize PII columns as an **unconditional transform** applied to every row inside the chunk loop, BEFORE the business rules. It is NOT a `quality_standards` rule and removes no rows. Hashing needs `import hashlib` at the top of the file (add it ONLY when a column is hashed — an unused import trips ruff `F401`).
+```python
+import hashlib  # top-of-file import, only when a column is hashed
+# ...
+# Hash a name column (irreversible) — resolve <name_col> from read_data_schema:
+chunk['<name_col>'] = chunk['<name_col>'].apply(
+    lambda v: hashlib.sha256(str(v).encode()).hexdigest())
+# Mask an email column → keeps first char + domain (b***@example.org):
+chunk['<email_col>'] = chunk['<email_col>'].str.replace(r'(?<=.).*?(?=@)', '***', regex=True)
+```
+Omit this block entirely when `pii_sensitive` is absent or false.
+
 ### Type Casting
 - Cast `float64` → `Int64` for quantity/count columns before every `to_parquet()` call — pandas defaults NULLable integers to float64, causing Trino to read `double` instead of `BIGINT`.
 - This step is **MANDATORY** whenever the schema contains integer/quantity/count columns. It must appear as step 3c inside the chunk loop, before `to_parquet()`:

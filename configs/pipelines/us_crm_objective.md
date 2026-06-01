@@ -1,43 +1,40 @@
-# MISSION OBJECTIVE: US CRM Data Pipeline to Azure Blob Storage (Idempotent Execution)
+# MISSION OBJECTIVE: PIPE_CRM_US_TO_AZURE
 
-**## 1. INFRASTRUCTURE & SECURITY (TERRAFORM)**
+**Natural Language Input:** US CRM pipeline to Azure (PII-sensitive customer data)
 
-**Azure Storage & Encryption**
-* **Standards Inheritance:** Apply all technical standards defined in `{{target_infra_config}}` (azure_blob.yaml), specifically ensuring **Hierarchical Namespace (ADLS Gen2)** and **StorageV2** kind.
-* **Storage Account:** Provision the account named `{{azure_setup.storage_account_name}}` in region `{{azure_setup.region}}`.
-* **Container:** Create the blob container `{{azure_setup.container_name}}` within the account.
-* **Security (PII):** * **Access Level:** Ensure the container is strictly **Private** as per infra standards.
-    * **Encryption:** Rely on Azure Storage **platform-managed encryption at rest** (always on). Customer-Managed Keys are out of scope — bootstrap provisions no Key Vault, so do NOT generate `azurerm_key_vault` / CMK resources.
-* **Idempotency:** Verify that the existing infrastructure matches both the project-specific values and the `{{target_infra_config}}` standards.
+---
 
-**Identity & Access Management (Azure & K8s)**
-* **Managed Identity (bootstrap-owned — reference only):** The User-Assigned Managed Identity `{{azure_setup.managed_identity_name}}` is created by bootstrap. Reference it via a Terraform `data` source — do NOT create an `azurerm_user_assigned_identity`.
-* **RBAC Permissions:** Assign the **'Storage Blob Data Contributor'** role to that identity, scoped to the data storage account this pipeline provisions.
-* **Kubernetes Integration:** Create a Service Account named `{{azure_setup.k8s_service_account_name}}` in namespace `{{azure_setup.k8s_namespace}}` carrying the workload-identity annotation/label. The AKS→identity federation is provisioned by bootstrap — do NOT create an `azurerm_federated_identity_credential`.
+## 🏗️ 1. ARCHITECT SCOPE (DATA LOGIC)
 
-**## 2. DATA ENGINEERING & PII HANDLING (PYTHON)**
-* **Base Image:** Use the shared `Dockerfile` including drivers specified in `{{target_infra_config}}` (`azure-storage-blob`, `psycopg2-binary`).
-* **Extraction:** Extract customer data from Postgres (per `{{source_config}}`).
-* **Anonymization (Compliance):** Since `pii_sensitive` is `true`, apply SHA-256 **hashing** to the customer name column and **masking** to the email and phone columns (e.g. `a***@b.com`). This is an unconditional transform applied to every row — it is NOT a `quality_standards` rule.
-* **Output:** Write the anonymized dataset as **Parquet** (snappy compression), per the infra standards.
-* **Upload:** Write to the destination injected as `DESTINATION_URI` (the standard `…/processed/` prefix), partitioned by `run_date=YYYY-MM-DD/` per the python standard. NEVER hardcode a bucket path or add `project_id` as a path component.
+**DATA PIPELINE (PYTHON):**
+- Source: `postgres` database — table from `DATA_SOURCE.table` in your context (never guess or invent a table name)
+- Output format: parquet/snappy
+- Destination URI: `abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/`
+- Idempotency: check `abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/run_date=<today>/` before writing. If data exists, log and return (never `exit()`).
+- PII (`pii_sensitive: true`): BEFORE applying the business rules, SHA-256 **hash** the customer name column and **mask** the email and phone columns (e.g. `a***@b.com`). Apply to every row — this is an unconditional transform, not a quality rule.
+- Save script to: `scripts/pipe_crm_us_to_azure.py`
 
-**## 3. SHARED SERVICES INTEGRATION (TRINO & GRAFANA)**
-* **Trino Validation:**
-    * Use the `target_uri_pattern` from `{{target_infra_config}}` to construct the ABFS path.
-    * Path (the table `external_location`): `abfss://{{azure_setup.container_name}}@{{azure_setup.storage_account_name}}.dfs.core.windows.net/processed/` — the stable `…/processed/` parent (matches `LOGICAL_DESTINATION.uri`), NEVER a `project_id`-suffixed folder, so Trino discovers every `run_date=` partition.
-* **Grafana Monitoring:**
-    * Connect to `{{shared_services.grafana.url}}`.
-    * Dashboard: Update/Create **"US CRM Business Insights"** following the Grafana standard EXACTLY — the mandatory **five panels** (Record Count, Last Success, Rejection Rate, Run Duration, Rejections by Reason), one per emitted metric. Do NOT invent custom panels (e.g. "Retention Rate") that are not backed by an emitted Prometheus metric.
-    * Alert: the standard 60-minute Data Silence rule (severity critical).
+**BUSINESS RULES:**
+  - See `TRANSFORMATION_LOGIC` in your context — this is the authoritative and complete rules list. Do not infer or skip rules based on this task description.
 
-**## 4. DEPLOYMENT ENGINEERING (KUBERNETES)**
-* **K8s Job:** Deploy as a Kubernetes Job named `us-crm-insights-job-{{project_id}}`.
-* **Security Context:** The Job must use `serviceAccountName: {{azure_setup.k8s_service_account_name}}` to leverage Azure Workload Identity.
+**CATALOG & OBSERVABILITY:**
+- Trino DDL: `sql/setup_trino.sql` — external table at `abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/` with `run_date` partitioning
+- Trino target: `azure_catalog.crm_us.pipe_crm_us_to_azure`
+- Grafana: `dashboards/monitoring_specs.json` — the standard five panels + 60-minute Data Silence alert
 
-**## 5. CONSTRAINTS**
-* Use English for all code comments.
-* Resource naming: Prefix all temporary K8s resources with `us-crm-{{project_id}}`.
-* **Compliance:** Pipeline logs must **never** contain raw PII data. Only metadata and anonymized statistics are allowed.
-* **Config Merging:** The Agent must merge `infra/azure_blob.yaml` (technical standards) with the project-specific YAML (values). Project-specific values always override infra standards in case of conflict.
-* Ensure compatibility with GitHub Actions for CI/CD by referencing resources via environment variables.
+---
+
+## 🛠️ 2. INFRA SCOPE (DEPLOYMENT & AUTOMATION)
+
+**TERRAFORM:** Provision the Azure ADLS Gen2 storage account + private container + the `Storage Blob Data Contributor` role assignment. The resource group, managed identity and AKS→identity federation are **bootstrap-owned** — reference them via `data` sources, NEVER create them. Encryption is platform-managed — no Key Vault / CMK.
+**K8S:** Deploy namespaces, Trino, Grafana, Prometheus + the Pipeline Job. The Job MUST use `serviceAccountName: us-crm-insights-sa` and carry the `azure.workload.identity/use: "true"` pod label.
+**CI/CD:** `/.github/workflows/pipe_crm_us_to_azure_pipeline.yml`
+
+---
+
+## 🔒 3. GLOBAL CONSTRAINTS
+
+- All DB credentials via `cloud_get()` — never `os.getenv()` for host/user/password/db. GitHub Secrets are for CI/CD auth only (ACR, cloud CLI).
+- Every agent MUST query the Vector Store for domain standards before writing.
+- **Compliance:** pipeline logs must NEVER contain raw PII — only metadata and anonymized statistics.
+- Final signal: `echo "Deployment Complete"`.

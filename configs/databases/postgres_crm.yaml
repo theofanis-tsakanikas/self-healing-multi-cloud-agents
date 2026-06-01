@@ -1,6 +1,10 @@
 db_id: "postgres_crm_us"
 db_type: "postgres"
 connection_type: "network"
-env_var_url: "POSTGRES_CRM_URL"      # e.g. postgresql://user:pass@localhost:5432/crm
+env_var_host: "CRM_DB_HOST"
+env_var_port: "CRM_DB_PORT"
+env_var_user: "CRM_DB_USER"
+env_var_password: "CRM_DB_PASSWORD"
+env_var_name: "CRM_DB_NAME"
 default_table: "raw_us_crm"   # MUST match the table seed_chaos writes (raw_<target>)
 description: "Global CRM containing sensitive customer profiles and loyalty data."
