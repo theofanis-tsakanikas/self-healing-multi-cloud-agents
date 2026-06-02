@@ -12,7 +12,7 @@ Before marking a file complete, confirm every item below. Skipping even one caus
 | File | Must contain | Common omissions that break deployments |
 |---|---|---|
 | `trino_deployment.yaml` | Deployment **+** ClusterIP Service (2 objects, separated by `---`) | Missing Service → `trino.analytics.svc.cluster.local` never resolves |
-| `grafana_deployment.yaml` | Deployment **+** LoadBalancer Service with `aws-load-balancer-scheme` annotation (2 objects) | Missing Service → no external IP; missing annotation → `<pending>` forever |
+| `grafana_deployment.yaml` | Deployment **+** `type: LoadBalancer` Service (2 objects); exposure annotation is cloud-specific — AWS only, omit on Azure/GCP | Missing Service → no external IP |
 | `prometheus_deployment.yaml` | Prometheus Deployment + Service **+** Pushgateway Deployment + Service (4 objects) | Missing Pushgateway → pipeline metrics push fails at runtime |
 | `configmaps.yaml` | All 5 named ConfigMaps with `labels: project_id:` on every one | Wrong key name in hive-catalog (`catalog.properties` → must be `hive.properties`) |
 | `job.yaml` | `initContainers` (init-trino) **+** `containers` (pipeline) — two separate sections | Using `containers` for init-trino → it runs in parallel with pipeline, not before |
@@ -295,7 +295,9 @@ spec:
 ```
 
 ### 3.2 grafana_deployment.yaml — 2 OBJECTS: Deployment + LoadBalancer Service
-`grafana_deployment.yaml` MUST contain both a `Deployment` AND a `Service` in a single file, separated by `---`. Without the LoadBalancer Service + `aws-load-balancer-scheme: internet-facing` annotation, Grafana is permanently `<pending>` with no external IP.
+`grafana_deployment.yaml` MUST contain both a `Deployment` AND a `Service` in a single file, separated by `---`. Without the `type: LoadBalancer` Service, Grafana is permanently `<pending>` with no external IP. The exposure annotation is **cloud-specific** — apply only the one matching `cloud_provider`:
+- **AWS:** `service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing`
+- **Azure (AKS) & GCP (GKE):** **NO annotation** — a `type: LoadBalancer` Service gets a public IP by default. Do NOT copy the AWS annotation onto AKS/GKE; it is silently ignored (works but is wrong).
 
 **CRITICAL rules:**
 - Namespace: `monitoring` (never invent another name)
@@ -664,14 +666,17 @@ hive.allow-drop-table=true
 hive.allow-rename-table=true
 ```
 
-**Azure (file metastore + ABFS):**
+**Azure (file metastore + ABFS):** authenticate ADLS Gen2 with the **storage account access
+key** — NOT an `oauth2` block (a managed identity has no client secret, so the old
+`oauth2.client-id=<managed_identity_client_id>` + `credential=<client_secret>` combination is
+invalid). The deploy workflow injects the real key in place of the `__ABFS_KEY__` sentinel
+(`KEY=$(az storage account keys list ...)` then `sed`), exactly like the ECR-URL sentinel.
 ```properties
 connector.name=hive
 hive.metastore=file
 hive.metastore.catalog.dir=abfss://<container>@<account>.dfs.core.windows.net/metastore/
-hive.azure-adls-gen2.oauth2.client-id=<managed_identity_client_id>
-hive.azure-adls-gen2.oauth2.credential=<client_secret>
-hive.azure-adls-gen2.oauth2.endpoint=https://login.microsoftonline.com/<tenant_id>/oauth2/token
+hive.azure.abfs-storage-account=<storage_account_name>
+hive.azure.abfs-access-key=__ABFS_KEY__
 hive.allow-drop-table=true
 hive.allow-rename-table=true
 ```

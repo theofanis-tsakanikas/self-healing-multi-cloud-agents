@@ -126,26 +126,38 @@ The following steps MUST appear in this exact order:
     kubectl rollout status deployment/grafana -n monitoring --timeout=120s
 - name: Create DB Credentials Secret
   run: |
-    # Name must be RFC 1123 and match job.yaml envFrom.secretRef.name exactly.
-    # Generate the variant for the TARGET cloud — do NOT copy the AWS empty form for Azure/GCP.
+    # Emit EXACTLY ONE form — the one matching PROJECT_METADATA.cloud_provider. There is NO
+    # default cloud: an AWS empty secret on an Azure/GCP pipeline makes cloud_get() return
+    # None → `host name "None"`. Name must be RFC 1123 and match job.yaml secretRef exactly.
     #
-    # ── AWS — EMPTY secret. cloud_get() reads creds from SSM via IRSA; the object only
-    #          needs to exist for envFrom: secretRef. SSM is the single source of truth:
-    kubectl create secret generic <project_id_rfc1123>-db-credentials \
-      -n analytics \
-      --dry-run=client -o yaml | kubectl apply -f -
+    # ✅ AWS — EMPTY secret (cloud_get reads creds from SSM via IRSA; object just needs to exist):
+    #   kubectl create secret generic <project_id_rfc1123>-db-credentials -n analytics \
+    #     --dry-run=client -o yaml | kubectl apply -f -
     #
-    # ── Azure / GCP — POPULATED secret. There is NO SSM; an empty secret means
-    #    cloud_get() returns None → `host name "None"`. You MUST pass --from-literal for
-    #    every key (per-cloud key mapping table below). Azure (CRM_DB_*) example:
-    # kubectl create secret generic <project_id_rfc1123>-db-credentials -n analytics \
-    #   --from-literal=CRM_DB_HOST=${{ vars.CRM_DB_HOST }} \
-    #   --from-literal=CRM_DB_PORT=${{ vars.CRM_DB_PORT }} \
-    #   --from-literal=CRM_DB_USER=${{ vars.CRM_DB_USER }} \
-    #   --from-literal=CRM_DB_NAME=${{ vars.CRM_DB_NAME }} \
-    #   --from-literal=CRM_DB_PASSWORD=${{ secrets.AZURE_DB_PASSWORD }} \
-    #   --dry-run=client -o yaml | kubectl apply -f -
-    # GCP uses the same pattern with the MYSQL_DB_* keys (PASSWORD from secrets, rest from vars).
+    # ✅ Azure — POPULATED secret. MUST include CRM_DB_* (no SSM) AND the storage connection
+    #   string (the pipeline's idempotency check + adlfs abfss writer both read
+    #   AZURE_STORAGE_CONNECTION_STRING from the pod env — provide it here):
+    #   kubectl create secret generic <project_id_rfc1123>-db-credentials -n analytics \
+    #     --from-literal=CRM_DB_HOST=${{ vars.CRM_DB_HOST }} \
+    #     --from-literal=CRM_DB_PORT=${{ vars.CRM_DB_PORT }} \
+    #     --from-literal=CRM_DB_USER=${{ vars.CRM_DB_USER }} \
+    #     --from-literal=CRM_DB_NAME=${{ vars.CRM_DB_NAME }} \
+    #     --from-literal=CRM_DB_PASSWORD=${{ secrets.AZURE_DB_PASSWORD }} \
+    #     --from-literal=AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING" \
+    #     --dry-run=client -o yaml | kubectl apply -f -
+    #
+    # ✅ GCP — POPULATED secret with the MYSQL_DB_* keys (PASSWORD from secrets, rest from vars).
+    #
+    # Replace the comment above with the single uncommented block for the active cloud.
+
+# ── Azure ONLY: build the storage connection string from the account key, just before the
+#    secret step above, so the pipeline pod can read/write ADLS Gen2 (Workload Identity for
+#    blob is not wired; the account key is the reliable path). Skip this step for AWS/GCP.
+# - name: Build Azure Storage Connection String + inject Trino ABFS key
+#   run: |
+#     KEY=$(az storage account keys list -g <resource_group> -n <storage_account_name> --query '[0].value' -o tsv)
+#     echo "AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=<storage_account_name>;AccountKey=$KEY;EndpointSuffix=core.windows.net" >> "$GITHUB_ENV"
+#     sed -i "s|__ABFS_KEY__|$KEY|g" k8s/configmaps.yaml   # real key into the Trino hive-catalog-config
 - name: Deploy Pipeline Job to Kubernetes
   run: |
     kubectl delete job -l component=pipeline-job -n analytics --ignore-not-found=true
@@ -182,8 +194,8 @@ Per-cloud `--from-literal` key mapping:
 
 | Cloud | Secret keys |
 |---|---|
-| AWS | `POSTGRES_DB_HOST`, `POSTGRES_DB_PORT`, `POSTGRES_DB_USER`, `POSTGRES_DB_PASSWORD`, `POSTGRES_DB_NAME` |
-| Azure | `CRM_DB_HOST`, `CRM_DB_PORT`, `CRM_DB_USER`, `CRM_DB_PASSWORD`, `CRM_DB_NAME` |
+| AWS | `POSTGRES_DB_HOST`, `POSTGRES_DB_PORT`, `POSTGRES_DB_USER`, `POSTGRES_DB_PASSWORD`, `POSTGRES_DB_NAME` (or empty — SSM) |
+| Azure | `CRM_DB_HOST`, `CRM_DB_PORT`, `CRM_DB_USER`, `CRM_DB_PASSWORD`, `CRM_DB_NAME`, **`AZURE_STORAGE_CONNECTION_STRING`** (for the idempotency check + adlfs abfss writes) |
 | GCP | `MYSQL_DB_HOST`, `MYSQL_DB_PORT`, `MYSQL_DB_USER`, `MYSQL_DB_PASSWORD`, `MYSQL_DB_NAME` |
 
 ---

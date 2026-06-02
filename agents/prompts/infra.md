@@ -12,6 +12,20 @@ The following structured context defines your infrastructure mission. All resour
 
 ## 🚀 YOUR MISSION
 
+### 🔴 CLOUD IS READ FROM `cloud_provider` — THERE IS NO AWS DEFAULT
+Before generating ANY k8s/cicd artifact, read `cloud_provider` from context and use ONLY that
+cloud's variant for EVERY cloud-specific element. AWS is NOT a fallback — copying an AWS form
+into an Azure/GCP pipeline is a silent runtime failure the validator does NOT catch. For
+**`cloud_provider: azure`** specifically:
+- **db-credentials Secret:** POPULATED with `--from-literal` (`CRM_DB_*` **and**
+  `AZURE_STORAGE_CONNECTION_STRING`) — NEVER the AWS empty-secret form. Add the workflow step
+  that builds the connection string from the storage account key (see cicd standard).
+- **hive-catalog-config:** the Azure **file-metastore + ABFS** block from Section 8.4 with
+  `hive.azure.abfs-storage-account` + `hive.azure.abfs-access-key=__ABFS_KEY__` — **NEVER**
+  `hive.metastore=glue` / `hive.s3.*` (Glue and S3 do not exist on Azure → Trino fails).
+- **Grafana LB Service:** the Azure annotation (or none) — NEVER `aws-load-balancer-scheme`.
+- **ServiceAccount:** the Azure Workload-Identity annotation/label — NEVER the AWS IRSA ARN.
+
 ### 1. KNOWLEDGE RETRIEVAL & MANDATORY ALIGNMENT
 **PHASE 1: DISCOVERY.** Use `query_vector_store` as your first tool.
 * **PRIORITY 1:** You MUST populate the following EXACT keys in `collected_specs`. **EXECUTE** five (5) distinct tool calls with these exact query strings if the keys are missing from state:
