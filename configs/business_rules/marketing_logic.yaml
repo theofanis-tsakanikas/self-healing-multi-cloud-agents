@@ -1,34 +1,54 @@
+# Business Rules: Global Marketing Pipeline
+# domain:           Identifies the business area these rules apply to.
+# quality_standards: List of data quality rules. Each rule defines WHAT to check,
+#                    WHERE to check it, and WHAT to do on failure.
+#
+# on_failure_action values (the ONLY supported actions — the architect maps each to
+# real pandas code via python_standards.md; never invent new action names):
+#   DROP_RECORD       — Remove the offending row entirely.
+#   EXCLUDE_AND_LOG   — Remove the row and log it as a warning.
+#   DEFAULT_VALUE     — Replace the invalid value with the specified default.
+#   FLAG_AS_SUSPICIOUS — Keep the row but mark it with a boolean flag column.
+
 domain: "marketing_analytics"
 domain_description: "Tracks multi-channel ad spend and engagement logs."
 
 quality_standards:
-  - capability: "taxonomy_alignment"
-    description: "Groups fragmented platform names into corporate categories."
-    target_criteria: "Columns indicating 'source', 'platform', or 'network'."
-    logic: "Map ['FB', 'Instagram', 'Meta'] -> 'META_ECOSYSTEM'; ['Google_Ads', 'Youtube'] -> 'GOOGLE_ECOSYSTEM'."
-    on_failure_action: "KEEP_ORIGINAL"
 
-  - capability: "type_safety_enforcement"
-    description: "Ensures metrics can be used in mathematical aggregations."
-    target_criteria: "Metrics like 'spend', 'clicks', 'impressions'."
-    logic: "Force conversion to Numeric (Float/Int). Handle non-numeric strings."
-    on_failure_action: "COERCE_TO_ZERO"
+  - capability: "spend_integrity"
+    description: "Ensures ad-spend metrics are non-negative for accounting."
+    target_criteria: "Numerical columns whose name contains 'spend', 'cost', or 'budget'."
+    logic: "Value must be >= 0.0. Replace negative or non-numeric values with 0."
+    on_failure_action: "DEFAULT_VALUE"
+    default: 0
 
-  - capability: "engagement_logic_check"
-    description: "Ensures derived metrics make logical sense."
-    target_criteria: "Relation between 'clicks' and 'impressions'."
-    logic: "Clicks cannot exceed Impressions (CTR <= 100%)."
-    on_failure_action: "ADJUST_OR_NULLIFY"
+  - capability: "temporal_validity"
+    description: "Prevents future-dated events from entering hourly reports."
+    target_criteria: "The 'event_timestamp' or 'ingestion_time' column."
+    logic: "Value must be <= current timestamp."
+    on_failure_action: "EXCLUDE_AND_LOG"
 
-  - capability: "incremental_window_sync"
-    description: "Handles hourly data ingestion batches."
-    target_criteria: "The 'event_timestamp' or 'ingestion_time' field."
-    logic: "Only process records from the current T-1 hour window."
-    on_failure_action: "SKIP_RECORD"
+  - capability: "completeness_enforcement"
+    description: "Ensures every log is attributed to a campaign."
+    target_criteria: "Identifier columns containing 'campaign_id' or 'ad_id'."
+    logic: "Field must not be NULL or empty string."
+    on_failure_action: "DROP_RECORD"
 
-  - capability: "campaign_id_validation"
-    description: "Ensures every log is attributed to a valid campaign."
-    target_criteria: "Columns containing 'campaign_id' or 'ad_id'."
-    logic: "Pattern match: 'CMP-####' or similar organizational format."
+  - capability: "campaign_standardization"
+    description: "Aligns unknown campaign identifiers to a default bucket."
+    target_criteria: "Columns containing 'campaign'."
+    logic: "Value must match the 'CMP-####' format. Default to 'UNASSIGNED_CAMPAIGN' if unknown."
     on_failure_action: "DEFAULT_VALUE"
     default: "UNASSIGNED_CAMPAIGN"
+
+  - capability: "engagement_logic_check"
+    description: "Flags impossible engagement (CTR > 100%) for downstream review."
+    target_criteria: "Columns representing 'clicks' and 'impressions'."
+    logic: "Clicks must not exceed Impressions."
+    on_failure_action: "FLAG_AS_SUSPICIOUS"
+
+  - capability: "volume_sanity_check"
+    description: "Flags extreme click outliers that suggest bot traffic or technical glitches."
+    target_criteria: "Columns representing 'clicks'."
+    logic: "Value must be < 1000000 per single hourly batch."
+    on_failure_action: "FLAG_AS_SUSPICIOUS"

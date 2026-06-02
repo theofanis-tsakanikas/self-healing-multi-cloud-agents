@@ -1001,6 +1001,8 @@ def patch_project_file(filename: str, replacements: list) -> str:
     except Exception as e:
         return f"Error reading '{filepath}': {e}"
 
+    original_content = content  # snapshot for the syntax-safety rollback below
+
     if not replacements:
         return (
             f"Error: replacements list is empty — patch_project_file requires at least one replacement. "
@@ -1043,6 +1045,32 @@ def patch_project_file(filename: str, replacements: list) -> str:
         count = content.count(old)
         content = content.replace(old, new, 1)
         applied.append(f"replaced ({count}x): {repr(old[:60])}")
+
+    # Safety-net: never let a patch turn a parseable .py file into a syntactically broken
+    # one. If the file compiled BEFORE the patch but the patched content does NOT, reject
+    # the patch and leave the file untouched — this stops a bad patch (e.g. a mis-indented
+    # import) from corrupting the file and cascading into a self-healing death spiral.
+    # Only triggers when THIS patch is the cause: an already-broken file is left alone so
+    # legitimate step-by-step fixes still work.
+    if ext == ".py":
+        def _compiles(src: str) -> bool:
+            try:
+                compile(src, filepath, "exec")
+                return True
+            except SyntaxError:
+                return False
+        if _compiles(original_content) and not _compiles(content):
+            try:
+                compile(content, filepath, "exec")
+                _err = ""
+            except SyntaxError as _se:
+                _err = f"{_se.msg} (line {_se.lineno})"
+            return (
+                f"PATCH REJECTED for '{filepath}' — it would break Python syntax: {_err}. "
+                f"The file was left UNCHANGED (no corruption). Re-issue the patch matching the "
+                f"existing indentation (4 spaces inside run(), 12 inside the chunk loop). "
+                f"To add an import use {{\"old\": \"__ADD_IMPORT__\", \"new\": \"from x import y\"}}."
+            )
 
     try:
         with open(filepath, "w", encoding="utf-8") as f:

@@ -1,47 +1,38 @@
-# MISSION OBJECTIVE: Global Marketing Data Pipeline to GCP (Idempotent Execution)
+# MISSION OBJECTIVE: PIPE_MKT_GLOBAL_TO_GCP
 
-**## 1. INFRASTRUCTURE & STORAGE (TERRAFORM)**
+**Natural Language Input:** Global marketing pipeline to GCP
 
-**GCP Storage (GCS)**
-* **Standards Inheritance:** Apply all technical standards defined in `{{target_infra_config}}` (gcp_bucket.yaml), specifically **Uniform Bucket-Level Access** and **Public Access Prevention**.
-* **Provisioning:** Create the Google Cloud Storage (GCS) Bucket named `{{gcp_setup.bucket_name}}` in region `{{gcp_setup.region}}`.
-* **Security & Compliance:** * **Versioning:** Must be **Enabled** as per infra standards to protect against accidental deletions.
-    * **Lifecycle:** Implement the lifecycle rules (e.g., Nearline transition) defined in `{{target_infra_config}}`.
-* **Idempotency:** If the bucket exists, verify that versioning is enabled and encryption/access settings match the org policy.
+---
 
-**Identity & Access Management (GCP & K8s)**
-* **Authentication Method:** Use **{{target_infra_config.auth_method}}** (Workload Identity Federation) to eliminate the use of static JSON keys.
-* **Service Account:** Create a GCP Service Account named `{{gcp_setup.k8s_service_account_name}}`.
-* **IAM Permissions:** Grant the `roles/storage.objectAdmin` role to this Service Account, restricted strictly to `{{gcp_setup.bucket_name}}`.
-* **Kubernetes Integration:** Bind the Kubernetes Service Account `{{gcp_setup.k8s_service_account_name}}` in namespace `{{gcp_setup.k8s_namespace}}` to the GCP Service Account using Workload Identity.
+## 🏗️ 1. ARCHITECT SCOPE (DATA LOGIC)
 
-**## 2. DATA ENGINEERING & LOGIC (PYTHON)**
-* **Base Image:** Use the shared `Dockerfile` with required drivers (`google-cloud-storage`, `mysql-connector-python`).
-* **Extraction:** Connect to MySQL (per `{{source_config}}`) using incremental loading based on the `last_updated` timestamp.
-* **Processing:** * Clean campaign logs using `{{business_rules_config}}`.
-    * Deduplicate entries based on `lead_id`.
-* **Output:** Convert data to **{{target_infra_config.data_format}}** with **{{target_infra_config.compression_type}}** compression.
-* **Upload:** Path: `gs://{{gcp_setup.bucket_name}}/processed/{{project_id}}/`.
+**DATA PIPELINE (PYTHON):**
+- Source: `mysql` database — table from `DATA_SOURCE.table` in your context (never guess or invent a table name)
+- Output format: parquet/snappy
+- Destination URI: `gs://global-marketing-insights-data/processed/`
+- Idempotency: check `gs://global-marketing-insights-data/processed/run_date=<today>/` before writing. If data exists, exit 0.
+- Save script to: `scripts/pipe_mkt_global_to_gcp.py`
 
-**## 3. SHARED SERVICES INTEGRATION (TRINO & GRAFANA)**
-* **Trino Validation:**
-    * Use the `target_uri_pattern` from `{{target_infra_config}}` to construct the GS path.
-    * Check if the schema `{{shared_services.trino.schema}}` exists in catalog `{{shared_services.trino.catalog}}`.
-    * Define an **External Table** pointing to: `gs://{{gcp_setup.bucket_name}}/processed/{{project_id}}/`.
-* **Grafana Monitoring:**
-    * Dashboard: Update/Create **"Real-time Marketing Monitor"**.
-    * Metrics: **"Cost per Click (CPC) Trend"** and **"Hourly Ingestion Rate"**.
-    * Set an alert for 60-minute data silence.
+**BUSINESS RULES:**
+  - See `TRANSFORMATION_LOGIC` in your context — this is the authoritative and complete rules list. Do not infer or skip rules based on this task description.
 
-**## 4. DEPLOYMENT & SCHEDULING (KUBERNETES)**
-* **Orchestration:** Deploy as a **Kubernetes CronJob** named `mkt-cron-{{project_id}}`.
-* **Schedule:** Set to `"0 * * * *"` (every hour).
-* **Security Context:** Ensure the Pod uses the K8s Service Account bound to the GCP identity.
-* **Resource Limits:** Explicitly set CPU/Memory limits to ensure cluster stability during hourly bursts.
+**CATALOG & OBSERVABILITY:**
+- Trino DDL: `sql/setup_trino.sql` — external table at `gs://global-marketing-insights-data/processed/` with `run_date` partitioning
+- Trino target: `hive.marketing_global.pipe_mkt_global_to_gcp`
+- Grafana: `dashboards/monitoring_specs.json` with 60-minute Data Silence alert
 
-**## 5. CONSTRAINTS**
-* Use English for all code comments.
-* Resource naming: All dynamic K8s resources must include the `{{project_id}}` suffix.
-* **Scalability:** The Python logic must handle a 2x increase in log volume using memory-efficient streaming.
-* **Config Merging:** The Agent must merge `infra/gcp_bucket.yaml` (standards) with the project-specific YAML (values). Project values always override standards.
-* Ensure compatibility with GitHub Actions for CI/CD by referencing resources via environment variables.
+---
+
+## 🛠️ 2. INFRA SCOPE (DEPLOYMENT & AUTOMATION)
+
+**TERRAFORM:** Deploy GCP storage (GCS) and identity resources (Service Account + Workload Identity).
+**K8S:** Deploy namespaces, Trino, Grafana, Prometheus + Pipeline CronJob (hourly schedule from `gcp_setup.schedule`).
+**CI/CD:** `/.github/workflows/pipe_mkt_global_to_gcp_pipeline.yml`
+
+---
+
+## 🔒 3. GLOBAL CONSTRAINTS
+
+- All DB credentials via `cloud_get()` — never `os.getenv()` for host/user/password/db. GitHub Secrets are for CI/CD auth only (Artifact Registry, cloud CLI).
+- Every agent MUST query the Vector Store for domain standards before writing.
+- Final signal: `echo "Deployment Complete"`.

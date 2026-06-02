@@ -6,8 +6,11 @@ provider: databricks
 host_cloud: aws            # aws | azure | gcp
 host_region: eu-central-1  # matches host_cloud region (AWS)
 
-# Databricks workspace
-workspace_name: "${pipeline_id}-workspace"
+# Databricks workspace — SHARED, created by bootstrap/databricks (not per-pipeline).
+# Must match bootstrap variables.tf `workspace_name` default; the Unity Catalog catalog
+# below is derived from it (replace "-" with "_"). `${...}` is NOT resolved by the loader,
+# so these values are concrete on purpose.
+workspace_name: "multi-cloud-agent-workspace"
 databricks_tier: premium   # standard | premium (Unity Catalog requires premium)
 
 # Compute — Jobs cluster (batch pipelines)
@@ -34,22 +37,25 @@ delta_storage:
   #   gcp   → gs://{bucket}/{pipeline_id}/
   partition_by: run_date         # Hive-style partitioning
 
-# Unity Catalog
+# Unity Catalog — created by bootstrap/databricks. The catalog name = the workspace name
+# with hyphens replaced by underscores (bootstrap: replace(workspace_name, "-", "_")).
+# MUST agree with the pipeline config's `databricks_target.catalog` — the architect uses
+# databricks_target while the infra agent uses this block; a mismatch breaks the job.
 unity_catalog:
   enabled: true
-  metastore: "${host_region}-metastore"
-  catalog: "${pipeline_id}_catalog"
+  metastore: "multi-cloud-agent-metastore"     # matches bootstrap metastore_name default
+  catalog: "multi_cloud_agent_workspace"        # = replace(workspace_name, "-", "_")
   schema: raw
 
-# MLflow (Mosaic AI tracking)
+# MLflow (Mosaic AI tracking) — disabled by default. experiment_name is per-pipeline;
+# set it concretely when enabling MLflow for a pipeline that trains models.
 mlflow:
-  enabled: false               # set true if pipeline includes ML model training
-  experiment_name: "${pipeline_id}-experiment"
+  enabled: false
+  experiment_name: "pipe_eu_sales_to_delta-experiment"
 
-# State backend (Terraform)
-terraform_backend:
-  # Resolves to host_cloud state storage at deploy time
-  state_key: "databricks/${pipeline_id}/terraform.tfstate"
+# State backend (Terraform): the per-pipeline state_bucket / state_key are the single source
+# of truth in the PIPELINE config's host-cloud setup (e.g. aws_setup.state_bucket /
+# aws_setup.state_key). Not duplicated here to avoid drift between the two files.
 
 # GitHub Actions
 cicd:

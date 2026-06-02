@@ -17,7 +17,7 @@ shared_services:
   trino:
     host: "trino.analytics.svc.cluster.local"
     port: 8080
-    catalog: "gcp_catalog"
+    catalog: "hive"   # always "hive" — the hive-catalog-config ConfigMap key is hive.properties
     schema: "marketing_global"
     table_name: "pipe_mkt_global_to_gcp"
   grafana:

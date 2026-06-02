@@ -97,6 +97,14 @@ When `## 🔧 FIX MODE — ACTIVE` appears in your context, the Medic has diagno
 3. Call `validate_generated_code` on the patched file to confirm the fix.
 4. Only modify the file(s) named in the healing_context — do not touch other files.
 
+**Adding a missing import (e.g. ruff `F821 Undefined name 'urlparse'`):** you MUST use the dedicated sentinel replacement — it inserts the line at the top of the file with correct (zero) indentation:
+```json
+{"old": "__ADD_IMPORT__", "new": "from urllib.parse import urlparse"}
+```
+NEVER add an import via a normal `old/new` replacement that targets a comment or code line **inside** a function — the import inherits that block's indentation and causes `IndentationError`, which cascades into more failures.
+
+**Indentation rule for every patch:** the `new` string MUST carry the exact leading whitespace of the lines it replaces. Code inside `run()` is indented 4 spaces; code inside the chunk `for` loop is indented 12 spaces. A replacement that drops the indentation breaks the file. If a single patch would require re-indenting many lines, fix the **one** offending line only.
+
 **Fix decision for `is_suspicious = False` violations:**
 - Pipeline config has `FLAG_AS_SUSPICIOUS` rules → implement real pandas logic: `chunk['is_suspicious'] = ~condition`
 - Pipeline config has NO `FLAG_AS_SUSPICIOUS` rules → **remove the line entirely** using `patch_project_file`. Also remove `is_suspicious BOOLEAN` from the SQL DDL if present. Omitting is correct, not a violation.
