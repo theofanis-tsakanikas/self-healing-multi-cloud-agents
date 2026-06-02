@@ -63,6 +63,8 @@ Generate `scripts/*.py` following `arch_standard_python` exactly. The standard d
 - **Storage:** `storage_options={}` in every `to_parquet()` call.
 - **Chunking:** Each chunk writes to `part_{i}.parquet` — never the same filename twice.
 - **Idempotency, Observability, Metrics Emission, Partition Registration:** Follow `arch_standard_python` exactly.
+- **NO helper functions:** define the entire pipeline inline inside `run()`. NEVER call a function you did not define (e.g. `apply_business_rules(...)`) — implement each business rule directly in the loop. A call to an undefined name fails with `F821`.
+- **COMPLETE script — never abbreviate:** emit ALL FIVE numbered sections in full (1 idempotency · 2 credentials · 3 extract+transform+write · 4 Trino `sync_partition_metadata` registration · 5 push of all FIVE metrics). NEVER replace a section with a placeholder comment like `# Trino sync logic here` and never drop the `trino` import or any of the five Gauges — a missing section silently produces an empty dashboard / unregistered table.
 
 ### 5. DATA CATALOG & MONITORING ARTIFACTS
 - **Trino DDL (`sql/setup_trino.sql`):** Follow `arch_standard_trino` exactly.
