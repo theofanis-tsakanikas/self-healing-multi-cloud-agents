@@ -14,6 +14,7 @@ data:
         full_name   VARCHAR,
         email_address VARCHAR,
         phone_number VARCHAR,
+        is_suspicious BOOLEAN,
         run_date    DATE
     ) WITH (
         format            = 'PARQUET',
@@ -31,10 +32,10 @@ metadata:
 data:
   hive.properties: |
     connector.name=hive
-    hive.metastore=glue
-    hive.metastore.glue.region=westeurope
-    hive.s3.region=westeurope
-    hive.s3.path-style-access=true
+    hive.metastore=file
+    hive.metastore.catalog.dir=abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/metastore/
+    hive.azure.abfs-storage-account=uscrminsightsstorage
+    hive.azure.abfs-access-key=__ABFS_KEY__
     hive.allow-drop-table=true
     hive.allow-rename-table=true
 ---
@@ -199,7 +200,8 @@ data:
         "labels": { "severity": "critical", "pipeline": "us-crm", "cloud_provider": "azure" },
         "annotations": { "summary": "No data received for US CRM pipeline (Azure) in the last 60 minutes." }
       }
-    }---
+    }
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:

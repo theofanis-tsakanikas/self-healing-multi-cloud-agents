@@ -1,3 +1,5 @@
+name: Deploy Pipeline
+
 on:
   push:
     paths:
@@ -15,15 +17,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure Azure Credentials
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Azure Container Registry Login
-        uses: azure/docker-login@v1
-        with:
-          login-server: mcselfhealagentacr.azurecr.io
+      - name: Build Azure Storage Connection String + inject Trino ABFS key
+        run: |
+          KEY=$(az storage account keys list -g multi-cloud-agent-rg -n uscrminsightsstorage --query '[0].value' -o tsv)
+          echo "AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=uscrminsightsstorage;AccountKey=$KEY;EndpointSuffix=core.windows.net" >> "$GITHUB_ENV"
+          sed -i "s|__ABFS_KEY__|$KEY|g" k8s/configmaps.yaml
 
       - name: Build and Push Docker Image
         run: |
@@ -41,8 +39,13 @@ jobs:
 
       - name: Create DB Credentials Secret
         run: |
-          kubectl create secret generic pipe-crm-us-to-azure-db-credentials \
-            -n analytics \
+          kubectl create secret generic pipe-crm-us-to-azure-db-credentials -n analytics \
+            --from-literal=CRM_DB_HOST=${{ secrets.CRM_DB_HOST }} \
+            --from-literal=CRM_DB_PORT=${{ secrets.CRM_DB_PORT }} \
+            --from-literal=CRM_DB_USER=${{ secrets.CRM_DB_USER }} \
+            --from-literal=CRM_DB_PASSWORD=${{ secrets.AZURE_DB_PASSWORD }} \
+            --from-literal=CRM_DB_NAME=${{ secrets.CRM_DB_NAME }} \
+            --from-literal=AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy Shared Services to Kubernetes
