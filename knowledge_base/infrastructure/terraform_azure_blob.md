@@ -125,7 +125,10 @@ resource "azurerm_storage_account" "data" {
   allow_nested_items_to_be_public = false
 
   blob_properties {
-    versioning_enabled = true
+    # Blob versioning is NOT compatible with is_hns_enabled = true (ADLS Gen2): Azure
+    # rejects the account with "versioning_enabled can't be true when is_hns_enabled is
+    # true". HNS is mandatory for abfss://, so do NOT set versioning_enabled here.
+    # Blob soft-delete (below) IS supported on HNS accounts and covers recoverability.
     delete_retention_policy {
       days = 7
     }
@@ -256,7 +259,7 @@ output "resource_group_name" {
 
 ## 7. LIFECYCLE & ENCRYPTION
 
-- **Versioning:** Always enabled via `blob_properties.versioning_enabled = true`
+- **Versioning:** NOT available on ADLS Gen2 (HNS) accounts — `versioning_enabled = true` is rejected by Azure when `is_hns_enabled = true`. Never set it here; rely on blob soft-delete (`delete_retention_policy`) for recoverability.
 - **Soft delete:** Set `delete_retention_policy.days = 7` minimum
 - **Encryption:** Azure Storage encrypts at rest by default (Microsoft-managed keys). For Customer-Managed Keys (CMK), add `azurerm_key_vault` + `azurerm_storage_account_customer_managed_key` resources.
 - **`prevent_destroy = true`** is MANDATORY on `azurerm_storage_account` to prevent accidental deletion.
