@@ -211,6 +211,34 @@ def medic_node(state: AgentState):
     logs_still_pending = False
     verification_successful = False # To know if we will store the insight
 
+    # 2b. TERRAFORM STATE-LOCK GUARD — operational issue, not a code bug.
+    # A locked tfstate blob cannot be resolved by any artifact change, so request_fix
+    # would loop forever on no-op patches. Detect the marker execute_terraform emits and
+    # short-circuit BEFORE the LLM runs: surface actionable guidance and FINISH (via
+    # fix_loop_escalated, which the Supervisor routes to FINISH).
+    _recent_blob = " ".join(str(getattr(m, "content", "")) for m in state["messages"][-8:])
+    if "STATE_LOCK_ERROR" in _recent_blob:
+        logger.warning("Terraform STATE_LOCK_ERROR detected — operational, surfacing to user (no fix loop).")
+        _lock_msg = (
+            "Terraform could not acquire the state lock — the tfstate blob is locked by a "
+            "previous (cancelled/killed) run, so NO code fix applies. Break the stale lease "
+            "and re-run:\n"
+            "  • Azure CLI: az storage blob lease break --account-name <tfstate-account> "
+            "--container-name tfstate --blob-name <state-key>\n"
+            "  • or Azure Portal → the tfstate blob → Break lease\n"
+            "  • or, from terraform/: terraform force-unlock <LOCK_ID>"
+        )
+        return {
+            "messages": [HumanMessage(content=_lock_msg)],
+            "next_step": "supervisor",
+            "last_agent": "medic",
+            "healing_context": "",
+            "fix_loop_escalated": True,   # Supervisor → FINISH; do not re-route a doomed fix
+            "fix_attempt": 0,
+            "last_fix_signature": "",
+            "medic_fix_target": "",
+        }
+
     # 3. REASONING LOOP
     fix_requested = False
     fix_signature_parts = []  # error text of each request_fix this turn → loop-convergence signature

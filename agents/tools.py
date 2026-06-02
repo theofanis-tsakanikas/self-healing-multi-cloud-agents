@@ -1238,6 +1238,25 @@ def execute_terraform(command: str, vars_dict: dict = None):
         if result.returncode == 0:
             return f"SUCCESS: Terraform {subcommand}\n{result.stdout}"
         else:
+            combined = (result.stderr or "") + (result.stdout or "")
+            # State-lock errors are OPERATIONAL, not code bugs — no file change can resolve
+            # them, so they must NOT be routed to request_fix (which would loop forever on a
+            # no-op patch). Surface a dedicated marker the Medic recognises (mirrors the
+            # fetch_github_action_logs PERMISSIONS_ERROR pattern) so it tells the user to
+            # break the stale tfstate lease instead of flailing with code edits.
+            if ("Error acquiring the state lock" in combined
+                    or "state blob is already locked" in combined
+                    or "state lock" in combined.lower()):
+                return (
+                    "PENDING: STATE_LOCK_ERROR — Terraform could not acquire the state lock; "
+                    "the tfstate blob is locked by a previous run. This is an OPERATIONAL "
+                    "issue, not a code bug: no artifact change can fix it. If a CI run is "
+                    "genuinely still in progress, wait for it to finish. If the lock is stale "
+                    "(left behind by a cancelled/killed run), the user must break the blob "
+                    "lease (Azure: `az storage blob lease break`, or Portal → the tfstate "
+                    "blob → Break lease) or run `terraform force-unlock <LOCK_ID>`, then "
+                    f"re-run. Do NOT call request_fix.\n{result.stderr}"
+                )
             # Return the stderr to the Medic for diagnosis
             return f"FAILED: Terraform {subcommand}\nERROR: {result.stderr}\nOUTPUT: {result.stdout}"
 
