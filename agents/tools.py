@@ -925,30 +925,27 @@ def write_project_file(filename: str, content: str):
     If filename includes a directory path (e.g., 'custom/path/file.txt'), it uses that.
     Otherwise, it routes by extension: .py -> scripts/, .sql -> sql/, .json -> dashboards/, .csv -> data/.
     """
-    # Check if the Agent provided a path (contains "/" or "\")
-    has_custom_path = os.path.dirname(filename) != ""
-
-    if has_custom_path:
-        # If the Agent provided a path, use it as is
+    # requirements.txt ALWAYS lives at the repo root — normalise away any directory the
+    # caller prepends (the LLM sometimes passes scripts/requirements.txt).
+    if os.path.basename(filename).lower() == "requirements.txt":
+        filepath = "requirements.txt"
+        final_dir = "."
+    elif os.path.dirname(filename) != "":
+        # The Agent provided a path — use it as is
         filepath = filename
         final_dir = os.path.dirname(filepath)
     else:
-        # If the Agent provided only a name, the "path router" is activated
+        # The Agent provided only a name — route by extension
         base_name = os.path.basename(filename)
         extension = os.path.splitext(base_name)[1].lower()
-
-        if base_name.lower() == "requirements.txt":
-            target_dir = "."
-        else:
-            folder_map = {
-                ".py": "scripts",
-                ".sql": "sql",
-                ".json": "dashboards",
-                ".csv": "data",
-                ".md": "."
-            }
-            target_dir = folder_map.get(extension, "scripts")
-        
+        folder_map = {
+            ".py": "scripts",
+            ".sql": "sql",
+            ".json": "dashboards",
+            ".csv": "data",
+            ".md": ".",
+        }
+        target_dir = folder_map.get(extension, "scripts")
         filepath = os.path.join(target_dir, base_name)
         final_dir = target_dir
 
@@ -979,14 +976,17 @@ def patch_project_file(filename: str, replacements: list) -> str:
 
     Returns: summary of applied/skipped replacements, or an error message.
     """
-    # Resolve path the same way write_project_file does
-    has_custom_path = os.path.dirname(filename) != ""
-    if has_custom_path:
+    # Resolve path the same way write_project_file does. requirements.txt ALWAYS lives at
+    # the repo root — normalise away any directory the caller prepends (the LLM sometimes
+    # passes scripts/requirements.txt, which previously caused a "does not exist" error).
+    if os.path.basename(filename).lower() == "requirements.txt":
+        filepath = "requirements.txt"
+    elif os.path.dirname(filename) != "":
         filepath = filename
     else:
         base_name = os.path.basename(filename)
         _ext = os.path.splitext(base_name)[1].lower()
-        folder_map = {".py": "scripts", ".sql": "sql", ".json": "dashboards", ".csv": "data"}
+        folder_map = {".py": "scripts", ".sql": "sql", ".json": "dashboards", ".csv": "data", ".md": "."}
         target_dir = folder_map.get(_ext, "scripts")
         filepath = os.path.join(target_dir, base_name)
 

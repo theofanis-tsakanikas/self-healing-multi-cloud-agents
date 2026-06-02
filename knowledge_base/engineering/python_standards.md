@@ -414,17 +414,35 @@ Hidden runtime dependencies (never imported directly):
 
 **File location:** `requirements.txt` at the **repository root** — never inside `scripts/` or any subdirectory.
 
+The file is the shared block PLUS the active cloud's block. Copy the matching cloud block **verbatim — omit NOTHING**. Each cloud needs THREE distinct things and dropping any one fails at runtime:
+- object-storage SDK · `to_parquet()` filesystem driver · DB driver
+
+**Shared (always):**
 ```
 pandas
 sqlalchemy
 pyarrow
 trino
 prometheus-client
-# AWS:   boto3, s3fs, psycopg2-binary
-# GCP:   google-cloud-storage, gcsfs, pymysql
-# Azure: azure-storage-blob, adlfs, psycopg2-binary   (us_crm source = Azure Postgres;
-#        use pyodbc instead only if the source is Azure SQL / MSSQL)
 ```
-`trino` is always required. Include only the packages for the active cloud provider.
+**AWS — append all three:**
+```
+boto3
+s3fs
+psycopg2-binary
+```
+**GCP — append all three:**
+```
+google-cloud-storage
+gcsfs
+pymysql
+```
+**Azure — append all three:**
+```
+azure-storage-blob
+adlfs
+psycopg2-binary
+```
+(Use `pyodbc` instead of `psycopg2-binary` ONLY if the source is Azure SQL / MSSQL — not Postgres.)
 
-The filesystem driver (`s3fs` / `gcsfs` / `adlfs`) is **mandatory** — `to_parquet()` cannot write to cloud storage URIs without it.
+The filesystem driver (`s3fs` / `gcsfs` / `adlfs`) and the DB driver (`psycopg2-binary` / `pymysql`) are BOTH mandatory: without the filesystem driver `to_parquet()` cannot write to a cloud URI; without the DB driver SQLAlchemy cannot connect.
