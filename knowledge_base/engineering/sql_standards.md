@@ -39,7 +39,17 @@ When generating `setup_trino.sql`, ensure the following:
         unit_price DECIMAL(18,2),  -- ✅ monetary
         -- quantity DECIMAL(18,2)  ← ❌ WRONG — DECIMAL is for monetary only
         ```
-- **Partitioning**: Always partition by `run_date`. Add `run_date DATE` as the **last column** in the column list and include `partitioned_by = ARRAY['run_date']` in the `WITH` clause. `run_date` is a Hive-style partition key — Trino derives its value from the storage path (`run_date=YYYY-MM-DD/`) and does NOT expect it inside the Parquet files. The same pattern works for all three clouds — only `external_location` changes:
+- **Partitioning**: Always partition by `run_date`. Add `run_date DATE` as the **last column** in the column list and include `partitioned_by = ARRAY['run_date']` in the `WITH` clause. `run_date` is a Hive-style partition key — Trino derives its value from the storage path (`run_date=YYYY-MM-DD/`) and does NOT expect it inside the Parquet files.
+
+  **`run_date` is ALWAYS the FINAL column — no exception.** When a `FLAG_AS_SUSPICIOUS` rule adds the optional `is_suspicious BOOLEAN` column (see Data Types above), `is_suspicious` is a regular data column and MUST be placed **before** `run_date`, never after it. Trino fails at runtime with `Partition keys must be the last columns in the table` if any non-partition column follows `run_date`:
+    ```sql
+    -- ❌ WRONG — is_suspicious after the partition key:
+    ...  phone_number VARCHAR,  run_date DATE,  is_suspicious BOOLEAN
+    -- ✅ CORRECT — partition key strictly last, is_suspicious before it:
+    ...  phone_number VARCHAR,  is_suspicious BOOLEAN,  run_date DATE
+    ```
+
+  The same pattern works for all three clouds — only `external_location` changes:
 
     ```sql
     -- AWS

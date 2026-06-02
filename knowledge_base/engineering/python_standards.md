@@ -143,6 +143,7 @@ chunk['<name_col>'] = chunk['<name_col>'].apply(
 # Mask an email column → keeps first char + domain (b***@example.org):
 chunk['<email_col>'] = chunk['<email_col>'].str.replace(r'(?<=.).*?(?=@)', '***', regex=True)
 ```
+**Every `.str.replace()` that takes a regex pattern MUST pass `regex=True`.** In pandas 2.x the default is `regex=False`, so the pattern is treated as a literal string — the mask matches nothing and **silently no-ops**, leaving the PII column fully exposed with no error. This applies to any masked column you add (phone, SSN, …), not just email. Validate the pattern is a real regex, not a `\b`-mangled literal.
 Omit this block entirely when `pii_sensitive` is absent or false.
 
 ### Type Casting
