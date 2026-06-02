@@ -39,6 +39,31 @@ def files_exist_in_state(target_files: list, written_files: list) -> bool:
     written_files_lower = {f.lower() for f in written_files}
     return set(f.lower() for f in target_files).issubset(written_files_lower)
 
+
+def _is_infra_allowed_file(filename: str) -> bool:
+    """
+    Security Filter — symmetric to the architect's _is_architect_allowed_file.
+    Infra owns the deployment plane (Terraform, k8s manifests, Dockerfile, CI workflow)
+    and must NEVER edit architect-owned data-plane artifacts: the pipeline script
+    (scripts/*.py), the Trino DDL (sql/*.sql), the Grafana dashboard (dashboards/*.json)
+    or requirements.txt. Without this guard a mis-routed fix lets Infra patch a .py and
+    then cascade into regenerating unrelated artifacts (broken workflow pushed to repo).
+    """
+    norm = (filename or "").replace("\\", "/").lstrip("/")
+    if not norm:
+        return False
+    name = Path(norm).name.lower()
+    ext = Path(norm).suffix.lower()
+    low = norm.lower()
+    # Architect-owned → forbidden to Infra.
+    if name == "requirements.txt":
+        return False
+    if ext in {".py", ".sql"}:
+        return False
+    if "dashboards/" in low:
+        return False
+    return True
+
 def infra_node(state: AgentState, config: RunnableConfig = None):
     """
     Infrastructure agent node managing Terraform, Containerization, and CI/CD.
@@ -472,6 +497,25 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             # project_id removed from terraform tool signatures — strip if LLM still passes it
             if t_name in ("write_terraform_config", "execute_terraform"):
                 t_args.pop("project_id", None)
+
+            # Ownership guard: Infra must never edit architect-owned data-plane files
+            # (scripts/*.py, sql/*.sql, dashboards/*.json, requirements.txt). Symmetric to
+            # the architect's _is_architect_allowed_file. Blocks patch_project_file (the only
+            # tool that takes an arbitrary path) from straying into another agent's artifacts
+            # — the root of the cascade where a mis-routed .py fix dragged Infra off course.
+            if t_name in ("patch_project_file", "write_terraform_config", "write_project_file"):
+                _target = t_args.get("filename", "")
+                if _target and not _is_infra_allowed_file(_target):
+                    result = (
+                        f"Policy Error: Infra is not permitted to modify '{_target}' — it is an "
+                        f"architect-owned artifact (pipeline script / Trino SQL / dashboard / "
+                        f"requirements). This fix belongs to the architect, not infra."
+                    )
+                    any_tool_error = True
+                    new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
+                    logger.warning(f"🚫 Infra ownership guard: blocked edit to '{_target}'.")
+                    continue
+
             try:
                 # Skip files already written to prevent re-generation loops.
                 # In fix mode: allow overwrite ONLY for the file explicitly targeted by

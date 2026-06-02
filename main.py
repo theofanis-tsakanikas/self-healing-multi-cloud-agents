@@ -74,6 +74,10 @@ def _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
         "medic_fix_requested": False,
         "agent_error": False,
         "ci_poll_attempt": 0,
+        "fix_attempt": 0,
+        "last_fix_signature": "",
+        "fix_loop_escalated": False,
+        "medic_fix_target": "",
         "healing_context": "",
         "raw_configs": {
             "pipeline": pipe_conf,

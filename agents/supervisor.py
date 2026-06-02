@@ -137,20 +137,32 @@ def supervisor_node(state: AgentState):
 
     # RULE C: Medic Healing & Rejection Logic
     if last_step == "medic":
-        medic_target = _extract_medic_fix_target(state["messages"])
+        # Honour the Medic's non-convergence escalation BEFORE re-deriving any fix
+        # target — the doomed request_fix message is still in history and would
+        # otherwise route us straight back into the loop the guard just broke.
+        if state.get("fix_loop_escalated"):
+            logger.warning("Medic abandoned a non-converging fix loop. Routing to FINISH.")
+            return {"next_step": "FINISH", "fix_loop_escalated": False}
+
+        # Prefer the Medic's deterministic ownership target (derived from the FAILED-file
+        # list at the Python layer) over re-parsing the request_fix message — the LLM has
+        # named both agents for one .py error, which the message scan cannot disambiguate.
+        medic_target = state.get("medic_fix_target") or _extract_medic_fix_target(state["messages"])
         
         if medic_target == "architect":
             logger.info("Medic requested Logic fix. Resetting architect_status to pending.")
             return {
                 "next_step": "architect",
-                "architect_status": "pending" # Resetting unified status
+                "architect_status": "pending", # Resetting unified status
+                "medic_fix_target": "",        # consume the one-shot ownership target
             }
-        
+
         if medic_target == "infra":
             logger.info("Medic requested Infra fix. Resetting infra_status to pending.")
             return {
                 "next_step": "infra",
-                "infra_status": "pending" # Resetting unified status
+                "infra_status": "pending", # Resetting unified status
+                "medic_fix_target": "",    # consume the one-shot ownership target
             }
 
         # Pending logs — Medic signaled it needs another turn

@@ -84,6 +84,25 @@ class AgentState(TypedDict):
     # Reset to 0 after logs arrive or a fix is requested.
     ci_poll_attempt: int
 
+    # Fix-loop convergence guard (Medic). fix_attempt counts how many consecutive
+    # times the SAME error (last_fix_signature = hash of the request_fix diagnosis)
+    # has been re-requested without resolving. After 3 identical rounds Medic stops
+    # the self-heal and surfaces to the user instead of looping to recursion_limit.
+    # Both reset on a clean verification or a different (progress) error signature.
+    fix_attempt: int
+    last_fix_signature: str
+
+    # Set True by Medic when the fix loop is abandoned as non-converging. The Supervisor
+    # honours it (routes to FINISH) instead of re-deriving the fix target from the
+    # request_fix message left in history. Reset to False once the Supervisor consumes it.
+    fix_loop_escalated: bool
+
+    # Deterministic fix target ("architect" | "infra" | "") derived by Medic from the
+    # FAILED-file ownership, not the LLM's free-form target_agent. The Supervisor routes
+    # by this when set, preventing the same .py error reaching both agents. One-shot:
+    # cleared by the Supervisor after it routes.
+    medic_fix_target: str
+
     # Structured fix instructions from the Medic, injected directly into the next
     # agent's system prompt. More reliable than relying on the LLM to find the
     # REJECTED_BY_MEDIC JSON buried in message history.

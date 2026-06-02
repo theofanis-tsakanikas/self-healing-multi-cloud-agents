@@ -1,5 +1,6 @@
 import os
 import json
+import hashlib
 import logging
 import random
 import time
@@ -65,6 +66,23 @@ def _extract_validation_summary(messages: list) -> dict[str, tuple[str, str]]:
             results[fname] = ("CLEAN", "")
 
     return results
+
+def _owner_of_file(path: str) -> str:
+    """Deterministic file → owning-agent mapping.
+
+    The Architect owns the data-plane artifacts (pipeline script, Trino DDL, Grafana
+    dashboard, requirements). Infra owns everything deployment-related (k8s manifests,
+    Dockerfile, CI workflow, Terraform). A single validation failure belongs to exactly
+    ONE of them — never both. Used to override the LLM's free-form target_agent, which
+    has mis-routed the SAME .py error to architect AND infra and triggered a cascade
+    (infra patching files it does not own, then regenerating unrelated workflows).
+    """
+    p = path.lower()
+    if (p.endswith(".py") or p.endswith(".sql")
+            or "dashboards/" in p or p.endswith("requirements.txt")):
+        return "architect"
+    return "infra"
+
 
 def medic_node(state: AgentState):
     """
@@ -195,6 +213,7 @@ def medic_node(state: AgentState):
 
     # 3. REASONING LOOP
     fix_requested = False
+    fix_signature_parts = []  # error text of each request_fix this turn → loop-convergence signature
     healing_context = ""  # Populated when request_fix is called; written to state for next agent
     for i in range(5):
         response = llm_with_tools.invoke(messages)
@@ -230,6 +249,13 @@ def medic_node(state: AgentState):
                 if "arch" in target: reset_architect = True
                 if "infra" in target: reset_infra = True
                 fix_requested = True
+                # Capture the error signature (what is being fixed) so the convergence
+                # guard below can tell a recurring identical failure (oscillation) apart
+                # from progress through different errors.
+                fix_signature_parts.append(
+                    str(tool_args.get("issue_description", "")
+                        or tool_args.get("evidence_quote", "")).strip().lower()
+                )
                 # Build healing_context from BOTH diagnosis and healing_instructions.
                 # diagnosis contains the filename (needed by architect.py for the
                 # is_fix_target check); healing_instructions contains the exact fix.
@@ -253,6 +279,27 @@ def medic_node(state: AgentState):
         if fix_requested:
             break
 
+    # 3b. DETERMINISTIC OWNERSHIP ROUTING — override the LLM's target_agent.
+    # A file-validation failure belongs to exactly ONE agent. The LLM has mis-routed
+    # the SAME .py error to BOTH architect and infra; honouring that drags infra into
+    # patching files it doesn't own and regenerating unrelated artifacts (broken CI
+    # workflow pushed to the repo). Derive the reset flags from the AUTHORITATIVE
+    # FAILED-file list instead of trusting the LLM. (Skipped for CI-log failures,
+    # which produce no validate_generated_code results — those keep the LLM's target.)
+    deterministic_fix_target = ""  # written to state so the Supervisor routes by ownership
+    if fix_requested and _validation_results:
+        _failed_files = [f for f, (st, _) in _validation_results.items() if st == "FAILED"]
+        if _failed_files:
+            _owners = {_owner_of_file(f) for f in _failed_files}
+            reset_architect = "architect" in _owners
+            reset_infra = "infra" in _owners
+            # Architect first when both fail — fix the data plane before redeploying infra.
+            deterministic_fix_target = "architect" if "architect" in _owners else "infra"
+            logger.info(
+                f"🧭 Ownership routing: FAILED {_failed_files} → {sorted(_owners)} "
+                f"(target={deterministic_fix_target})"
+            )
+
     # 4. FINAL STATE PREPARATION
     output_state = {
         "messages": new_messages_for_state,
@@ -261,16 +308,71 @@ def medic_node(state: AgentState):
         # Pass healing_instructions directly to the next agent's system prompt.
         # Empty string when no fix was requested (verification path).
         "healing_context": healing_context,
+        # Deterministic ownership target — the Supervisor honours this over re-parsing
+        # the request_fix message (which may name the wrong/both agents). "" = fall back
+        # to message parsing (CI-log failures have no validation result to map).
+        "medic_fix_target": deterministic_fix_target,
     }
 
 
-    # Apply resets and critically UPDATE infra_status
-    if reset_architect:
+    # ── FIX-LOOP CONVERGENCE GUARD ───────────────────────────────────────────
+    # A fix that never validates — e.g. an SQL column-reorder the architect's
+    # surgical patch keeps DUPLICATING instead of moving — would otherwise bounce
+    # medic → architect → medic until the graph recursion_limit (200), forcing a
+    # manual stop. Detect a fix request whose error signature is IDENTICAL to the
+    # previous round (no progress) and, after _MAX_FIX_ATTEMPTS repeats, stop and
+    # surface to the user instead of looping. A DIFFERENT signature = real progress
+    # through distinct errors, so the counter restarts (legit multi-fix sequences
+    # are never penalised). Mirrors the ci_poll_attempt back-off pattern.
+    _MAX_FIX_ATTEMPTS = 3
+    escalated_fix_loop = False
+    if fix_requested:
+        current_sig = hashlib.sha256(
+            "||".join(sorted(filter(None, fix_signature_parts))).encode()
+        ).hexdigest()
+        if current_sig and current_sig == state.get("last_fix_signature", ""):
+            fix_attempt = state.get("fix_attempt", 0) + 1  # same error again → not converging
+        else:
+            fix_attempt = 1  # new/different error → progress, restart the count
+
+        if fix_attempt >= _MAX_FIX_ATTEMPTS:
+            logger.warning(
+                f"Fix loop not converging: the same error survived {fix_attempt} "
+                f"fix attempts. Stopping self-heal and surfacing to the user."
+            )
+            new_messages_for_state.append(HumanMessage(content=(
+                f"Self-healing could not resolve this after {fix_attempt} attempts — the same "
+                f"validation error keeps recurring, so the automated fix is not converging "
+                f"(the surgical patch cannot resolve it; a manual edit to the standard/prompt "
+                f"is likely needed). Last diagnosis:\n\n{healing_context}"
+            )))
+            output_state["messages"] = new_messages_for_state
+            output_state["next_step"] = "supervisor"
+            output_state["fix_attempt"] = 0
+            output_state["last_fix_signature"] = ""
+            output_state["healing_context"] = ""  # do NOT route the doomed fix to an agent
+            output_state["medic_fix_target"] = ""  # cancel any pending ownership route
+            # Explicit flag the supervisor honours — without it, supervisor RULE C would
+            # re-derive the fix target from the request_fix message still in history and
+            # route back to the architect, defeating this guard.
+            output_state["fix_loop_escalated"] = True
+            escalated_fix_loop = True
+        else:
+            output_state["fix_attempt"] = fix_attempt
+            output_state["last_fix_signature"] = current_sig
+    elif verification_successful:
+        # Clean verification — reset so the next pipeline's fix cycle starts fresh.
+        output_state["fix_attempt"] = 0
+        output_state["last_fix_signature"] = ""
+
+    # Apply resets and critically UPDATE infra_status (skipped when the loop guard
+    # escalated — we must NOT re-route the non-converging fix back to an agent).
+    if reset_architect and not escalated_fix_loop:
         logger.info("Resetting Architect flag.")
         output_state["architect_status"] = "pending"
         output_state["medic_fix_requested"] = True
 
-    if reset_infra:
+    if reset_infra and not escalated_fix_loop:
         logger.info("Resetting Infra status to pending for fix cycle.")
         output_state["infra_status"] = "pending"
         # github_done stays True — infra.py unlocks push_to_github via medic_triggered_fix
