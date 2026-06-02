@@ -1,99 +1,47 @@
-resource "aws_s3_bucket" "data_bucket" {
-  bucket = var.bucket_name
-  tags   = { Project = var.project_id }
+data "azurerm_resource_group" "main" {
+  name = var.resource_group_name
+}
+
+data "azurerm_user_assigned_identity" "pipeline" {
+  name                = var.managed_identity_name
+  resource_group_name = var.resource_group_name
+}
+
+resource "azurerm_storage_account" "data" {
+  name                            = var.storage_account_name
+  resource_group_name             = data.azurerm_resource_group.main.name
+  location                        = data.azurerm_resource_group.main.location
+  account_tier                    = "Standard"
+  account_replication_type        = "LRS"
+  account_kind                    = "StorageV2"
+  is_hns_enabled                  = true
+  min_tls_version                 = "TLS1_2"
+  allow_nested_items_to_be_public = false
+
+  blob_properties {
+    delete_retention_policy {
+      days = 7
+    }
+  }
+
+  tags = {
+    project_id = var.project_id
+    ManagedBy  = "terraform"
+  }
+
   lifecycle {
     prevent_destroy = true
   }
 }
 
-resource "aws_s3_bucket_ownership_controls" "ownership_controls" {
-  bucket = aws_s3_bucket.data_bucket.id
-  rule {
-    object_ownership = "BucketOwnerEnforced"
-  }
+resource "azurerm_storage_container" "data" {
+  name                  = var.container_name
+  storage_account_name  = azurerm_storage_account.data.name
+  container_access_type = "private"
 }
 
-resource "aws_s3_bucket_public_access_block" "public_access_block" {
-  bucket                  = aws_s3_bucket.data_bucket.id
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_versioning" "versioning" {
-  bucket = aws_s3_bucket.data_bucket.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
-  bucket = aws_s3_bucket.data_bucket.id
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "aws:kms"
-    }
-  }
-}
-
-resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
-  bucket = aws_s3_bucket.data_bucket.id
-  rule {
-    id     = "lifecycle_rule"
-    status = "Enabled"
-    filter {}
-    transition {
-      days          = 90
-      storage_class = "STANDARD_IA"
-    }
-    transition {
-      days          = 365
-      storage_class = "GLACIER"
-    }
-  }
-}
-
-resource "aws_iam_policy" "s3_access_policy" {
-  name        = "${var.project_id}-s3-access-policy"
-  description = "Scoped S3 and Glue access policy for ${var.project_id}"
-  policy      = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["s3:ListBucket"]
-        Resource = [aws_s3_bucket.data_bucket.arn]
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-        Resource = ["${aws_s3_bucket.data_bucket.arn}/processed/*"]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "glue:GetDatabase", "glue:GetDatabases", "glue:CreateDatabase",
-          "glue:GetTable",    "glue:GetTables",    "glue:CreateTable",
-          "glue:DeleteTable", "glue:UpdateTable",
-          "glue:GetPartition",     "glue:GetPartitions",
-          "glue:CreatePartition",  "glue:DeletePartition",  "glue:UpdatePartition",
-          "glue:BatchCreatePartition", "glue:BatchDeletePartition"
-        ]
-        Resource = ["*"]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "ssm:GetParameter",
-          "ssm:GetParameters",
-          "ssm:GetParametersByPath"
-        ]
-        Resource = "arn:aws:ssm:*:*:parameter/multi-cloud-self-healing-agent/*"
-      }
-    ]
-  })
-  lifecycle {
-    ignore_changes = [description, tags]
-  }
+resource "azurerm_role_assignment" "pipeline_storage" {
+  scope                = azurerm_storage_account.data.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = data.azurerm_user_assigned_identity.pipeline.principal_id
 }

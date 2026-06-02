@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pipe-crm-us-to-azure-job
+  namespace: analytics
+  labels:
+    project_id: pipe_crm_us_to_azure
+    component: pipeline-job
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        project_id: pipe_crm_us_to_azure
+        component: pipeline-job
+    spec:
+      serviceAccountName: us-crm-insights-sa
+      restartPolicy: Never
+      initContainers:
+      - name: init-trino
+        image: trinodb/trino:403
+        command:
+        - /bin/sh
+        - -c
+        - |
+          until trino --server http://trino.analytics.svc.cluster.local:8080 --execute "SELECT 1" > /dev/null 2>&1; do
+            echo "Waiting for Trino to be ready..."; sleep 5;
+          done
+          trino --server http://trino.analytics.svc.cluster.local:8080 --file /scripts/setup_trino.sql
+        volumeMounts:
+        - name: sql-scripts
+          mountPath: /scripts
+      containers:
+      - name: pipeline
+        image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}
+        env:
+        - name: PROJECT_ID
+          value: "pipe_crm_us_to_azure"
+        - name: CLOUD_PROVIDER
+          value: "azure"
+        - name: DESTINATION_URI
+          value: "abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/"
+        - name: TRINO_HOST
+          value: "trino.analytics.svc.cluster.local"
+        - name: PUSHGATEWAY_URL
+          value: "http://pushgateway.monitoring.svc.cluster.local:9091"
+        envFrom:
+        - secretRef:
+            name: pipe-crm-us-to-azure-db-credentials
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: sql-scripts
+          mountPath: /scripts
+      volumes:
+      - name: sql-scripts
+        configMap:
+          name: trino-sql-config

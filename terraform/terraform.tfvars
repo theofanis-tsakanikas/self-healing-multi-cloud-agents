@@ -1,3 +1,5 @@
-region      = "eu-central-1"
-bucket_name = "eu-sales-insights-data"
-project_id  = "pipe_eu_sales_to_s3"
+resource_group_name = "multi-cloud-agent-rg"
+storage_account_name = "uscrminsightsstorage"
+container_name = "us-crm-insights-data"
+project_id = "pipe_crm_us_to_azure"
+managed_identity_name = "us-crm-insights-identity"

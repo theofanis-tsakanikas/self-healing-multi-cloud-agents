@@ -1,0 +1,88 @@
+on:
+  push:
+    paths:
+      - 'Dockerfile'
+      - 'scripts/**'
+      - 'k8s/**'
+      - 'sql/**'
+      - 'dashboards/**'
+      - 'requirements.txt'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Azure Credentials
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Azure Container Registry Login
+        uses: azure/docker-login@v1
+        with:
+          login-server: mcselfhealagentacr.azurecr.io
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }} -f Dockerfile .
+          docker push mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}
+          docker tag mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }} mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:latest
+          docker push mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:latest
+
+      - name: Update Kubeconfig
+        run: az aks get-credentials --resource-group multi-cloud-agent-rg --name multi-cloud-agent-aks
+
+      - name: Set Image Tag in Job Manifest
+        run: |
+          sed -i 's|image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:.*|image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}|' k8s/job.yaml
+
+      - name: Create DB Credentials Secret
+        run: |
+          kubectl create secret generic pipe-crm-us-to-azure-db-credentials \
+            -n analytics \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Shared Services to Kubernetes
+        run: |
+          kubectl apply -f k8s/00_namespaces.yaml
+          kubectl apply -f k8s/configmaps.yaml
+          kubectl apply -f k8s/trino_deployment.yaml
+          kubectl apply -f k8s/grafana_deployment.yaml
+
+      - name: Deploy Pipeline Job to Kubernetes
+        run: |
+          kubectl delete job -l component=pipeline-job -n analytics --ignore-not-found=true
+          kubectl apply -f k8s/job.yaml
+
+      - name: Check Deployment Status
+        run: |
+          kubectl get pods -n analytics
+          kubectl get pods -n monitoring
+          for i in $(seq 1 60); do
+            SUCCEEDED=$(kubectl get job -l component=pipeline-job -n analytics -o jsonpath='{.items[0].status.succeeded}' 2>/dev/null)
+            FAILED=$(kubectl get job -l component=pipeline-job -n analytics -o jsonpath='{.items[0].status.failed}' 2>/dev/null)
+            if [ "${SUCCEEDED:-0}" = "1" ]; then
+              echo "Job completed successfully"; exit 0
+            fi
+            if [ "${FAILED:-0}" -gt 0 ]; then
+              echo "Job failed. Fetching logs..."
+              echo "=== init-trino logs ==="
+              kubectl logs -l component=pipeline-job -n analytics -c init-trino --tail=50 2>/dev/null || echo "(init-trino logs unavailable)"
+              echo "=== pipeline logs ==="
+              kubectl logs -l component=pipeline-job -n analytics -c pipeline --tail=100 2>/dev/null || echo "(pipeline logs unavailable)"
+              exit 1
+            fi
+            echo "Waiting for job... ($i/60)"; sleep 10
+          done
+          echo "Timeout waiting for job"
+          echo "=== init-trino logs ==="
+          kubectl logs -l component=pipeline-job -n analytics -c init-trino --tail=50 2>/dev/null || echo "(init-trino logs unavailable)"
+          echo "=== pipeline logs ==="
+          kubectl logs -l component=pipeline-job -n analytics -c pipeline --tail=100 2>/dev/null || echo "(pipeline logs unavailable)"
+          exit 1
+
+      - name: Heartbeat
+        run: echo "Deployment Complete"

@@ -2,20 +2,20 @@ terraform {
   required_version = ">= 1.6"
 
   required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.100"
     }
   }
 
-  backend "s3" {
-    bucket         = "multi-cloud-agent-tf-state-bucket"
-    key            = "terraform/eu-sales-insights/terraform.tfstate"
-    region         = "eu-central-1"
-    dynamodb_table = "terraform-state-lock"
+  backend "azurerm" {
+    resource_group_name  = "multi-cloud-agent-rg"
+    storage_account_name = "multicloudagenttfstate"
+    container_name       = "tfstate"
+    key                  = "azure/us-crm-insights/terraform.tfstate"
   }
 }
 
-provider "aws" {
-  region = var.region
+provider "azurerm" {
+  features {}
 }
