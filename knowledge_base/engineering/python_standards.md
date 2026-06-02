@@ -9,12 +9,10 @@ After writing any `.py` file, you MUST call `validate_generated_code` on it — 
 These violations cause immediate runtime failure. No exceptions.
 
 ### Code syntax — single braces only
-- The generated file is a plain Python script — it is NOT a template and is NOT passed through `.format()`. Use **single** braces everywhere: `f"{var}"` for f-string placeholders and `{}` for empty dicts.
-- **NEVER double braces.** `storage_options={{}}` is a set containing a dict → `TypeError: unhashable type: dict`. `f"part_{{i}}.parquet"` produces the literal text `part_{i}.parquet` (no substitution) and trips ruff `F541`.
+- The generated file is a plain Python script — it is NOT a template and is NOT passed through `.format()`. Use a SINGLE pair of braces everywhere: `f"{var}"` for an f-string placeholder and `{}` for an empty dict.
+- **Never double the braces.** Wrapping an empty dict in a second pair of braces builds a set that contains a dict → `TypeError: unhashable type: dict` at runtime. Wrapping an f-string placeholder in a second pair of braces cancels the substitution — it emits the literal placeholder text and trips ruff `F541`. The two mandatory call sites are the empty `storage_options` argument and the part-file f-string; each takes exactly one pair of braces:
 ```python
-# ❌ WRONG — double braces:
-chunk.to_parquet(f"{partition_uri}part_{{i}}.parquet", storage_options={{}})
-# ✅ CORRECT — single braces:
+# ✅ CORRECT — exactly one pair of braces at each site:
 chunk.to_parquet(f"{partition_uri}part_{i}.parquet", storage_options={})
 ```
 
