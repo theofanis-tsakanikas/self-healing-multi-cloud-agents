@@ -47,6 +47,8 @@ resource (resource group, managed identity, federated credential) causes a 409
 
 Use the **AzureRM backend** for state storage. All backend values must be **string literals** — no `var.*` in backend blocks.
 
+**The backend `key` MUST be the exact `state_key` from `CLOUD_SETUP`, copied verbatim — NEVER derived from `pipeline_id` or any other identifier.** The `key` is the per-pipeline state path and must be byte-identical on every run of this pipeline. If the `key` differs between runs, Terraform reads an EMPTY state file and `apply` tries to re-create resources that already exist (e.g. the storage account) → fails with a `409 "already exists"` conflict, while the real state is orphaned under the old key. The project convention derives `state_key` from `project_name` (e.g. `us-crm-insights`), NOT from `pipeline_id` (`pipe_crm_us_to_azure`) — so deriving the key yourself produces the WRONG path. Copy `CLOUD_SETUP.state_key` exactly.
+
 ```hcl
 terraform {
   required_version = ">= 1.6"
@@ -62,7 +64,7 @@ terraform {
     resource_group_name  = "multi-cloud-agent-rg"
     storage_account_name = "multicloudagenttfstate"
     container_name       = "tfstate"
-    key                  = "azure/<pipeline_id>/terraform.tfstate"
+    key                  = "azure/us-crm-insights/terraform.tfstate"   # ← CLOUD_SETUP.state_key VERBATIM — never derived from pipeline_id
   }
 }
 

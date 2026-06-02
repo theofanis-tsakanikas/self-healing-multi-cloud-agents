@@ -65,6 +65,88 @@ The Agent MUST select the logic block that matches the `target_cloud` identifier
 - **Registry:** `azure/docker-login@v1` with `login-server: {{acr_name}}.azurecr.io`.
 - **Kubeconfig:** `az aks get-credentials --resource-group {{resource_group}} --name {{aks_cluster_name}}`
 
+### 3.4 Azure — COMPLETE ordered workflow (the authoritative Azure template)
+For `cloud_provider: azure`, generate **exactly** these steps in this order. Section 4's
+detailed AWS template below is NOT the Azure shape — do NOT translate it step-by-step and do
+NOT drop any step. The five most-commonly-dropped steps are flagged 🔴 — every one is
+mandatory. Substitute only the bracketed values from the infrastructure context.
+
+```yaml
+name: Deploy Pipeline
+
+on:
+  push:
+    paths: ['Dockerfile', 'scripts/**', 'k8s/**', 'sql/**', 'dashboards/**', 'requirements.txt']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login            # 🔴 MANDATORY — every `az` command below fails without it
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: ACR Login              # 🔴 MANDATORY — `docker push` is unauthorized without it
+        run: az acr login --name <acr_name>          # e.g. mcselfhealagentacr
+
+      - name: Build Azure Storage Connection String + inject Trino ABFS key
+        run: |
+          KEY=$(az storage account keys list -g <resource_group> -n <storage_account_name> --query '[0].value' -o tsv)
+          echo "AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=<storage_account_name>;AccountKey=$KEY;EndpointSuffix=core.windows.net" >> "$GITHUB_ENV"
+          sed -i "s|__ABFS_KEY__|$KEY|g" k8s/configmaps.yaml
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t <acr_login_server>/<project_id_rfc1123>:${{ github.sha }} -f Dockerfile .
+          docker push <acr_login_server>/<project_id_rfc1123>:${{ github.sha }}
+          docker tag  <acr_login_server>/<project_id_rfc1123>:${{ github.sha }} <acr_login_server>/<project_id_rfc1123>:latest
+          docker push <acr_login_server>/<project_id_rfc1123>:latest
+
+      - name: Update Kubeconfig
+        run: az aks get-credentials --resource-group <resource_group> --name <aks_cluster_name>
+
+      - name: Set Image Tag in Job Manifest
+        run: |
+          sed -i 's|image: <acr_login_server>/<project_id_rfc1123>:.*|image: <acr_login_server>/<project_id_rfc1123>:${{ github.sha }}|' k8s/job.yaml
+
+      - name: Create DB Credentials Secret      # HOST/PORT/USER/NAME = vars.* (NOT secrets.*); password = secret
+        run: |
+          kubectl create secret generic <project_id_rfc1123>-db-credentials -n analytics \
+            --from-literal=CRM_DB_HOST=${{ vars.CRM_DB_HOST }} \
+            --from-literal=CRM_DB_PORT=${{ vars.CRM_DB_PORT }} \
+            --from-literal=CRM_DB_USER=${{ vars.CRM_DB_USER }} \
+            --from-literal=CRM_DB_NAME=${{ vars.CRM_DB_NAME }} \
+            --from-literal=CRM_DB_PASSWORD=${{ secrets.AZURE_DB_PASSWORD }} \
+            --from-literal=AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Shared Services to Kubernetes
+        run: |
+          kubectl apply -f k8s/00_namespaces.yaml
+          kubectl apply -f k8s/configmaps.yaml
+          kubectl apply -f k8s/prometheus_deployment.yaml   # 🔴 MANDATORY — Prometheus + Pushgateway; without it metrics push fails → Grafana "No data"
+          kubectl apply -f k8s/trino_deployment.yaml
+          kubectl apply -f k8s/grafana_deployment.yaml
+          kubectl rollout restart deployment/trino -n analytics      # 🔴 reload ConfigMaps (the sed'd ABFS key) on re-deploy
+          kubectl rollout restart deployment/grafana -n monitoring
+          kubectl rollout status deployment/trino -n analytics --timeout=120s
+          kubectl rollout status deployment/grafana -n monitoring --timeout=120s
+
+      - name: Deploy Pipeline Job to Kubernetes
+        run: |
+          kubectl delete job -l component=pipeline-job -n analytics --ignore-not-found=true
+          kubectl apply -f k8s/job.yaml
+
+      - name: Check Deployment Status
+        run: |
+          # poll the Job; on failure/timeout dump init-trino + pipeline container logs (see AWS template)
+          echo "see the status-polling block in Section 4 — identical for all clouds"
+```
+
 ---
 
 **## 4. DEPLOYMENT EXECUTION**

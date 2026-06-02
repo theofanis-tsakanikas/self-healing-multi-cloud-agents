@@ -272,7 +272,14 @@ def medic_node(state: AgentState):
             ):
                 logs_still_pending = True
 
-            if tool_name == "request_fix":
+            if tool_name == "request_fix" and '"REJECTED_BY_MEDIC"' in result_str:
+                # Only ACCEPTED fix requests set routing flags. The request_fix tool rejects
+                # calls whose evidence_quote carries no error marker (status TOOL_ERROR) —
+                # e.g. the LLM hallucinating a "fix" for a CLEAN file, passing evidence
+                # "AUTO-VALIDATION: CLEAN ✓". Honouring those would wrongly activate an agent
+                # and pollute the convergence signature. Rejected calls fall through: the
+                # ToolMessage is still appended below so the LLM sees the rejection and
+                # self-corrects.
                 target = str(tool_args.get("target_agent", "")).lower()
                 if "arch" in target: reset_architect = True
                 if "infra" in target: reset_infra = True
