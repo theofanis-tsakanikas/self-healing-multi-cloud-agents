@@ -334,6 +334,19 @@ def medic_node(state: AgentState):
                 f"🧭 Ownership routing: FAILED {_failed_files} → {sorted(_owners)} "
                 f"(target={deterministic_fix_target})"
             )
+            # Ensure the FAILED filename(s) appear in healing_context. The architect's
+            # is_patch_target check (architect.py) requires the file stem to be present in
+            # the diagnosis, but custom-validator errors (e.g. "STORAGE: storage_options")
+            # carry NO file path — unlike ruff errors which include "--> scripts/...py".
+            # Without this the architect rejects its OWN patch ("not the fix target") and
+            # the fix loops. Prepend the names only when none is already mentioned.
+            if healing_context and not any(
+                Path(f).stem.lower() in healing_context.lower() for f in _failed_files
+            ):
+                healing_context = (
+                    "Target file(s) to fix: " + ", ".join(_failed_files) + "\n\n" + healing_context
+                )
+                logger.info("🩹 Injected FAILED filename(s) into healing_context for patch targeting.")
 
     # 4. FINAL STATE PREPARATION
     output_state = {
