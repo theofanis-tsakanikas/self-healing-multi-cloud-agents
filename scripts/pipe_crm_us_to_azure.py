@@ -3,6 +3,7 @@ import time
 import datetime
 import logging
 import hashlib
+from urllib.parse import urlparse
 
 import pandas as pd
 from sqlalchemy import create_engine
@@ -10,15 +11,8 @@ from trino.dbapi import connect as trino_connect
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
 from utils.cloud_config import cloud_get  # SSM → bootstrap_outputs → env fallback
-from urllib.parse import urlparse
 
-_CLOUD = os.getenv("CLOUD_PROVIDER", "aws")
-if _CLOUD == "aws":
-    import boto3
-elif _CLOUD == "gcp":
-    from google.cloud import storage as gcs
-elif _CLOUD == "azure":
-    from azure.storage.blob import BlobServiceClient
+_CLOUD = os.getenv("CLOUD_PROVIDER", "azure")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -33,53 +27,25 @@ def run():
     bucket = parsed.netloc
     prefix = parsed.path.lstrip('/')
 
-    if _CLOUD == "aws":
-        s3 = boto3.client('s3')
-        response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-        if response.get('KeyCount', 0) > 0:
-            logging.info(f"Partition run_date={run_date} already populated. Skipping.")
-            return
-    elif _CLOUD == "gcp":
-        client = gcs.Client()
-        blobs = list(client.list_blobs(bucket, prefix=prefix, max_results=1))
-        if blobs:
-            logging.info("Destination already populated. Skipping.")
-            return
-    elif _CLOUD == "azure":
+    # Check if the partition already exists
+    if _CLOUD == "azure":
+        from azure.storage.blob import BlobServiceClient
         client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))
         container = client.get_container_client(bucket)
         blobs = list(container.list_blobs(name_starts_with=prefix))
         if blobs:
-            logging.info("Destination already populated. Skipping.")
+            logging.info(f"Partition run_date={run_date} already populated. Skipping.")
             return
 
     # ── 2. CREDENTIALS via cloud_get() ───────────────────────────────────────
-    if _CLOUD == "aws":
-        host = cloud_get("aws", "db_host",     db_type="postgres")
-        port = cloud_get("aws", "db_port",     db_type="postgres") or "5432"
-        user = cloud_get("aws", "db_user",     db_type="postgres")
-        pw   = cloud_get("aws", "db_password", db_type="postgres")
-        db   = cloud_get("aws", "db_name",     db_type="postgres")
-        connection_string = (
-            f"postgresql+psycopg2://{user}:{pw}"
-            f"@{host}:{port}/{db}"
-        )
-    elif _CLOUD == "gcp":
-        host = cloud_get("gcp", "db_host",     db_type="mysql")
-        port = cloud_get("gcp", "db_port",     db_type="mysql") or "3306"
-        user = cloud_get("gcp", "db_user",     db_type="mysql")
-        pw   = cloud_get("gcp", "db_password", db_type="mysql")
-        db   = cloud_get("gcp", "db_name",     db_type="mysql")
-        connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
-    elif _CLOUD == "azure":
-        host = cloud_get("azure", "db_host",     db_type="postgres")
-        port = cloud_get("azure", "db_port",     db_type="postgres") or "5432"
-        user = cloud_get("azure", "db_user",     db_type="postgres")
-        pw   = cloud_get("azure", "db_password", db_type="postgres")
-        db   = cloud_get("azure", "db_name",     db_type="postgres")
-        connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
+    host = cloud_get("azure", "db_host", db_type="postgres")
+    port = cloud_get("azure", "db_port", db_type="postgres") or "5432"
+    user = cloud_get("azure", "db_user", db_type="postgres")
+    pw   = cloud_get("azure", "db_password", db_type="postgres")
+    db   = cloud_get("azure", "db_name", db_type="postgres")
+    connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
 
-    # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
+    # ── 3. EXTRACTION + TRANSFORMATION + WRITE ────────────────────────────────
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
     rejected_by_reason = {}    # rule_name → cumulative dropped rows
@@ -89,12 +55,12 @@ def run():
     try:
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
-            # PII Transformation: Hashing and Masking
-            chunk['full_name'] = chunk['full_name'].apply(lambda x: hashlib.sha256(x.encode()).hexdigest())
+            # PII Transformation: Hash the full_name, mask email and phone
+            chunk['full_name'] = chunk['full_name'].apply(lambda x: hashlib.sha256(str(x).encode()).hexdigest())
             chunk['email_address'] = chunk['email_address'].str.replace(r'(?<=.).*?(?=@)', '***', regex=True)
-            chunk['phone_number'] = chunk['phone_number'].str.replace(r'(?<=\d{3})\d{3,}.*', '***', regex=True)
+            chunk['phone_number'] = chunk['phone_number'].astype(str).str.replace(r'\d(?=\d{4})', '*', regex=True)
 
-            # Business Rules
+            # Business Rules Implementation
             # 1. contact_format_integrity
             _before = len(chunk)
             chunk = chunk[chunk['email_address'].str.contains('@')]
@@ -110,7 +76,7 @@ def run():
             chunk['is_suspicious'] = chunk.duplicated(subset=['cust_id'], keep=False)
             rejected_by_reason['entity_uniqueness'] = rejected_by_reason.get('entity_uniqueness', 0) + (_before - len(chunk))
 
-            # Type casting
+            # 3c. Type casting — cast float64 → Int64 for integer/count/quantity columns
             int_cols = [c for c in chunk.select_dtypes(include='float64').columns
                         if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
             for col in int_cols:
@@ -131,6 +97,7 @@ def run():
         logging.error(f"Pipeline failed: {e}")
         raise
 
+    # Scalar total DERIVED from the per-reason dict
     rejected_rows = sum(rejected_by_reason.values())
     duration_seconds = time.time() - start_time   # for pipeline_duration_seconds metric
     logging.info(f"Pipeline completed. Rows: {total_rows}, rejected: {rejected_rows}, duration: {duration_seconds:.1f}s")

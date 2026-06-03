@@ -200,7 +200,7 @@ data:
         "labels": { "severity": "critical", "pipeline": "us-crm", "cloud_provider": "azure" },
         "annotations": { "summary": "No data received for US CRM pipeline (Azure) in the last 60 minutes." }
       }
-    }
+    }  
 ---
 apiVersion: v1
 kind: ConfigMap
