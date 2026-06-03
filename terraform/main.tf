@@ -40,6 +40,13 @@ resource "azurerm_storage_container" "data" {
   container_access_type = "private"
 }
 
+resource "azurerm_storage_data_lake_gen2_path" "processed" {
+  path               = "processed"
+  filesystem_name    = azurerm_storage_container.data.name
+  storage_account_id = azurerm_storage_account.data.id
+  resource           = "directory"
+}
+
 resource "azurerm_role_assignment" "pipeline_storage" {
   scope                = azurerm_storage_account.data.id
   role_definition_name = "Storage Blob Data Contributor"

@@ -9,6 +9,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 from trino.dbapi import connect as trino_connect
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+
 from utils.cloud_config import cloud_get  # SSM → bootstrap_outputs → env fallback
 
 _CLOUD = os.getenv("CLOUD_PROVIDER", "azure")
@@ -48,41 +49,34 @@ def run():
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
     rejected_by_reason = {}    # rule_name → cumulative dropped rows
+
     query = "SELECT * FROM raw_us_crm"
 
     try:
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
-            # PII Anonymization
-            chunk['full_name'] = chunk['full_name'].apply(lambda v: hashlib.sha256(str(v).encode()).hexdigest())
+            # PII Transformation: Hash the full_name, mask email and phone
+            chunk['full_name'] = chunk['full_name'].apply(lambda x: hashlib.sha256(str(x).encode()).hexdigest())
             chunk['email_address'] = chunk['email_address'].str.replace(r'(?<=.).*?(?=@)', '***', regex=True)
             chunk['phone_number'] = chunk['phone_number'].astype(str).str.replace(r'\d(?=\d{4})', '*', regex=True)
 
-            # 3b. Business rules — translate ALL quality_standards from pipeline config.
-            rejected_by_reason = {}
-
-            # Contact format integrity
+            # Business Rules Implementation
+            # 1. contact_format_integrity
             _before = len(chunk)
             chunk = chunk[chunk['email_address'].str.contains('@')]
-            rejected_by_reason['contact_format_integrity'] = _before - len(chunk)
+            logging.warning(f"Excluded {_before - len(chunk)} rows: Invalid email format.")
 
-            # Mandatory contact info
+            # 2. mandatory_contact_info
             _before = len(chunk)
             chunk = chunk[chunk['email_address'].notnull() | chunk['phone_number'].notnull()]
-            rejected_by_reason['mandatory_contact_info'] = _before - len(chunk)
+            rejected_by_reason['mandatory_contact_info'] = rejected_by_reason.get('mandatory_contact_info', 0) + (_before - len(chunk))
 
-            # Entity uniqueness
+            # 3. entity_uniqueness
             _before = len(chunk)
             chunk['is_suspicious'] = chunk.duplicated(subset=['cust_id'], keep=False)
-            rejected_by_reason['entity_uniqueness'] = _before - len(chunk)
+            rejected_by_reason['entity_uniqueness'] = rejected_by_reason.get('entity_uniqueness', 0) + (_before - len(chunk))
 
-            # 3c. Type casting — cast float64 → Int64 for integer/count/quantity columns
-            int_cols = [c for c in chunk.select_dtypes(include='float64').columns
-                        if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
-            for col in int_cols:
-                chunk[col] = chunk[col].astype('Int64')
-
-            # 3d. Write — storage_options={} is MANDATORY, do not omit it
+            # Write to Parquet
             chunk.to_parquet(
                 f"{partition_uri}part_{i}.parquet",
                 engine="pyarrow",
