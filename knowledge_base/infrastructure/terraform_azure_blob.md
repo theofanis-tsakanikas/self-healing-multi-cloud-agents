@@ -34,6 +34,7 @@ resource (resource group, managed identity, federated credential) causes a 409
 |---|---|
 | `azurerm_storage_account` | Core ADLS Gen2 storage (hierarchical namespace enabled) |
 | `azurerm_storage_container` | Data container within the storage account |
+| `azurerm_storage_data_lake_gen2_path` | The `processed/` directory — MUST exist before Trino `CREATE TABLE` (HNS real dirs). See §2.2.1 |
 | `azurerm_role_assignment` | RBAC: Storage Blob Data Contributor — binds the bootstrap managed identity to THIS data account |
 
 **Never** generate `azurerm_resource_group`, `azurerm_user_assigned_identity`, or
@@ -147,6 +148,21 @@ resource "azurerm_storage_container" "data" {
   name                  = var.container_name
   storage_account_name  = azurerm_storage_account.data.name
   container_access_type = "private"
+}
+```
+
+### 2.2.1 Pre-created `processed/` directory (ADLS Gen2 / HNS only)
+**MANDATORY on Azure.** With `is_hns_enabled = true`, ADLS Gen2 has REAL directories. Trino's
+Hive connector `CREATE TABLE ... external_location = 'abfss://.../processed/'` fails with
+`External location must be a directory` unless that directory already EXISTS — and `init-trino`
+runs BEFORE the pipeline writes any data. (S3/GCS use virtual prefixes and need no such resource.)
+Terraform — not the deploy workflow — owns this data-plane path, and it runs before the deploy:
+```hcl
+resource "azurerm_storage_data_lake_gen2_path" "processed" {
+  path               = "processed"   # last path segment of LOGICAL_DESTINATION.uri
+  filesystem_name    = azurerm_storage_container.data.name
+  storage_account_id = azurerm_storage_account.data.id
+  resource           = "directory"
 }
 ```
 
