@@ -91,7 +91,12 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: ACR Login              # 🔴 MANDATORY — `docker push` is unauthorized without it
-        run: az acr login --name <acr_name>          # e.g. mcselfhealagentacr
+        # Registry name = the FIRST label of <acr_login_server> — the SAME registry the
+        # `docker build/push` steps below use. It is the CONTAINER REGISTRY, NOT the storage
+        # account (e.g. acr_login_server `mcselfhealagentacr.azurecr.io` → `mcselfhealagentacr`;
+        # NEVER the storage account `uscrminsightsstorage`). Deriving it from <acr_login_server>
+        # keeps it identical to the image registry and avoids confusing the two identifiers.
+        run: az acr login --name "$(echo '<acr_login_server>' | cut -d'.' -f1)"
 
       - name: Build Azure Storage Connection String + inject Trino ABFS key
         run: |
