@@ -96,7 +96,13 @@ jobs:
         # account (e.g. acr_login_server `mcselfhealagentacr.azurecr.io` → `mcselfhealagentacr`;
         # NEVER the storage account `uscrminsightsstorage`). Deriving it from <acr_login_server>
         # keeps it identical to the image registry and avoids confusing the two identifiers.
-        run: az acr login --name "$(echo '<acr_login_server>' | cut -d'.' -f1)"
+        # Retry up to 3× — `az acr login` intermittently hits a transient AAD-endpoint
+        # 'Connection reset by peer' on GitHub runners; a single failure must not abort deploy.
+        run: |
+          REG="$(echo '<acr_login_server>' | cut -d'.' -f1)"
+          for i in 1 2 3; do
+            az acr login --name "$REG" && break || { echo "ACR login attempt $i failed (transient), retrying in 10s..."; sleep 10; }
+          done
 
       - name: Build Azure Storage Connection String + inject Trino ABFS key
         run: |
