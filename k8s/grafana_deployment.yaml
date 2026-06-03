@@ -54,8 +54,6 @@ metadata:
   labels:
     project_id: pipe-crm-us-to-azure
     component: grafana
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
 spec:
   selector:
     app: grafana

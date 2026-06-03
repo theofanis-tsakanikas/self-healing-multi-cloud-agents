@@ -27,7 +27,6 @@ def run():
     bucket = parsed.netloc
     prefix = parsed.path.lstrip('/')
 
-    # Check if the partition already exists
     if _CLOUD == "azure":
         from azure.storage.blob import BlobServiceClient
         client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))
@@ -45,22 +44,21 @@ def run():
     db   = cloud_get("azure", "db_name", db_type="postgres")
     connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
 
-    # ── 3. EXTRACTION + TRANSFORMATION + WRITE ────────────────────────────────
+    # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
     rejected_by_reason = {}    # rule_name → cumulative dropped rows
-
     query = "SELECT * FROM raw_us_crm"
 
     try:
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
-            # PII Transformation: Hash the full_name, mask email and phone
-            chunk['full_name'] = chunk['full_name'].apply(lambda x: hashlib.sha256(str(x).encode()).hexdigest())
+            # PII TRANSFORMATION: Hash name, mask email and phone
+            chunk['full_name'] = chunk['full_name'].apply(lambda v: hashlib.sha256(str(v).encode()).hexdigest())
             chunk['email_address'] = chunk['email_address'].str.replace(r'(?<=.).*?(?=@)', '***', regex=True)
             chunk['phone_number'] = chunk['phone_number'].astype(str).str.replace(r'\d(?=\d{4})', '*', regex=True)
 
-            # Business Rules Implementation
+            # BUSINESS RULES
             # 1. contact_format_integrity
             _before = len(chunk)
             chunk = chunk[chunk['email_address'].str.contains('@')]
@@ -82,7 +80,7 @@ def run():
             for col in int_cols:
                 chunk[col] = chunk[col].astype('Int64')
 
-            # Write to Parquet
+            # 3d. Write — storage_options={} is MANDATORY, do not omit it
             chunk.to_parquet(
                 f"{partition_uri}part_{i}.parquet",
                 engine="pyarrow",

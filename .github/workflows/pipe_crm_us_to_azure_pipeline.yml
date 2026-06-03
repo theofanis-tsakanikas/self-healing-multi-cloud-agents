@@ -17,7 +17,7 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: ACR Login              # 🔴 MANDATORY — `docker push` is unauthorized without it
-        run: az acr login --name mcselfhealagentacr
+        run: az acr login --name uscrminsightsstorage
 
       - name: Build Azure Storage Connection String + inject Trino ABFS key
         run: |
@@ -39,18 +39,7 @@ jobs:
         run: |
           sed -i 's|image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:.*|image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}|' k8s/job.yaml
 
-      - name: Create DB Credentials Secret      # HOST/PORT/USER/NAME = vars.* (NOT secrets.*); password = secret
-        run: |
-          kubectl create secret generic pipe-crm-us-to-azure-db-credentials -n analytics \
-            --from-literal=CRM_DB_HOST=${{ vars.CRM_DB_HOST }} \
-            --from-literal=CRM_DB_PORT=${{ vars.CRM_DB_PORT }} \
-            --from-literal=CRM_DB_USER=${{ vars.CRM_DB_USER }} \
-            --from-literal=CRM_DB_NAME=${{ vars.CRM_DB_NAME }} \
-            --from-literal=CRM_DB_PASSWORD=${{ secrets.AZURE_DB_PASSWORD }} \
-            --from-literal=AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING" \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Deploy Shared Services to Kubernetes
+      - name: Deploy Shared Services to Kubernetes   # 🔴 MUST run BEFORE the secret — 00_namespaces.yaml creates the `analytics` namespace
         run: |
           kubectl apply -f k8s/00_namespaces.yaml
           kubectl apply -f k8s/configmaps.yaml
@@ -61,6 +50,17 @@ jobs:
           kubectl rollout restart deployment/grafana -n monitoring
           kubectl rollout status deployment/trino -n analytics --timeout=120s
           kubectl rollout status deployment/grafana -n monitoring --timeout=120s
+
+      - name: Create DB Credentials Secret      # HOST/PORT/USER/NAME = vars.* (NOT secrets.*); password = secret. MUST come AFTER the namespace exists (above) or `kubectl` fails with `namespaces "analytics" not found`.
+        run: |
+          kubectl create secret generic pipe-crm-us-to-azure-db-credentials -n analytics \
+            --from-literal=CRM_DB_HOST=${{ vars.CRM_DB_HOST }} \
+            --from-literal=CRM_DB_PORT=${{ vars.CRM_DB_PORT }} \
+            --from-literal=CRM_DB_USER=${{ vars.CRM_DB_USER }} \
+            --from-literal=CRM_DB_NAME=${{ vars.CRM_DB_NAME }} \
+            --from-literal=CRM_DB_PASSWORD=${{ secrets.AZURE_DB_PASSWORD }} \
+            --from-literal=AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy Pipeline Job to Kubernetes
         run: |
