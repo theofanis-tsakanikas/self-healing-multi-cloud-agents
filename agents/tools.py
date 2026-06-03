@@ -789,8 +789,15 @@ def validate_generated_code(filename: str) -> str:
                         "Pushgateway Deployment, Pushgateway Service. "
                         "Without Pushgateway the pipeline cannot push metrics."
                     )
-                # Grafana LoadBalancer annotation required on AWS — without it EXTERNAL-IP is permanently pending.
-                if fname == "grafana_deployment.yaml" and "aws-load-balancer-scheme" not in raw:
+                # Grafana LoadBalancer annotation is required ONLY on AWS — without it the AWS
+                # ELB defaults to internal and EXTERNAL-IP stays <pending>. On Azure (AKS) and
+                # GCP (GKE) a type:LoadBalancer Service gets a public IP WITHOUT any annotation,
+                # and the AWS annotation is silently ignored there. Requiring it unconditionally
+                # made the Azure/GCP grafana unfixable (the standard correctly omits it), so the
+                # agent looped/flailed. Gate the check on the active cloud.
+                _grafana_cloud = os.getenv("CLOUD_PROVIDER", "aws").lower()
+                if (fname == "grafana_deployment.yaml" and _grafana_cloud == "aws"
+                        and "aws-load-balancer-scheme" not in raw):
                     errors.append(
                         "K8S grafana_deployment.yaml [project policy]: missing aws-load-balancer-scheme annotation — "
                         "add 'service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing' to the Service "
