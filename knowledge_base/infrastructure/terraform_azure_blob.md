@@ -64,18 +64,16 @@ terraform {
     resource_group_name  = "multi-cloud-agent-rg"
     storage_account_name = "multicloudagenttfstate"
     container_name       = "tfstate"
-    key                  = "azure/us-crm-insights/terraform.tfstate"   # ← CLOUD_SETUP.state_key VERBATIM — never derived from pipeline_id
+    key                  = "azure/us-crm-insights/terraform.tfstate"   # = CLOUD_SETUP.state_key
   }
 }
 
-# Auth comes from the ARM_* environment variables the CI already exports
-# (ARM_CLIENT_ID, ARM_CLIENT_SECRET, ARM_SUBSCRIPTION_ID, ARM_TENANT_ID) — for BOTH
-# the backend and the provider. Never hardcode a subscription_id or read a separate
-# AZURE_SUBSCRIPTION_ID variable (it is not exported to the agent run step).
 provider "azurerm" {
   features {}
 }
 ```
+
+**`providers.tf` MUST contain BOTH blocks — the `terraform {}` block AND the `provider "azurerm" { features {} }` block.** The provider block is NOT optional: omitting it (or its `features {}`) makes `terraform apply` fail with `Invalid provider configuration` / `Insufficient features blocks: At least 1 "features" blocks are required`. Never generate only the `terraform {}` block and stop. (Auth itself comes from the ARM_* env vars the CI exports — `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_SUBSCRIPTION_ID`, `ARM_TENANT_ID` — for both the backend and the provider; never hardcode `subscription_id`.)
 
 **Backend RG note:** `resource_group_name` MUST be `multi-cloud-agent-rg` — that is where
 bootstrap creates the `multicloudagenttfstate` state storage account. Any other RG name
