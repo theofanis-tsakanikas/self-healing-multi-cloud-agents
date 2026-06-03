@@ -21,8 +21,8 @@ When generating `setup_trino.sql`, ensure the following:
   | Cloud | Catalog name | Correct protocol | Example |
   |---|---|---|---|
   | AWS (Hive + Glue) | `hive` | `s3://` | `s3://eu-sales-insights-data/processed/` |
-  | Azure (Hive + ABFS) | `azure_catalog` | `abfss://` | `abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/` |
-  | GCP (Hive + GCS) | `gcp_catalog` | `gs://` | `gs://global-marketing-insights-data/processed/` |
+  | Azure (Hive + ABFS) | `hive` | `abfss://` | `abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/` |
+  | GCP (Hive + GCS) | `hive` | `gs://` | `gs://global-marketing-insights-data/processed/` |
 
   Trino's Hive connector supports `s3://` natively via the AWS S3 file system. With a GCS connector configured it supports `gs://`. With an Azure connector it supports `abfss://`. **Do NOT use `s3a://` (Hadoop/Spark protocol) for any cloud.** Do NOT replace `gs://` or `abfss://` with `s3://` — that would point to a non-existent AWS bucket.
 - **Data Types**:
@@ -65,7 +65,7 @@ When generating `setup_trino.sql`, ensure the following:
     );
 
     -- Azure
-    CREATE TABLE azure_catalog.crm_us.pipe_crm_us_to_azure (
+    CREATE TABLE hive.crm_us.pipe_crm_us_to_azure (
         cust_id     INTEGER,
         full_name   VARCHAR,
         run_date    DATE
@@ -76,7 +76,7 @@ When generating `setup_trino.sql`, ensure the following:
     );
 
     -- GCP
-    CREATE TABLE gcp_catalog.marketing_global.pipe_mkt_global_to_gcp (
+    CREATE TABLE hive.marketing_global.pipe_mkt_global_to_gcp (
         campaign_id VARCHAR,
         ad_spend    DECIMAL(18,2),
         run_date    DATE
@@ -90,7 +90,7 @@ When generating `setup_trino.sql`, ensure the following:
 - **Trino Partition Sync (all clouds)**: After the pipeline writes all chunks, call `sync_partition_metadata` so the new `run_date` partition is immediately queryable without manual `MSCK REPAIR`. The CALL syntax is identical for all catalogs — only the catalog name changes:
     ```sql
     CALL hive.system.sync_partition_metadata('sales_eu', 'pipe_sales_eu_to_s3', 'ADD')          -- AWS
-    CALL azure_catalog.system.sync_partition_metadata('crm_us', 'pipe_crm_us_to_azure', 'ADD')  -- Azure
-    CALL gcp_catalog.system.sync_partition_metadata('marketing_global', 'pipe_mkt_global_to_gcp', 'ADD')  -- GCP
+    CALL hive.system.sync_partition_metadata('crm_us', 'pipe_crm_us_to_azure', 'ADD')  -- Azure
+    CALL hive.system.sync_partition_metadata('marketing_global', 'pipe_mkt_global_to_gcp', 'ADD')  -- GCP
     ```
     Use the catalog/schema/table values from `CATALOG_AND_MONITORING.trino_metadata` in the pipeline context.

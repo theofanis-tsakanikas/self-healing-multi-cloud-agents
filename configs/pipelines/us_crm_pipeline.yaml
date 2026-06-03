@@ -17,7 +17,7 @@ shared_services:
   trino:
     host: "trino.analytics.svc.cluster.local"
     port: 8080
-    catalog: "azure_catalog"
+    catalog: "hive"   # always "hive" — the hive-catalog-config ConfigMap key is hive.properties → Trino catalog name is "hive" (same as AWS/GCP)
     schema: "crm_us"
     table_name: "pipe_crm_us_to_azure"
   grafana:
