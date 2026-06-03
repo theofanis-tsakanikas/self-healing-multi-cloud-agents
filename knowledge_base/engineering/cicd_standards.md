@@ -109,6 +109,13 @@ jobs:
           KEY=$(az storage account keys list -g <resource_group> -n <storage_account_name> --query '[0].value' -o tsv)
           echo "AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=<storage_account_name>;AccountKey=$KEY;EndpointSuffix=core.windows.net" >> "$GITHUB_ENV"
           sed -i "s|__ABFS_KEY__|$KEY|g" k8s/configmaps.yaml
+          # 🔴 AZURE ONLY: ADLS Gen2 (HNS) has REAL directories, so Trino's `CREATE TABLE`
+          # with `external_location = 'abfss://.../processed/'` fails with "External location
+          # must be a directory" unless that directory already EXISTS (S3/GCS use virtual
+          # dirs and don't need this). init-trino runs BEFORE the pipeline writes any data,
+          # so pre-create the processed/ directory here. The path segment ('processed') is
+          # the last path component of LOGICAL_DESTINATION.uri; the filesystem is <container_name>.
+          az storage fs directory create -n processed -f <container_name> --account-name <storage_account_name> --account-key "$KEY" --only-show-errors 2>/dev/null || true
 
       - name: Build and Push Docker Image
         run: |
