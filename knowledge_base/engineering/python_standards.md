@@ -140,7 +140,10 @@ chunk['<name_col>'] = chunk['<name_col>'].apply(
     lambda v: hashlib.sha256(str(v).encode()).hexdigest())
 # Mask an email column → keeps first char + domain (b***@example.org):
 chunk['<email_col>'] = chunk['<email_col>'].str.replace(r'(?<=.).*?(?=@)', '***', regex=True)
+# Mask a phone column → keeps only the last 4 digits (***-***-6789):
+chunk['<phone_col>'] = chunk['<phone_col>'].astype(str).str.replace(r'\d(?=\d{4})', '*', regex=True)
 ```
+**Copy the mask patterns above VERBATIM — never improvise your own.** For phone numbers use the exact `r'\d(?=\d{4})'` pattern shown (a simple look-ahead that stars every digit followed by 4+ more). Do NOT invent a `\b`-based look-behind like `r'(?<=\b)\b(\b\d{3})...'` — it reliably mangles into an unterminated string or invalid syntax and breaks the whole file.
 **Every `.str.replace()` that takes a regex pattern MUST pass `regex=True`.** In pandas 2.x the default is `regex=False`, so the pattern is treated as a literal string — the mask matches nothing and **silently no-ops**, leaving the PII column fully exposed with no error. This applies to any masked column you add (phone, SSN, …), not just email. Validate the pattern is a real regex, not a `\b`-mangled literal.
 Omit this block entirely when `pii_sensitive` is absent or false.
 
