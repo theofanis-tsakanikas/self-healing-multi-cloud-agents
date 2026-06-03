@@ -227,13 +227,22 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     # which triggers the Supervisor's keyword scan and causes false Medic routing.
     current_phase_tools = [full_tools_map[name] for name in allowed_tool_names]
 
-    should_force_tool = not is_fix_mode and (
-        # Discovery phase: standards still missing
-        ("query_vector_store" in allowed_tool_names and not has_all_standards)
-        # Schema phase: schema not yet read
-        or ("read_data_schema" in allowed_tool_names and not schema_discovered)
-        # Implementation phase: artifacts still missing
-        or ("write_project_file" in allowed_tool_names and bool(missing_artifacts))
+    should_force_tool = (
+        not is_fix_mode and (
+            # Discovery phase: standards still missing
+            ("query_vector_store" in allowed_tool_names and not has_all_standards)
+            # Schema phase: schema not yet read
+            or ("read_data_schema" in allowed_tool_names and not schema_discovered)
+            # Implementation phase: artifacts still missing
+            or ("write_project_file" in allowed_tool_names and bool(missing_artifacts))
+        )
+    ) or (
+        # FIX MODE: the architect MUST act on the fix, never reply with plain text. Without
+        # forcing, the LLM returns a text "explanation", makes NO patch, the loop breaks on
+        # no-tool-call (below), and medic→architect→medic never converges — exactly the
+        # "architect is called but makes no tool call" stall. Force whenever a fix tool is
+        # available so the patch (or fix-mode query/schema read) is always attempted.
+        is_fix_mode and bool(allowed_tool_names)
     )
 
     if should_force_tool:
@@ -436,7 +445,19 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                     elif tool_name == "patch_project_file":
                         filename = tool_args.get("filename", "")
                         filename_base = Path(filename).stem.lower()
-                        is_patch_target = filename_base in healing_context.lower()
+                        # The patch target is valid if it is named in the diagnosis OR it is
+                        # a file the architect itself generated this run. Custom-validator
+                        # failures (e.g. STORAGE: storage_options) are auto-validated in
+                        # Python and never reach the medic's _validation_results, so the
+                        # filename is usually ABSENT from healing_context — without this
+                        # written_files fallback the architect rejects its OWN patch and the
+                        # fix loops forever. _is_architect_allowed_file (below) still bounds
+                        # it to architect-owned artifacts.
+                        _wf_names = {Path(w).name.lower() for w in written_files}
+                        is_patch_target = (
+                            filename_base in healing_context.lower()
+                            or Path(filename).name.lower() in _wf_names
+                        )
                         if not _is_architect_allowed_file(filename):
                             result = f"Policy Error: Architect is not permitted to modify '{filename}'."
                             any_tool_error = True
