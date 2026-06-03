@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import hashlib
 import logging
@@ -82,6 +83,30 @@ def _owner_of_file(path: str) -> str:
             or "dashboards/" in p or p.endswith("requirements.txt")):
         return "architect"
     return "infra"
+
+
+_AUTOVAL_FAIL_RE = re.compile(r"AUTO-VALIDATION FAILED — fix these errors and rewrite '([^']+)'")
+
+
+def _latest_autovalidation_failure(messages: list) -> str:
+    """Return the file most recently flagged FAILED by the architect's auto-validation.
+
+    The architect runs validate_generated_code in Python (NOT as an LLM tool call) and
+    appends "AUTO-VALIDATION FAILED — fix these errors and rewrite '<file>'" to the
+    write_project_file ToolMessage. So these failures never appear in
+    _extract_validation_summary (which only sees validate_generated_code tool calls).
+    Scanning the messages for that marker is the reliable way to recover the failed
+    filename for STORAGE/business-rule errors that carry no path of their own. Iterating
+    in order and overwriting yields the MOST RECENT failure. Returns "" if none.
+    """
+    latest = ""
+    for msg in messages:
+        content = getattr(msg, "content", "") or ""
+        if not isinstance(content, str):
+            content = str(content)
+        for m in _AUTOVAL_FAIL_RE.finditer(content):
+            latest = m.group(1).strip()
+    return latest
 
 
 def medic_node(state: AgentState):
@@ -322,8 +347,15 @@ def medic_node(state: AgentState):
     # FAILED-file list instead of trusting the LLM. (Skipped for CI-log failures,
     # which produce no validate_generated_code results — those keep the LLM's target.)
     deterministic_fix_target = ""  # written to state so the Supervisor routes by ownership
-    if fix_requested and _validation_results:
+    if fix_requested:
         _failed_files = [f for f, (st, _) in _validation_results.items() if st == "FAILED"]
+        if not _failed_files:
+            # Architect auto-validation failures never reach _validation_results (validate
+            # runs in Python, not as an LLM tool call). Recover the SINGLE most-recently
+            # failed file from the messages so the architect patches EXACTLY that file —
+            # not every artifact it generated. (Prevents over-patching a correct SQL/dashboard.)
+            _latest_failed = _latest_autovalidation_failure(state["messages"])
+            _failed_files = [_latest_failed] if _latest_failed else []
         if _failed_files:
             _owners = {_owner_of_file(f) for f in _failed_files}
             reset_architect = "architect" in _owners

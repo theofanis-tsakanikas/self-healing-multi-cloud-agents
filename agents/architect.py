@@ -445,19 +445,14 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                     elif tool_name == "patch_project_file":
                         filename = tool_args.get("filename", "")
                         filename_base = Path(filename).stem.lower()
-                        # The patch target is valid if it is named in the diagnosis OR it is
-                        # a file the architect itself generated this run. Custom-validator
-                        # failures (e.g. STORAGE: storage_options) are auto-validated in
-                        # Python and never reach the medic's _validation_results, so the
-                        # filename is usually ABSENT from healing_context — without this
-                        # written_files fallback the architect rejects its OWN patch and the
-                        # fix loops forever. _is_architect_allowed_file (below) still bounds
-                        # it to architect-owned artifacts.
-                        _wf_names = {Path(w).name.lower() for w in written_files}
-                        is_patch_target = (
-                            filename_base in healing_context.lower()
-                            or Path(filename).name.lower() in _wf_names
-                        )
+                        # STRICT targeting: ONLY the file the medic named in healing_context
+                        # may be patched. The medic now reliably injects the failed filename
+                        # ("Target file(s) to fix: ...") — recovered from the auto-validation
+                        # message — even for custom-validator errors (STORAGE etc.) that carry
+                        # no path. So this allows the real fix target while BLOCKING the
+                        # architect from over-patching OTHER, already-correct artifacts it
+                        # generated (e.g. patching a valid setup_trino.sql during a .py fix).
+                        is_patch_target = filename_base in healing_context.lower()
                         if not _is_architect_allowed_file(filename):
                             result = f"Policy Error: Architect is not permitted to modify '{filename}'."
                             any_tool_error = True
