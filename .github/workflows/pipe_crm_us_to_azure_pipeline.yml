@@ -17,7 +17,7 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: ACR Login              # 🔴 MANDATORY — `docker push` is unauthorized without it
-        run: az acr login --name uscrminsightsstorage
+        run: az acr login --name "$(echo 'mcselfhealagentacr.azurecr.io' | cut -d'.' -f1)"
 
       - name: Build Azure Storage Connection String + inject Trino ABFS key
         run: |
