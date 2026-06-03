@@ -367,8 +367,12 @@ metadata:
   labels:
     project_id: <project_id>
     component: grafana
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+  # 🔴 The annotations block below is AWS-ONLY. Emit it ONLY when cloud_provider == "aws".
+  # For cloud_provider "azure" (AKS) or "gcp" (GKE): OMIT the entire annotations block —
+  # a type:LoadBalancer Service already gets a public IP, and the AWS annotation is silently
+  # ignored on AKS/GKE. Do NOT copy it onto Azure/GCP.
+  annotations:                                                            # ← AWS ONLY — delete for azure/gcp
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing  # ← AWS ONLY — delete for azure/gcp
 spec:
   selector:
     app: grafana
@@ -378,7 +382,21 @@ spec:
   type: LoadBalancer
 ```
 
-> **Why the annotation is required:** Without `aws-load-balancer-scheme: internet-facing`, the AWS Load Balancer Controller defaults to an *internal* load balancer and looks for subnets tagged `kubernetes.io/role/internal-elb`. Default VPC subnets are public and carry `kubernetes.io/role/elb` instead, causing `FailedBuildModel` and a permanently `<pending>` EXTERNAL-IP. The annotation forces an internet-facing NLB that resolves against the correct subnet tag.
+For **Azure (AKS)** and **GCP (GKE)** the Service is identical but carries **NO `annotations:` block** at all:
+```yaml
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    project_id: <project_id>
+    component: grafana
+  # no annotations — type: LoadBalancer gets a public IP by default on AKS/GKE
+spec:
+  type: LoadBalancer
+  # ... ports/selector identical ...
+```
+
+> **Why (AWS only):** Without `aws-load-balancer-scheme: internet-facing`, the AWS Load Balancer Controller defaults to an *internal* load balancer and looks for subnets tagged `kubernetes.io/role/internal-elb`. Default VPC subnets are public and carry `kubernetes.io/role/elb` instead, causing `FailedBuildModel` and a permanently `<pending>` EXTERNAL-IP. The annotation forces an internet-facing NLB. **This rationale is AWS-specific — AKS/GKE provision a public LB without any annotation, so adding it there is wrong.**
 
 ---
 
