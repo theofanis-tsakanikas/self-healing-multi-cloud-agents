@@ -21,6 +21,7 @@ chunk.to_parquet(f"{partition_uri}part_{i}.parquet", storage_options={})
 - Import: `from utils.cloud_config import cloud_get` — place after standard library imports, before cloud SDK block.
 - Connection strings MUST use double-quoted outer f-strings to avoid `SyntaxError: f-string: unmatched '('`.
 - Every `cloud_get()` call and the `connection_string` assignment MUST be inside a cloud-specific guard (`if _CLOUD == "aws":` / `elif _CLOUD == "gcp":` / `elif _CLOUD == "azure":`). An unguarded `cloud_get("aws", ...)` hardcodes AWS credentials into a supposedly cloud-agnostic script — it will fail silently when `CLOUD_PROVIDER=gcp` or `CLOUD_PROVIDER=azure` because the wrong credential keys are resolved.
+- **A generated pipeline targets exactly ONE cloud — emit ONLY that cloud's branch.** The skeleton above shows all three clouds for reference, but a real script (e.g. `us_crm` → Azure) needs a SINGLE `if _CLOUD == "<that_cloud>":` block. The validator requires a guard only for the cloud whose `cloud_get()` actually appears, so a lone `if _CLOUD == "azure":` is correct and complete. **Do NOT add `elif` branches for clouds this pipeline does not use, and NEVER fill a branch with a placeholder comment** (`# Add AWS credentials logic here`): a comment-only `if`/`elif` body is a `SyntaxError` AND violates the no-placeholder rule. In fix mode this is fatal — `patch_project_file`'s syntax safety-net rejects the broken patch, the file is left unchanged, and the self-heal loop can never converge (it re-issues the same rejected patch until it escalates). When wrapping an unguarded block, add ONLY the single `if _CLOUD == "<cloud>":` guard around the existing lines.
 ```python
 # ❌ WRONG — unguarded, breaks on GCP/Azure:
 host = cloud_get("aws", "db_host", db_type="postgres")
@@ -36,6 +37,20 @@ elif _CLOUD == "gcp":
 elif _CLOUD == "azure":
     host = cloud_get("azure", "db_host", db_type="postgres")
     connection_string = f"postgresql+psycopg2://..."   # us_crm source = Azure Postgres
+
+# ✅ ALSO CORRECT — single-cloud pipeline (us_crm) needs ONLY its own branch:
+if _CLOUD == "azure":
+    host = cloud_get("azure", "db_host", db_type="postgres")
+    connection_string = f"postgresql+psycopg2://..."
+
+# ❌ FATAL — empty elif stubs for unused clouds are a SyntaxError; in fix mode the
+# patch is rejected by the syntax safety-net and the self-heal loop never converges:
+if _CLOUD == "azure":
+    host = cloud_get("azure", "db_host", db_type="postgres")
+elif _CLOUD == "aws":
+    # Add AWS credentials logic here     ← comment-only body → SyntaxError
+elif _CLOUD == "gcp":
+    # Add GCP credentials logic here
 ```
 
 ### Storage
