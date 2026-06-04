@@ -2,8 +2,8 @@ import os
 import time
 import datetime
 import logging
-import hashlib
 from urllib.parse import urlparse
+import hashlib
 
 import pandas as pd
 from sqlalchemy import create_engine
@@ -12,12 +12,18 @@ from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
 from utils.cloud_config import cloud_get  # SSM → bootstrap_outputs → env fallback
 
-_CLOUD = os.getenv("CLOUD_PROVIDER", "azure")
+_CLOUD = os.getenv("CLOUD_PROVIDER", "aws")
+if _CLOUD == "aws":
+    import boto3
+elif _CLOUD == "gcp":
+    from google.cloud import storage as gcs
+elif _CLOUD == "azure":
+    from azure.storage.blob import BlobServiceClient
 
 logging.basicConfig(level=logging.INFO)
 
 def run():
-    logging.info("Pipeline starting: US CRM to Azure")
+    logging.info("Pipeline starting: pipe_crm_us_to_azure")  # ← MUST be the very first line
 
     # ── 1. IDEMPOTENCY CHECK ──────────────────────────────────────────────────
     run_date = datetime.date.today().isoformat()
@@ -27,55 +33,94 @@ def run():
     bucket = parsed.netloc
     prefix = parsed.path.lstrip('/')
 
-    # Check if the partition already exists
-    if _CLOUD == "azure":
-        from azure.storage.blob import BlobServiceClient
+    if _CLOUD == "aws":
+        s3 = boto3.client('s3')
+        response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        if response.get('KeyCount', 0) > 0:
+            logging.info(f"Partition run_date={run_date} already populated. Skipping.")
+            return
+    elif _CLOUD == "gcp":
+        client = gcs.Client()
+        blobs = list(client.list_blobs(bucket, prefix=prefix, max_results=1))
+        if blobs:
+            logging.info("Destination already populated. Skipping.")
+            return
+    elif _CLOUD == "azure":
+        container_name = bucket.split('@')[0]
         client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))
-        container = client.get_container_client(bucket)
+        container = client.get_container_client(container_name)
         blobs = list(container.list_blobs(name_starts_with=prefix))
         if blobs:
-            logging.info(f"Partition run_date={run_date} already populated. Skipping.")
+            logging.info("Destination already populated. Skipping.")
             return
 
     # ── 2. CREDENTIALS via cloud_get() ───────────────────────────────────────
-    host = cloud_get("azure", "db_host", db_type="postgres")
-    port = cloud_get("azure", "db_port", db_type="postgres") or "5432"
-    user = cloud_get("azure", "db_user", db_type="postgres")
-    pw   = cloud_get("azure", "db_password", db_type="postgres")
-    db   = cloud_get("azure", "db_name", db_type="postgres")
-    connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
+    if _CLOUD == "aws":
+        host = cloud_get("aws", "db_host",     db_type="postgres")
+        port = cloud_get("aws", "db_port",     db_type="postgres") or "5432"
+        user = cloud_get("aws", "db_user",     db_type="postgres")
+        pw   = cloud_get("aws", "db_password", db_type="postgres")
+        db   = cloud_get("aws", "db_name",     db_type="postgres")
+        connection_string = (
+            f"postgresql+psycopg2://{user}:{pw}"
+            f"@{host}:{port}/{db}"
+        )
+    elif _CLOUD == "gcp":
+        host = cloud_get("gcp", "db_host",     db_type="mysql")
+        port = cloud_get("gcp", "db_port",     db_type="mysql") or "3306"
+        user = cloud_get("gcp", "db_user",     db_type="mysql")
+        pw   = cloud_get("gcp", "db_password", db_type="mysql")
+        db   = cloud_get("gcp", "db_name",     db_type="mysql")
+        connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
+    elif _CLOUD == "azure":
+        host = cloud_get("azure", "db_host",     db_type="postgres")
+        port = cloud_get("azure", "db_port",     db_type="postgres") or "5432"
+        user = cloud_get("azure", "db_user",     db_type="postgres")
+        pw   = cloud_get("azure", "db_password", db_type="postgres")
+        db   = cloud_get("azure", "db_name",     db_type="postgres")
+        connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
 
     # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
-    rejected_by_reason = {}    # rule_name → cumulative dropped rows
-    query = "SELECT * FROM raw_us_crm"
+    rejected_by_reason = {}    # rule_name → cumulative dropped rows (one entry per row-removing rule)
+    query = "SELECT * FROM raw_us_crm"  # authoritative table name
 
     try:
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
-            # PII Transformation: Hash the full_name, mask email and phone
-            chunk['full_name'] = chunk['full_name'].apply(lambda x: hashlib.sha256(str(x).encode()).hexdigest())
+
+            # 3a. PII Anonymization
+            chunk['full_name'] = chunk['full_name'].apply(
+                lambda v: hashlib.sha256(str(v).encode()).hexdigest())
             chunk['email_address'] = chunk['email_address'].str.replace(r'(?<=.).*?(?=@)', '***', regex=True)
             chunk['phone_number'] = chunk['phone_number'].astype(str).str.replace(r'\d(?=\d{4})', '*', regex=True)
 
-            # Business Rules Implementation
-            # 1. contact_format_integrity
+            # 3b. Business rules
             _before = len(chunk)
-            chunk = chunk[chunk['email_address'].str.contains('@')]
+            # contact_format_integrity: Exclude invalid emails
+            _mask = ~chunk['email_address'].str.contains('@')
+            logging.warning(f"Excluded {_mask.sum()} rows: Invalid email format.")
+            chunk = chunk[~_mask]
             rejected_by_reason['contact_format_integrity'] = rejected_by_reason.get('contact_format_integrity', 0) + (_before - len(chunk))
 
-            # 2. mandatory_contact_info
             _before = len(chunk)
-            chunk = chunk[chunk['email_address'].notnull() | chunk['phone_number'].notnull()]
+            # mandatory_contact_info: At least one contact channel must be non-NULL
+            chunk = chunk.dropna(subset=['email_address', 'phone_number'], how='all')
             rejected_by_reason['mandatory_contact_info'] = rejected_by_reason.get('mandatory_contact_info', 0) + (_before - len(chunk))
 
-            # 3. entity_uniqueness
             _before = len(chunk)
+            # entity_uniqueness: Flag duplicates
             chunk['is_suspicious'] = chunk.duplicated(subset=['cust_id'], keep=False)
             rejected_by_reason['entity_uniqueness'] = rejected_by_reason.get('entity_uniqueness', 0) + (_before - len(chunk))
 
-            # Write to Parquet
+            # 3c. Type casting
+            int_cols = [c for c in chunk.select_dtypes(include='float64').columns
+                        if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
+            for col in int_cols:
+                chunk[col] = chunk[col].astype('Int64')
+
+            # 3d. Write
             chunk.to_parquet(
                 f"{partition_uri}part_{i}.parquet",
                 engine="pyarrow",
@@ -90,17 +135,16 @@ def run():
         logging.error(f"Pipeline failed: {e}")
         raise
 
-    # Scalar total DERIVED from the per-reason dict
     rejected_rows = sum(rejected_by_reason.values())
     duration_seconds = time.time() - start_time   # for pipeline_duration_seconds metric
     logging.info(f"Pipeline completed. Rows: {total_rows}, rejected: {rejected_rows}, duration: {duration_seconds:.1f}s")
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
-    schema, table = "crm_us", "pipe_crm_us_to_azure"
+    catalog, schema, table = "hive", "crm_us", "pipe_crm_us_to_azure"  # from CATALOG_AND_MONITORING.trino_metadata
     conn = trino_connect(host=trino_host, port=8080, user="pipeline")
     cursor = conn.cursor()
-    cursor.execute(f"CALL hive.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
+    cursor.execute(f"CALL {catalog}.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
     cursor.fetchall()
     logging.info(f"Trino partition run_date={run_date} registered.")
 
@@ -109,7 +153,6 @@ def run():
     project_id     = os.getenv("PROJECT_ID", "unknown")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")
 
-    # Emit ALL FIVE metrics
     registry = CollectorRegistry()
     Gauge('pipeline_rows_processed_total', 'Total rows written to storage after business rules',
           ['project_id', 'cloud_provider'], registry=registry) \
@@ -124,7 +167,6 @@ def run():
           ['project_id', 'cloud_provider'], registry=registry) \
         .labels(project_id=project_id, cloud_provider=cloud_provider).set(duration_seconds)
 
-    # Per-rule breakdown
     rejected_by_reason_gauge = Gauge(
         'pipeline_rows_rejected_by_reason', 'Rows rejected per business rule, labelled by rule name',
         ['project_id', 'cloud_provider', 'reason'], registry=registry)

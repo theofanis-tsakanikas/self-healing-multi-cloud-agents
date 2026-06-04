@@ -97,6 +97,3 @@ jobs:
           echo "=== pipeline logs ==="
           kubectl logs -l component=pipeline-job -n analytics -c pipeline --tail=100 2>/dev/null || echo "(pipeline logs unavailable)"
           exit 1
-
-      - name: Heartbeat
-        run: echo "Deployment Complete"

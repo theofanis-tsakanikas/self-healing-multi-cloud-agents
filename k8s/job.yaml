@@ -4,14 +4,14 @@ metadata:
   name: pipe-crm-us-to-azure-job
   namespace: analytics
   labels:
-    project_id: pipe_crm_us_to_azure
+    project_id: pipe-crm-us-to-azure
     component: pipeline-job
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        project_id: pipe_crm_us_to_azure
+        project_id: pipe-crm-us-to-azure
         component: pipeline-job
     spec:
       serviceAccountName: us-crm-insights-sa
@@ -35,7 +35,7 @@ spec:
         image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}
         env:
         - name: PROJECT_ID
-          value: "pipe_crm_us_to_azure"
+          value: "pipe-crm-us-to-azure"
         - name: CLOUD_PROVIDER
           value: "azure"
         - name: DESTINATION_URI
