@@ -67,6 +67,11 @@ def create_chaos_data(target, n_rows=100):
                 "platform_name": np.random.choice(platforms),
                 "ad_spend": np.random.choice([fake.pyfloat(left_digits=3, right_digits=2, positive=True), "not_a_number", None], p=[0.8, 0.1, 0.1]),
                 "clicks": np.random.randint(0, 1000),
+                # impressions: normally >> clicks; the small-value chaos makes clicks > impressions
+                # so the engagement_logic_check FLAG_AS_SUSPICIOUS rule has rows to flag.
+                "impressions": np.random.choice([np.random.randint(1000, 50000), np.random.randint(0, 50), None], p=[0.8, 0.1, 0.1]),
+                # event_timestamp: the future-dated chaos trips the temporal_validity rule.
+                "event_timestamp": np.random.choice([fake.date_time_this_year(), fake.future_datetime(end_date="+2y"), None], p=[0.8, 0.1, 0.1]),
             })
         return pd.DataFrame(data_list)
     
