@@ -225,18 +225,24 @@ jobs:
           terraform apply -auto-approve
 
           # ── Grant the pipeline user access to its database (idempotent) ──────────
-          # Cloud SQL MySQL does NOT auto-grant DB privileges to API-created users, so
-          # pipeline_user authenticates but hits 1044 "Access denied to database". terraform
-          # google_sql_user can't grant, so do it here over the public IP via root.
-          # (db_name/db_user are the bootstrap defaults: marketing_raw / pipeline_user.)
+          # Cloud SQL MySQL does NOT auto-grant DB privileges to API-created users, so the
+          # pipeline user authenticates but hits 1044 "Access denied to database". terraform
+          # google_sql_user can't grant (and the mysql provider has a known-after-apply
+          # chicken-egg with the instance IP), so this is a provisioning step: grant over the
+          # public IP via root. Target/host come from terraform outputs (single source of
+          # truth); root uses an EPHEMERAL password (not the app password) for hygiene.
           gcloud auth activate-service-account --key-file=/tmp/gcp-sa.json --project="$TF_VAR_project_id"
-          DB_IP=$(gcloud sql instances describe multi-cloud-agent-mysql --project="$TF_VAR_project_id" --format="value(ipAddresses[0].ipAddress)")
-          gcloud sql users set-password root --host='%' --instance=multi-cloud-agent-mysql \
-            --password="$TF_VAR_db_password" --project="$TF_VAR_project_id" --quiet
+          DB_INSTANCE=$(terraform output -raw db_instance_name)
+          DB_IP=$(terraform output -raw db_host)
+          DB_NAME=$(terraform output -raw db_name)
+          DB_USER=$(terraform output -raw db_user)
+          ROOT_PW=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9')
+          gcloud sql users set-password root --host='%' --instance="$DB_INSTANCE" \
+            --password="$ROOT_PW" --project="$TF_VAR_project_id" --quiet
           sudo apt-get update -qq && sudo apt-get install -y -qq default-mysql-client
-          mysql -h "$DB_IP" -u root -p"$TF_VAR_db_password" \
-            -e "GRANT ALL PRIVILEGES ON marketing_raw.* TO 'pipeline_user'@'%'; FLUSH PRIVILEGES;"
-          echo "✅ Granted pipeline_user ALL on marketing_raw."
+          mysql -h "$DB_IP" -u root -p"$ROOT_PW" \
+            -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'%'; FLUSH PRIVILEGES;"
+          echo "✅ Granted ${DB_USER} ALL on ${DB_NAME}."
 
           rm /tmp/gcp-sa.json
           echo "✅ GCP bootstrap complete. GKE + Artifact Registry + Cloud SQL provisioned."
