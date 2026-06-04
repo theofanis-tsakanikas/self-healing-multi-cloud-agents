@@ -6,5 +6,5 @@ env_var_port: "MYSQL_DB_PORT"
 env_var_user: "MYSQL_DB_USER"
 env_var_password: "MYSQL_DB_PASSWORD"
 env_var_name: "MYSQL_DB_NAME"
-default_table: "raw_marketing"
+default_table: "raw_global_marketing"   # MUST match the table seed_chaos writes (raw_<target>)
 description: "Global marketing campaigns database."
