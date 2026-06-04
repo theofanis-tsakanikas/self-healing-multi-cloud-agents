@@ -103,11 +103,13 @@ def build_engine(db_type, target):
             password = cloud_get("aws", "rds_password")
             db_name = cloud_get("aws", "rds_db_name")
         elif target == "global_marketing":
-            host    = cloud_get("gcp", "db_host")
-            port    = cloud_get("gcp", "db_port") or default_port
-            user    = cloud_get("gcp", "db_user")
-            password = cloud_get("gcp", "db_password")
-            db_name = cloud_get("gcp", "db_name")
+            # GCP source is Cloud SQL for MySQL → db_type="mysql" so cloud_get resolves the
+            # MYSQL_DB_* env fallbacks (not the POSTGRES_DB_* default), matching the prefix above.
+            host    = cloud_get("gcp", "db_host",     db_type="mysql")
+            port    = cloud_get("gcp", "db_port",     db_type="mysql") or default_port
+            user    = cloud_get("gcp", "db_user",     db_type="mysql")
+            password = cloud_get("gcp", "db_password", db_type="mysql")
+            db_name = cloud_get("gcp", "db_name",     db_type="mysql")
         else:  # us_crm (Azure) — env var fallback until Azure Secret Manager is set up
             prefix = cfg["prefix"]
             host    = os.getenv(f"{prefix}_DB_HOST")
@@ -125,7 +127,7 @@ def build_engine(db_type, target):
         return create_engine(url)
 
     if db_type == "mysql":
-        url = f"mysql+pymysql://{cloud_get('gcp','db_user')}:{cloud_get('gcp','db_password')}@{cloud_get('gcp','db_host')}:{cloud_get('gcp','db_port') or '3306'}/{cloud_get('gcp','db_name')}"
+        url = f"mysql+pymysql://{cloud_get('gcp','db_user',db_type='mysql')}:{cloud_get('gcp','db_password',db_type='mysql')}@{cloud_get('gcp','db_host',db_type='mysql')}:{cloud_get('gcp','db_port',db_type='mysql') or '3306'}/{cloud_get('gcp','db_name',db_type='mysql')}"
         return create_engine(url)
 
     raise ValueError(f"Unsupported DB type: {db_type}")
