@@ -226,8 +226,14 @@ def run():
             logging.info("Destination already populated. Skipping.")
             return
     elif _CLOUD == "azure":
+        # The abfss netloc is "<container>@<account>.dfs.core.windows.net" — the real
+        # container name is ONLY the segment BEFORE '@'. Passing the full netloc to
+        # get_container_client() sends '@' and '.' in the container name → Azure rejects
+        # it with HTTP 400 InvalidResourceName ("resource name contains invalid characters").
+        # (s3:// and gs:// put the bucket directly in netloc, so this split is azure-only.)
+        container_name = bucket.split('@')[0]
         client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))
-        container = client.get_container_client(bucket)
+        container = client.get_container_client(container_name)
         blobs = list(container.list_blobs(name_starts_with=prefix))
         if blobs:
             logging.info("Destination already populated. Skipping.")
