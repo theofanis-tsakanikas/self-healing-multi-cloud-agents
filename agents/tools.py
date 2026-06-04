@@ -309,6 +309,40 @@ def validate_generated_code(filename: str) -> str:
                 errors.append(f"GRAFANA: missing mandatory fields: {missing}")
             if not isinstance(data.get("panels"), list) or len(data.get("panels", [])) == 0:
                 errors.append("GRAFANA: 'panels' must be a non-empty list.")
+
+            # Panels MUST filter by the $project_id template variable — never a hardcoded
+            # project_id="<literal>". A literal session id (e.g. the script's "unknown"
+            # default) never matches the runtime metric label (project_id is set from the
+            # PROJECT_ID env var at runtime), so every panel silently shows "No data". The
+            # dashboard works only when each expr uses project_id=~"$project_id" AND the
+            # templating block declares that variable. See grafana_standards.md.
+            _exprs = [t.get("expr", "")
+                      for p in (data.get("panels") or []) if isinstance(p, dict)
+                      for t in (p.get("targets") or []) if isinstance(t, dict)]
+            _hardcoded_pid = None
+            for _e in _exprs:
+                for _op, _val in re.findall(r'project_id\s*(=~?)\s*"([^"]*)"', _e):
+                    if not (_op == "=~" and _val == "$project_id"):
+                        _hardcoded_pid = _val
+                        break
+                if _hardcoded_pid is not None:
+                    break
+            if _hardcoded_pid is not None:
+                errors.append(
+                    f'GRAFANA: panel expr hardcodes project_id="{_hardcoded_pid}" — use '
+                    'project_id=~"$project_id" instead. A literal project_id never matches the '
+                    'runtime metric label, so every panel shows "No data". Reference the '
+                    '$project_id template variable in EVERY panel expr.'
+                )
+            _templ_names = {v.get("name") for v in (data.get("templating", {}) or {}).get("list", [])
+                            if isinstance(v, dict)}
+            if _exprs and "project_id" not in _templ_names:
+                errors.append(
+                    'GRAFANA: missing the $project_id template variable in the "templating" block. '
+                    'Declare a query variable named "project_id" '
+                    '(query: label_values(pipeline_rows_processed_total, project_id)) and filter '
+                    'every panel by project_id=~"$project_id" so the dashboard matches any run.'
+                )
         except _json.JSONDecodeError as e:
             errors.append(f"JSON SYNTAX ERROR: {e}")
 
