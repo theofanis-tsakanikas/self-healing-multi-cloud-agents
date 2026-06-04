@@ -23,12 +23,9 @@ resource "google_sql_database_instance" "main" {
     ip_configuration {
       ipv4_enabled = true
 
-      dynamic "authorized_networks" {
-        for_each = length(var.db_password) > 0 ? [1] : []
-        content {
-          name  = "allow-all-dev"
-          value = "0.0.0.0/0"
-        }
+      authorized_networks {
+        name  = "allow-all-dev"
+        value = "0.0.0.0/0"
       }
     }
 
