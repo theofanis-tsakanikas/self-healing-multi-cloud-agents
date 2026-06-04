@@ -26,7 +26,7 @@
 ## 🛠️ 2. INFRA SCOPE (DEPLOYMENT & AUTOMATION)
 
 **TERRAFORM:** Deploy GCP storage (GCS) and identity resources (Service Account + Workload Identity).
-**K8S:** Deploy namespaces, Trino, Grafana, Prometheus + Pipeline CronJob (hourly schedule from `gcp_setup.schedule`).
+**K8S:** Deploy namespaces, Trino, Grafana, Prometheus + the Pipeline Job. The Job MUST use `serviceAccountName: global-mkt-insights-sa` (GKE Workload Identity).
 **CI/CD:** `/.github/workflows/pipe_mkt_global_to_gcp_pipeline.yml`
 
 ---

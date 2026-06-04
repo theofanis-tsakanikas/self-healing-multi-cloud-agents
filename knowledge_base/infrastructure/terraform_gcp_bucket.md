@@ -16,15 +16,27 @@ This standard defines the mandatory configuration for GCP Cloud Storage (GCS) re
 ---
 
 ## MANDATORY RESOURCE CHECKLIST
-Every `main.tf` generated for a GCP GCS pipeline MUST contain ALL of the following resources:
 
+The bootstrap (`bootstrap/gcp/`) already owns the pipeline's **service account**, its
+**Workload Identity binding** (GKE KSA → GSA) and a **project-level** `storage.objectAdmin`
+grant. The pipeline Terraform must therefore **reference** the service account via a `data`
+source and **create only** the pipeline-specific data-plane resources. Re-creating the
+service account (same `account_id`) or its Workload Identity binding fails on `apply` with a
+`409 "already exists"` conflict.
+
+### Reference via `data` (NEVER re-create — bootstrap owns these)
+| Data source | Purpose |
+|---|---|
+| `data "google_service_account"` | The bootstrap-created pipeline SA (`account_id` = `var.service_account_id`). Its GKE Workload Identity binding is ALSO bootstrap-owned — never create a `google_service_account_iam_member` for it. |
+
+### Create (pipeline-owned data plane)
 | Resource | Purpose |
 |---|---|
 | `google_storage_bucket` | Core GCS data bucket |
-| `google_service_account` | Service account for the pipeline workload |
-| `google_storage_bucket_iam_member` | IAM: roles/storage.objectAdmin on the bucket |
-| `google_service_account_iam_member` | Workload identity binding (GKE SA → GSA) |
-| `google_project_iam_member` | Optional: additional project-level permissions |
+| `google_storage_bucket_iam_member` | IAM: `roles/storage.objectAdmin` binding the bootstrap SA to THIS bucket |
+
+**Never** generate `google_service_account` or `google_service_account_iam_member` (Workload
+Identity binding) in the pipeline Terraform — they are bootstrap-owned (`bootstrap/gcp/iam.tf`).
 
 `outputs.tf` MUST export exactly: `bucket_name`, `bucket_url`, `service_account_email`, `service_account_id`, `project_id`.
 
@@ -114,36 +126,37 @@ Example: `gs://global-marketing-insights-data/processed/`
 
 ## 3. SERVICE ACCOUNT & WORKLOAD IDENTITY FEDERATION
 
-Never use static service account JSON keys in Kubernetes pods. Use **GKE Workload Identity** (binds GKE K8s service account to a GCP service account).
+Never use static service account JSON keys in Kubernetes pods. The pipeline uses **GKE
+Workload Identity** (GKE K8s service account → GCP service account), but the service account
+AND its Workload Identity binding are **bootstrap-owned** — the pipeline only references the
+SA and binds it to the new bucket.
 
-### 3.1 GCP Service Account
+### 3.1 GCP Service Account (bootstrap-owned — reference only)
+The SA is created by `bootstrap/gcp/iam.tf`. Reference it via a `data` source — **never**
+create a `google_service_account` here (a duplicate `account_id` fails with `409 already exists`):
 ```hcl
-resource "google_service_account" "pipeline" {
-  account_id   = var.service_account_id
-  display_name = "${var.project_id} Pipeline Service Account"
-  project      = var.project_id
+data "google_service_account" "pipeline" {
+  account_id = var.service_account_id
+  project    = var.project_id
 }
 ```
 
-### 3.2 Storage IAM Binding
+### 3.2 Storage IAM Binding (the ONE pipeline-owned IAM resource)
+Binds the bootstrap SA to THIS bucket:
 ```hcl
 resource "google_storage_bucket_iam_member" "pipeline" {
   bucket = google_storage_bucket.data.name
   role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.pipeline.email}"
+  member = "serviceAccount:${data.google_service_account.pipeline.email}"
 }
 ```
 
-### 3.3 Workload Identity Binding (GKE SA → GCP SA)
-```hcl
-resource "google_service_account_iam_member" "workload_identity" {
-  service_account_id = google_service_account.pipeline.name
-  role               = "roles/iam.workloadIdentityUser"
-  member = "serviceAccount:${var.project_id}.svc.id.goog[analytics/${var.k8s_service_account_name}]"
-}
-```
-
-The member format `PROJECT_ID.svc.id.goog[NAMESPACE/KSA_NAME]` is the GKE Workload Identity binding pattern. Never deviate from it.
+### 3.3 Workload Identity Binding (bootstrap-owned — do NOT create)
+The GKE-OIDC → GCP-SA binding (member
+`PROJECT_ID.svc.id.goog[analytics/<k8s_service_account_name>]`) is provisioned by
+`bootstrap/gcp/iam.tf`. The pipeline Terraform must **never** generate a
+`google_service_account_iam_member` for it — it already exists and a duplicate fails with a
+`409` conflict.
 
 ---
 
@@ -191,11 +204,11 @@ output "bucket_url" {
 }
 
 output "service_account_email" {
-  value = google_service_account.pipeline.email
+  value = data.google_service_account.pipeline.email
 }
 
 output "service_account_id" {
-  value = google_service_account.pipeline.id
+  value = data.google_service_account.pipeline.id
 }
 
 output "project_id" {
@@ -207,18 +220,13 @@ output "project_id" {
 
 ## 7. TRINO GCS CONNECTOR CONFIGURATION
 
-For Trino to read Parquet from GCS using the Hive connector, add this catalog ConfigMap to `configmaps.yaml`:
-
-```properties
-# gcs.properties
-connector.name=hive
-hive.metastore=file
-hive.metastore.catalog.dir=gs://<bucket_name>/metastore/
-hive.gcs.use-access-token=false
-hive.gcs.json-key-file-path=/etc/trino/gcs-key.json
-```
-
-If using Workload Identity (recommended), omit `json-key-file-path` and add `hive.gcs.use-access-token=false` with the GKE workload identity annotation on the Trino pod.
+The Trino Hive catalog ConfigMap (`hive-catalog-config`) is **NOT** part of this Terraform
+standard — it is owned by `k8s_deployment_rules.md` §8.4, which is the single source of truth.
+Two non-negotiable invariants from there: the ConfigMap data key is **always `hive.properties`**
+(catalog name = `hive`, never `gcs.properties`/catalog `gcs` — that would break every
+`hive.<schema>.<table>` reference the SQL/script use), and GCP uses a file metastore over GCS
+with Workload Identity (`hive.metastore=file`, `hive.metastore.catalog.dir=gs://<bucket>/metastore/`,
+`hive.gcs.use-access-token=false`, no JSON key). Generate it per §8.4, not from here.
 
 ---
 

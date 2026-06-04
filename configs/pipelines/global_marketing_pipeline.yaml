@@ -43,7 +43,6 @@ gcp_setup:
   gke_cluster_name: "multi-cloud-agent-gke"
   state_bucket: "multi-cloud-agent-tfstate"
   state_prefix: "gcp/global-marketing-insights/terraform.tfstate"
-  schedule: "0 * * * *"  # hourly CronJob
 
 # 7. ARTIFACT PATHS (where the Architect writes generated files)
 project_structure:
