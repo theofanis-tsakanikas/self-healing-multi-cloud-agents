@@ -8,6 +8,7 @@ from faker import Faker
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 from pathlib import Path
+from urllib.parse import quote_plus
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.cloud_config import cloud_get
@@ -118,7 +119,9 @@ def build_engine(db_type, target):
             password = os.getenv(f"{prefix}_DB_PASSWORD")
             db_name = os.getenv(f"{prefix}_DB_NAME")
 
-        url = f"{driver}://{user}:{password}@{host}:{port}/{db_name}"
+        # URL-encode user/password: a special char (@ : / # %) in the password otherwise
+        # breaks SQLAlchemy URL parsing and the wrong password is sent → "Access denied".
+        url = f"{driver}://{quote_plus(user or '')}:{quote_plus(password or '')}@{host}:{port}/{db_name}"
         return create_engine(url)
 
     # Fallback for explicit db_type (backward compat)
