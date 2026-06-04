@@ -94,6 +94,14 @@ def _resolve_artifacts(pipe_conf: dict, written_files: list[str]) -> list[str]:
     return missing
 
 
+def _keep_medic_fix_requested(medic_fix_requested: bool, github_done: bool) -> bool:
+    """Encode the medic_fix_requested handoff rule as one unit.
+    Scenario A (github_done=False): infra has not run yet — clear the flag so infra
+    starts from scratch (not fix mode). Scenario B (github_done=True): infra already
+    pushed — keep the flag so infra skips terraform and routes straight to push."""
+    return bool(medic_fix_requested and github_done)
+
+
 def architect_node(state: AgentState, config: RunnableConfig = None):
     """
     Architect node: Handles pipeline logic design using a Phase-Gate approach.
@@ -578,5 +586,6 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
         # Scenario B (github_done=True): infra already pushed — keep True so line 178 in
         # infra detects (fix_requested AND github_done) and routes to push_to_github only.
         # Infra clears medic_fix_requested after a successful push.
-        "medic_fix_requested": state.get("medic_fix_requested", False) and state.get("github_done", False),
+        "medic_fix_requested": _keep_medic_fix_requested(
+            state.get("medic_fix_requested", False), state.get("github_done", False)),
     }

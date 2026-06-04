@@ -50,9 +50,32 @@ vertexai = ["langchain-google-vertexai>=2.0.0"]
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",
+    "pytest-cov>=5.0.0",
     "ruff>=0.15.14",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+# Measure the deterministic orchestration logic we actually unit-test. The big
+# LLM-driven node bodies and external I/O are integration/eval-deferred.
+source = ["agents", "utils"]
+omit = [
+    "*/__init__.py",
+    "utils/nlp_parser.py",        # NL-input parsing (Streamlit path) — separate surface
+    "utils/dataset_analyzer.py",
+    "utils/cost_estimator.py",
+    "utils/architecture_advisor.py",
+    "utils/observability.py",
+    "utils/trino_client.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+# Regression FLOOR, not a quality target. The LLM-driven node bodies (architect_node,
+# infra_node, medic_node) are integration/eval-deferred, so total line coverage is
+# dominated by intentionally-untested code. This floor guards the deterministic logic
+# (validators, routing, cloud_get, state helpers) from silently losing coverage.
+fail_under = 22

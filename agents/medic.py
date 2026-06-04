@@ -31,6 +31,20 @@ logger = logging.getLogger("MEDIC")
 load_dotenv()
 
 _MAX_POLL_WAIT_SECONDS = 300  # 5-minute ceiling per backoff step
+_MAX_POLL_ATTEMPTS = 5        # stop after ~10 min cumulative instead of looping forever
+
+
+def _poll_backoff_seconds(attempt: int) -> int:
+    """Deterministic exponential back-off (no jitter) for CI-log polling:
+    attempt 0→30, 1→60, 2→120, 3→240, then capped at 300s. Extracted as a pure
+    function so the back-off sequence is unit-testable without actually sleeping."""
+    return min(30 * (2 ** attempt), _MAX_POLL_WAIT_SECONDS)
+
+
+def _should_stop_polling(attempt: int) -> bool:
+    """True once the poll budget is exhausted — surface to the user instead of
+    looping to the graph recursion limit."""
+    return attempt >= _MAX_POLL_ATTEMPTS
 
 
 def _extract_validation_summary(messages: list) -> dict[str, tuple[str, str]]:
@@ -107,6 +121,14 @@ def _latest_autovalidation_failure(messages: list) -> str:
         for m in _AUTOVAL_FAIL_RE.finditer(content):
             latest = m.group(1).strip()
     return latest
+
+
+def _accumulate_healing_context(existing: str, new_chunk: str) -> str:
+    """Append a new fix chunk to the running healing_context WITHOUT overwriting.
+    Multiple request_fix calls in one medic turn must ALL reach the target agent, so
+    chunks are joined with a separator (blank entries dropped), never replaced.
+    Extracted as a pure function so the accumulate-not-overwrite invariant is testable."""
+    return "\n\n---\n\n".join(filter(None, [existing, new_chunk]))
 
 
 def medic_node(state: AgentState):
@@ -328,7 +350,7 @@ def medic_node(state: AgentState):
                     new_chunk = "\n".join(filter(None, [diagnosis, instructions]))
                     # Accumulate — do not overwrite. Multiple request_fix calls in one
                     # turn must all reach the target agent, not just the last one.
-                    healing_context = "\n\n---\n\n".join(filter(None, [healing_context, new_chunk]))
+                    healing_context = _accumulate_healing_context(healing_context, new_chunk)
                 except (json.JSONDecodeError, AttributeError):
                     pass
 
@@ -463,7 +485,7 @@ def medic_node(state: AgentState):
     if logs_still_pending and not reset_infra and not reset_architect:
         attempt = state.get("ci_poll_attempt", 0)
 
-        if attempt >= 5:
+        if _should_stop_polling(attempt):
             # Exceeded ~10 minutes of cumulative waiting — stop polling, surface to user.
             logger.warning("CI run has been pending for over 10 minutes. Stopping poll, routing to supervisor.")
             new_messages_for_state.append(
@@ -477,7 +499,7 @@ def medic_node(state: AgentState):
             output_state["ci_poll_attempt"] = 0  # reset for next pipeline run
             output_state["next_step"] = "supervisor"
         else:
-            wait = min(30 * (2 ** attempt), _MAX_POLL_WAIT_SECONDS) + random.uniform(0, 5)
+            wait = _poll_backoff_seconds(attempt) + random.uniform(0, 5)
             logger.info(f"CI poll attempt {attempt+1}: logs pending. Waiting {wait:.1f}s before retry.")
             time.sleep(wait)
             output_state["ci_poll_attempt"] = attempt + 1

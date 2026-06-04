@@ -13,6 +13,13 @@ __pycache__/
 .venv/
 venv/
 
+# Test / coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+coverage.xml
+
 # Terraform
 **/.terraform/
 *.tfstate

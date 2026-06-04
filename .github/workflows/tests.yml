@@ -1,0 +1,43 @@
+name: Tests
+
+# Fast, hermetic unit tests for the agent/orchestration logic. No cloud, no
+# credentials, no infrastructure — every external dependency (LLM, AWS/SSM,
+# Pinecone, GitHub API, the clock) is mocked or injected. This guards the
+# deterministic logic (validators, routing, cloud_get, state helpers) on every
+# push/PR without ever provisioning anything.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'dashboards/**'
+      - 'data/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies (incl. dev group)
+        run: uv sync --group dev
+
+      - name: Lint test suite (ruff)
+        run: uv run ruff check tests/
+
+      - name: Run unit tests + coverage (no cloud, no credentials)
+        # fail_under is enforced via [tool.coverage.report] in pyproject.toml.
+        run: uv run pytest --cov --cov-report=term-missing

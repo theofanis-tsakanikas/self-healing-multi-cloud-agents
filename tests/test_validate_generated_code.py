@@ -1,0 +1,121 @@
+"""Unit tests for tools.validate_generated_code — the safety-net validator.
+
+A validator that never fails is useless, so every test proves a rule actually
+FIRES on a crafted BAD fixture, and (where it could false-positive) stays SILENT
+on a GOOD one. Fixtures are written to tmp_path — nothing leaks into the repo and
+no generated artifact is touched.
+"""
+from agents.tools import validate_generated_code
+
+
+def _validate(tmp_path, name, content):
+    f = tmp_path / name
+    f.write_text(content, encoding="utf-8")
+    return validate_generated_code.invoke({"filename": str(f)})
+
+
+# ── Python: credential policy ───────────────────────────────────────────────────
+class TestPythonCredentialPolicy:
+    def test_os_getenv_for_db_cred_is_policy_violation(self, tmp_path):
+        out = _validate(tmp_path, "p.py",
+                        'import os\nhost = os.getenv("POSTGRES_DB_HOST")\n')
+        assert "VALIDATION FAILED" in out
+        assert "POLICY VIOLATION" in out
+
+    def test_cloud_get_does_not_trigger_policy_violation(self, tmp_path):
+        out = _validate(tmp_path, "p.py",
+                        'from utils.cloud_config import cloud_get\n'
+                        'if _CLOUD == "aws":\n'
+                        '    host = cloud_get("aws", "db_host", db_type="postgres")\n')
+        assert "POLICY VIOLATION" not in out
+
+
+# ── Python: storage_options / destination_uri ───────────────────────────────────
+class TestPythonStorageChecks:
+    def test_double_brace_storage_options_flagged(self, tmp_path):
+        out = _validate(tmp_path, "p.py",
+                        'import pandas as pd\n'
+                        'df = pd.DataFrame()\n'
+                        'df.to_parquet("x", storage_options={{}})\n')
+        assert "STORAGE" in out and "double braces" in out
+
+    def test_single_brace_storage_options_not_flagged_for_double(self, tmp_path):
+        out = _validate(tmp_path, "p.py",
+                        'import pandas as pd\n'
+                        'df = pd.DataFrame()\n'
+                        'df.to_parquet("x", storage_options={})\n')
+        assert "double braces" not in out
+
+    def test_hardcoded_destination_uri_flagged(self, tmp_path):
+        out = _validate(tmp_path, "p.py",
+                        'destination_uri = "s3://my-bucket/processed/"\n')
+        assert "hardcoded" in out
+
+
+# ── Python: cloud guard + business rules ────────────────────────────────────────
+class TestPythonCloudGuardAndRules:
+    def test_unguarded_cloud_get_flagged(self, tmp_path):
+        out = _validate(tmp_path, "p.py",
+                        'from utils.cloud_config import cloud_get\n'
+                        'host = cloud_get("aws", "db_host", db_type="postgres")\n')
+        assert "CLOUD GUARD" in out
+
+    def test_is_suspicious_false_placeholder_flagged(self, tmp_path):
+        out = _validate(tmp_path, "p.py", "chunk['is_suspicious'] = False\n")
+        assert "BUSINESS RULES" in out
+
+
+# ── JSON: Grafana dashboard (incl. the $project_id template-var rule) ────────────
+_GOOD_DASHBOARD = """
+{
+  "uid": "x-observability",
+  "title": "X Observability",
+  "schemaVersion": 37,
+  "templating": {"list": [
+    {"name": "project_id", "type": "query",
+     "query": "label_values(pipeline_rows_processed_total, project_id)"}
+  ]},
+  "panels": [
+    {"id": 1, "title": "Record Count", "type": "stat",
+     "targets": [{"expr": "pipeline_rows_processed_total{project_id=~\\"$project_id\\"}"}]}
+  ]
+}
+"""
+
+
+class TestGrafanaDashboard:
+    def test_good_dashboard_is_clean(self, tmp_path):
+        out = _validate(tmp_path, "monitoring_specs.json", _GOOD_DASHBOARD)
+        assert out.startswith("CLEAN")
+
+    def test_hardcoded_project_id_flagged(self, tmp_path):
+        bad = """
+        {"uid": "x", "title": "x", "schemaVersion": 37,
+         "templating": {"list": []},
+         "panels": [{"targets": [{"expr": "pipeline_rows_processed_total{project_id=\\"unknown\\"}"}]}]}
+        """
+        out = _validate(tmp_path, "monitoring_specs.json", bad)
+        assert "hardcodes project_id" in out
+
+    def test_missing_project_id_template_var_flagged(self, tmp_path):
+        bad = """
+        {"uid": "x", "title": "x", "schemaVersion": 37,
+         "templating": {"list": []},
+         "panels": [{"targets": [{"expr": "pipeline_rows_processed_total{project_id=~\\"$project_id\\"}"}]}]}
+        """
+        out = _validate(tmp_path, "monitoring_specs.json", bad)
+        assert "missing the $project_id template variable" in out
+
+    def test_missing_mandatory_fields_flagged(self, tmp_path):
+        out = _validate(tmp_path, "monitoring_specs.json",
+                        '{"panels": [{"targets": [{"expr": "x"}]}]}')
+        assert "missing mandatory fields" in out
+
+    def test_empty_panels_flagged(self, tmp_path):
+        out = _validate(tmp_path, "monitoring_specs.json",
+                        '{"uid": "x", "title": "x", "schemaVersion": 37, "panels": []}')
+        assert "non-empty list" in out
+
+    def test_invalid_json_flagged(self, tmp_path):
+        out = _validate(tmp_path, "monitoring_specs.json", "{not valid json")
+        assert "JSON SYNTAX ERROR" in out

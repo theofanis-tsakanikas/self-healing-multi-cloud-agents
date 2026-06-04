@@ -18,7 +18,7 @@ class TestLoadPipelineBundle:
         assert len(result) == 4
 
     def test_pipeline_conf_pipeline_id(self):
-        assert self.pipe_conf["pipeline_id"] == "pipe_sales_eu_to_s3"
+        assert self.pipe_conf["pipeline_id"] == "pipe_eu_sales_to_s3"
 
     def test_pipeline_conf_cloud_provider(self):
         assert self.pipe_conf["cloud_provider"] == "aws"
