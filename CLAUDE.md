@@ -74,7 +74,8 @@ This is **not a monorepo**. All paths are relative to the repo root:
 ## Generated Artifacts — Critical Rules
 
 **Python pipeline scripts:**
-- `storage_options={}` is mandatory in every `to_parquet()` call.
+- `storage_options=dict()` is mandatory in every `to_parquet()` call (use `dict()`, not `{}`, so the model can't double-brace it into `{{}}`).
+- Trino partition registration uses the literal catalog `hive` (never a `catalog` variable — filling it with the literal leaves it unused → ruff F841).
 - `create_engine` AND the extraction loop in the **same** `try` block.
 - `destination_uri = os.getenv("DESTINATION_URI")` — never hardcode a URI string in the script.
 - **Single-cloud guard:** a generated script targets ONE cloud — emit only its `if _CLOUD == "<cloud>":` credentials branch. Never add `elif` stubs for other clouds with placeholder comment bodies (a comment-only `elif` is a `SyntaxError`; in fix mode `patch_project_file`'s safety-net rejects it and the self-heal loop never converges).

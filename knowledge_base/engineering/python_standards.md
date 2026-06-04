@@ -9,11 +9,11 @@ After writing any `.py` file, you MUST call `validate_generated_code` on it — 
 These violations cause immediate runtime failure. No exceptions.
 
 ### Code syntax — single braces only
-- The generated file is a plain Python script — it is NOT a template and is NOT passed through `.format()`. Use a SINGLE pair of braces everywhere: `f"{var}"` for an f-string placeholder and `{}` for an empty dict.
-- **Never double the braces.** Wrapping an empty dict in a second pair of braces builds a set that contains a dict → `TypeError: unhashable type: dict` at runtime. Wrapping an f-string placeholder in a second pair of braces cancels the substitution — it emits the literal placeholder text and trips ruff `F541`. The two mandatory call sites are the empty `storage_options` argument and the part-file f-string; each takes exactly one pair of braces:
+- The generated file is a plain Python script — it is NOT a template and is NOT passed through `.format()`. Use a SINGLE pair of braces for an f-string placeholder: `f"{var}"`. For the empty `storage_options` dict, use **`dict()`** — it has no braces, so it can never be accidentally double-braced.
+- **Never double the braces.** Wrapping an f-string placeholder in a second pair of braces cancels the substitution — it emits the literal placeholder text and trips ruff `F541`. (The empty `storage_options` uses `dict()` specifically to sidestep the equivalent `{{}}` trap, which would build a set containing a dict → `TypeError: unhashable type: dict` at runtime.) The remaining brace site is the part-file f-string; it takes exactly one pair:
 ```python
-# ✅ CORRECT — exactly one pair of braces at each site:
-chunk.to_parquet(f"{partition_uri}part_{i}.parquet", storage_options={})
+# ✅ CORRECT — dict() for the empty options, one pair of braces in the f-string:
+chunk.to_parquet(f"{partition_uri}part_{i}.parquet", storage_options=dict())
 ```
 
 ### Credentials
@@ -54,7 +54,7 @@ elif _CLOUD == "gcp":
 ```
 
 ### Storage
-- `storage_options={}` is MANDATORY in every `to_parquet()` call — omitting it causes `TypeError` on cloud storage writes (s3://, gs://, abfss://).
+- `storage_options=dict()` is MANDATORY in every `to_parquet()` call — omitting it causes `TypeError` on cloud storage writes (s3://, gs://, abfss://). Use `dict()`, not `{}`, to avoid the `{{}}` double-brace trap.
 - `run_date` MUST NOT be added as a DataFrame column — it is a Hive partition key derived from the path.
 - Partition path format is always `run_date=YYYY-MM-DD/` — any other format breaks Trino partition discovery.
 - `destination_uri` MUST come from `os.getenv("DESTINATION_URI")` — **never hardcode a URI string** (`"s3://..."`, `"gs://..."`, `"abfss://..."`). The K8s Job injects this at runtime; hardcoding it makes the script un-deployable to a different bucket without a code change.
@@ -343,13 +343,14 @@ def run():
             for col in int_cols:
                 chunk[col] = chunk[col].astype('Int64')
 
-            # 3d. Write — storage_options={} is MANDATORY, do not omit it
+            # 3d. Write — storage_options is MANDATORY, do not omit it. Use dict() (NOT {})
+            # so the empty-dict literal has no braces to accidentally double-brace into {{}}.
             chunk.to_parquet(
                 f"{partition_uri}part_{i}.parquet",
                 engine="pyarrow",
                 compression="snappy",
                 index=False,
-                storage_options={}
+                storage_options=dict()
             )
             logging.info(f"Chunk {i}: {len(chunk)} rows processed")
             total_rows += len(chunk)
@@ -367,10 +368,13 @@ def run():
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
-    catalog, schema, table = "<catalog>", "<schema>", "<table>"  # from CATALOG_AND_MONITORING.trino_metadata
+    schema, table = "<schema>", "<table>"  # from CATALOG_AND_MONITORING.trino_metadata
+    # The catalog is ALWAYS "hive" (the hive-catalog-config ConfigMap key is hive.properties
+    # on every cloud). Use the literal "hive" — do NOT assign a `catalog` variable: filling it
+    # with the literal and then writing CALL hive.system leaves it unused → ruff F841.
     conn = trino_connect(host=trino_host, port=8080, user="pipeline")
     cursor = conn.cursor()
-    cursor.execute(f"CALL {catalog}.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
+    cursor.execute(f"CALL hive.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
     cursor.fetchall()
     logging.info(f"Trino partition run_date={run_date} registered.")
 
