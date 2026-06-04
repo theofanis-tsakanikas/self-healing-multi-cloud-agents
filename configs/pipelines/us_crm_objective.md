@@ -19,7 +19,7 @@
 
 **CATALOG & OBSERVABILITY:**
 - Trino DDL: `sql/setup_trino.sql` — external table at `abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/` with `run_date` partitioning
-- Trino target: `azure_catalog.crm_us.pipe_crm_us_to_azure`
+- Trino target: `hive.crm_us.pipe_crm_us_to_azure`
 - Grafana: `dashboards/monitoring_specs.json` — the standard five panels + 60-minute Data Silence alert
 
 ---

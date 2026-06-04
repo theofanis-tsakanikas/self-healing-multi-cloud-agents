@@ -94,7 +94,7 @@ _CLOUD_DEFAULTS = {
         "state_container": "tfstate",
         "subscription_id_env": "AZURE_SUBSCRIPTION_ID",
         "default_region": "westeurope",
-        "trino_catalog": "azure_catalog",
+        "trino_catalog": "hive",
     },
     "gcp": {
         "gke_cluster_name": "multi-cloud-agent-gke",
@@ -103,7 +103,7 @@ _CLOUD_DEFAULTS = {
         "artifact_registry_repo": "multi-cloud-agent-repo",
         "project_id_env": "GCP_PROJECT_ID",
         "default_region": "europe-west3",
-        "trino_catalog": "gcp_catalog",
+        "trino_catalog": "hive",
     },
 }
 
