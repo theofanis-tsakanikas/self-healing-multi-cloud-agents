@@ -1,6 +1,6 @@
-CREATE SCHEMA IF NOT EXISTS azure_catalog.crm_us;
-DROP TABLE IF EXISTS azure_catalog.crm_us.pipe_crm_us_to_azure;
-CREATE TABLE azure_catalog.crm_us.pipe_crm_us_to_azure (
+CREATE SCHEMA IF NOT EXISTS hive.crm_us;
+DROP TABLE IF EXISTS hive.crm_us.pipe_crm_us_to_azure;
+CREATE TABLE hive.crm_us.pipe_crm_us_to_azure (
     cust_id     BIGINT,
     full_name   VARCHAR,
     email_address VARCHAR,

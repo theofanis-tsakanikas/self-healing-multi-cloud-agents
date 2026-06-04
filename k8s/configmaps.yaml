@@ -7,9 +7,9 @@ metadata:
     project_id: pipe-crm-us-to-azure
 data:
   setup_trino.sql: |
-    CREATE SCHEMA IF NOT EXISTS azure_catalog.crm_us;
-    DROP TABLE IF EXISTS azure_catalog.crm_us.pipe_crm_us_to_azure;
-    CREATE TABLE azure_catalog.crm_us.pipe_crm_us_to_azure (
+    CREATE SCHEMA IF NOT EXISTS hive.crm_us;
+    DROP TABLE IF EXISTS hive.crm_us.pipe_crm_us_to_azure;
+    CREATE TABLE hive.crm_us.pipe_crm_us_to_azure (
         cust_id     BIGINT,
         full_name   VARCHAR,
         email_address VARCHAR,
@@ -76,6 +76,7 @@ data:
             "query": "label_values(pipeline_rows_processed_total, cloud_provider)",
             "refresh": 2,
             "includeAll": true,
+            "multi": true,
             "label": "Cloud"
           },
           {

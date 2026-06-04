@@ -3,6 +3,7 @@ import time
 import datetime
 import logging
 import hashlib
+from urllib.parse import urlparse
 
 import pandas as pd
 from sqlalchemy import create_engine
@@ -22,13 +23,16 @@ def run():
     run_date = datetime.date.today().isoformat()
     destination_uri = os.getenv("DESTINATION_URI")  # injected by K8s Job env
     partition_uri = f"{destination_uri}run_date={run_date}/"
+    parsed = urlparse(partition_uri)
+    bucket = parsed.netloc
+    prefix = parsed.path.lstrip('/')
 
     # Check if the partition already exists
     if _CLOUD == "azure":
         from azure.storage.blob import BlobServiceClient
         client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))
-        container = client.get_container_client("us-crm-insights-data")
-        blobs = list(container.list_blobs(name_starts_with=f"processed/run_date={run_date}/"))
+        container = client.get_container_client(bucket)
+        blobs = list(container.list_blobs(name_starts_with=prefix))
         if blobs:
             logging.info(f"Partition run_date={run_date} already populated. Skipping.")
             return
@@ -41,23 +45,21 @@ def run():
     db   = cloud_get("azure", "db_name", db_type="postgres")
     connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
 
-    # ── 3. EXTRACTION + TRANSFORMATION + WRITE ────────────────────────────────
+    # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
     rejected_by_reason = {}    # rule_name → cumulative dropped rows
-
     query = "SELECT * FROM raw_us_crm"
 
     try:
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
-            # PII Anonymization
-            chunk['full_name'] = chunk['full_name'].apply(lambda v: hashlib.sha256(str(v).encode()).hexdigest())
+            # PII Transformation: Hash the full_name, mask email and phone
+            chunk['full_name'] = chunk['full_name'].apply(lambda x: hashlib.sha256(str(x).encode()).hexdigest())
             chunk['email_address'] = chunk['email_address'].str.replace(r'(?<=.).*?(?=@)', '***', regex=True)
             chunk['phone_number'] = chunk['phone_number'].astype(str).str.replace(r'\d(?=\d{4})', '*', regex=True)
-            chunk['phone_number'] = chunk['phone_number'].astype(str).str.replace(r'\d(?=\d{4})', '*', regex=True)
 
-            # Business Rules
+            # Business Rules Implementation
             # 1. contact_format_integrity
             _before = len(chunk)
             chunk = chunk[chunk['email_address'].str.contains('@')]
@@ -74,7 +76,13 @@ def run():
             rejected_by_reason['entity_uniqueness'] = rejected_by_reason.get('entity_uniqueness', 0) + (_before - len(chunk))
 
             # Write to Parquet
-            chunk.to_parquet(f"{partition_uri}part_{i}.parquet", engine="pyarrow", compression="snappy", index=False, storage_options={})
+            chunk.to_parquet(
+                f"{partition_uri}part_{i}.parquet",
+                engine="pyarrow",
+                compression="snappy",
+                index=False,
+                storage_options={}
+            )
             logging.info(f"Chunk {i}: {len(chunk)} rows processed")
             total_rows += len(chunk)
 
@@ -89,16 +97,16 @@ def run():
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
-    catalog, schema, table = "azure_catalog", "crm_us", "pipe_crm_us_to_azure"
+    schema, table = "crm_us", "pipe_crm_us_to_azure"
     conn = trino_connect(host=trino_host, port=8080, user="pipeline")
     cursor = conn.cursor()
-    cursor.execute(f"CALL {catalog}.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
+    cursor.execute(f"CALL hive.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
     cursor.fetchall()
     logging.info(f"Trino partition run_date={run_date} registered.")
 
     # ── 5. METRICS EMISSION ───────────────────────────────────────────────────
     pushgateway_url = os.getenv("PUSHGATEWAY_URL", "http://pushgateway.monitoring.svc.cluster.local:9091")
-    project_id = os.getenv("PROJECT_ID", "unknown")
+    project_id     = os.getenv("PROJECT_ID", "unknown")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")
 
     # Emit ALL FIVE metrics
