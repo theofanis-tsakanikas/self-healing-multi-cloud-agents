@@ -224,25 +224,12 @@ jobs:
           terraform init
           terraform apply -auto-approve
 
-          # ── Grant the pipeline user access to its database (idempotent) ──────────
-          # Cloud SQL MySQL does NOT auto-grant DB privileges to API-created users, so the
-          # pipeline user authenticates but hits 1044 "Access denied to database". terraform
-          # google_sql_user can't grant (and the mysql provider has a known-after-apply
-          # chicken-egg with the instance IP), so this is a provisioning step: grant over the
-          # public IP via root. Target/host come from terraform outputs (single source of
-          # truth); root uses an EPHEMERAL password (not the app password) for hygiene.
-          gcloud auth activate-service-account --key-file=/tmp/gcp-sa.json --project="$TF_VAR_project_id"
-          DB_INSTANCE=$(terraform output -raw db_instance_name)
-          DB_IP=$(terraform output -raw db_host)
-          DB_NAME=$(terraform output -raw db_name)
-          DB_USER=$(terraform output -raw db_user)
-          ROOT_PW=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9')
-          gcloud sql users set-password root --host='%' --instance="$DB_INSTANCE" \
-            --password="$ROOT_PW" --project="$TF_VAR_project_id" --quiet
-          sudo apt-get update -qq && sudo apt-get install -y -qq default-mysql-client
-          mysql -h "$DB_IP" -u root -p"$ROOT_PW" \
-            -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'%'; FLUSH PRIVILEGES;"
-          echo "✅ Granted ${DB_USER} ALL on ${DB_NAME}."
+          # NOTE: do NOT add a manual GRANT step here. Cloud SQL MySQL grants the
+          # API-created pipeline_user (google_sql_user) its default privileges automatically.
+          # Running `gcloud sql users set-password <user> --host=%` out-of-band CREATES a
+          # second, privilege-less <user>@% entry that shadows the real one on remote
+          # connections → 1044 "Access denied to database". Manage these users only via
+          # terraform; never set-password/create them with a different --host by hand.
 
           rm /tmp/gcp-sa.json
           echo "✅ GCP bootstrap complete. GKE + Artifact Registry + Cloud SQL provisioned."

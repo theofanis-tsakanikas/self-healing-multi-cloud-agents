@@ -32,11 +32,6 @@ output "db_host" {
   value       = google_sql_database_instance.main.public_ip_address
 }
 
-output "db_instance_name" {
-  description = "Cloud SQL instance name — used by the bootstrap grant step"
-  value       = google_sql_database_instance.main.name
-}
-
 output "db_port" {
   value = 3306
 }
