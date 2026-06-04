@@ -56,7 +56,7 @@ The Agent MUST select the logic block that matches the `target_cloud` identifier
 - **Kubeconfig:** `aws eks update-kubeconfig --region ${{ vars.AWS_DEFAULT_REGION }} --name {{eks_cluster_name}}` — same rule: `${{ vars.AWS_DEFAULT_REGION }}`, never a literal.
 
 ### 3.2 Module: GCP (target_cloud: gcp)
-- **Auth:** Use `google-github-actions/auth@v2` (via Workload Identity Federation or Service Account JSON secrets).
+- **Auth:** Use `google-github-actions/auth@v2` with `credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}` — the SA-key JSON content. This is the EXACT secret name (same one the infra-agent Terraform and bootstrap use); never invent a different name (e.g. `GCP_CREDENTIALS`) or the deploy fails to authenticate to Artifact Registry / GKE.
 - **Registry:** `google-github-actions/setup-gcloud@v2` to configure Docker for Artifact Registry/GCR.
 - **Kubeconfig:** `gcloud container clusters get-credentials {{gke_cluster_name}} --region {{region}} --project {{gcp_project_id}}`
 
