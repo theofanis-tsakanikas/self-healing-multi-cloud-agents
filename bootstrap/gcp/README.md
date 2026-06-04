@@ -39,9 +39,13 @@ once, in order, before the first bootstrap run.
    > bootstrap (`storage.tf`); pre-creating it causes a 409 conflict.
 
 4. **Create the Service Account + key** used by CI (`GCP_SA_KEY_JSON`):
-   Console → IAM & Admin → Service Accounts → Create → grant **Editor** + **Project IAM Admin**
-   (or the granular set: Kubernetes Engine Admin, Cloud SQL Admin, Artifact Registry Admin,
-   Storage Admin, Service Account Admin, Service Usage Admin) → Keys → Add key → JSON.
+   Console → IAM & Admin → Service Accounts → Create → grant **Owner** (simplest for a
+   bootstrap SA) → Keys → Add key → JSON.
+   > Plain **Editor is NOT enough** — it deliberately excludes the `*.setIamPolicy`
+   > permissions the bootstrap needs (Artifact Registry repo IAM, the GKE Workload Identity
+   > binding on the pipeline SA). If you prefer least-privilege over Owner, grant: Kubernetes
+   > Engine Admin, Cloud SQL Admin, **Artifact Registry Admin**, Storage Admin,
+   > **Service Account Admin**, Service Usage Admin, Project IAM Admin.
 
 ---
 

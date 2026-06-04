@@ -214,9 +214,10 @@ jobs:
           # db_password is a required (no-default) variable in bootstrap/gcp/variables.tf —
           # without it `terraform apply` blocks prompting for input and the bootstrap fails.
           TF_VAR_db_password: ${{ secrets.MYSQL_DB_PASSWORD }}
-          # Optional: enables GitHub-Actions Workload Identity Federation (else WIF pool is
-          # skipped and the deploy authenticates with the SA key JSON, which is the default path).
-          TF_VAR_pipeline_github_repo: ${{ github.repository }}
+          # NOTE: pipeline_github_repo is intentionally left at its empty default so the
+          # GitHub-Actions Workload Identity Federation pool is NOT created — the deploy
+          # authenticates with the SA key (GCP_SA_KEY_JSON), so the WIF pool is unused infra
+          # and creating it needs an extra elevated permission (workloadIdentityPoolAdmin).
         run: |
           echo '${{ secrets.GCP_SA_KEY_JSON }}' > /tmp/gcp-sa.json
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa.json
