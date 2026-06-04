@@ -1,0 +1,82 @@
+name: Power (Pause / Resume)
+
+# Daily cost control — pause/resume a cloud baseline between work sessions WITHOUT
+# destroying anything. Stops the DB + worker compute; keeps the cluster, registry,
+# storage, IAM and all state intact. Safe and reversible (no typed confirmation),
+# unlike destroy.yml. Pick the cloud + action each run.
+#
+#   pause   → end of day: stop DB + scale compute to 0
+#   resume  → next day:   start DB + scale compute back up
+#   status  → show current power state
+
+on:
+  workflow_dispatch:
+    inputs:
+      cloud:
+        description: 'Which cloud baseline to control'
+        required: true
+        type: choice
+        options:
+          - aws
+          - azure
+          - gcp
+        default: gcp
+      action:
+        description: 'pause (save cost) · resume (start) · status (show state)'
+        required: true
+        type: choice
+        options:
+          - status
+          - pause
+          - resume
+        default: status
+
+permissions:
+  contents: read
+
+jobs:
+  aws:
+    if: inputs.cloud == 'aws'
+    runs-on: ubuntu-latest
+    env:
+      AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_DEFAULT_REGION }}
+      - name: Power ${{ inputs.action }} (AWS)
+        run: bash bootstrap/aws/power.sh ${{ inputs.action }}
+
+  azure:
+    if: inputs.cloud == 'azure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Power ${{ inputs.action }} (Azure)
+        run: bash bootstrap/azure/power.sh ${{ inputs.action }}
+
+  gcp:
+    if: inputs.cloud == 'gcp'
+    runs-on: ubuntu-latest
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: GCP auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+      - name: Set up gcloud (+ GKE auth plugin for kubectl)
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gke-gcloud-auth-plugin
+      - name: Power ${{ inputs.action }} (GCP)
+        run: bash bootstrap/gcp/power.sh ${{ inputs.action }}

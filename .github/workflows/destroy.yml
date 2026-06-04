@@ -21,6 +21,7 @@ on:
         options:
           - aws
           - azure
+          - gcp
         default: aws
       confirm:
         description: 'Type exactly "destroy" to confirm — this is irreversible.'
@@ -189,3 +190,69 @@ jobs:
             echo "Resource group already gone ✅."
           fi
           echo "✅ Azure teardown complete."
+
+  # ════════════════════════════════════════════════════════════════════════════
+  #  GCP
+  # ════════════════════════════════════════════════════════════════════════════
+  destroy-gcp:
+    if: inputs.confirm == 'destroy' && inputs.cloud == 'gcp'
+    runs-on: ubuntu-latest
+    env:
+      GCP_PROJECT_ID:     ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_project_id:  ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_db_password: ${{ secrets.MYSQL_DB_PASSWORD }}
+      GKE_CLUSTER:        multi-cloud-agent-gke
+      GKE_REGION:         europe-west3
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+          terraform_wrapper: false
+
+      - name: GCP auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gke-gcloud-auth-plugin
+
+      # Phase 0: delete K8s LoadBalancer Services so their GCP LBs don't orphan.
+      - name: Delete K8s LoadBalancer Services
+        continue-on-error: true
+        run: |
+          if gcloud container clusters get-credentials "$GKE_CLUSTER" --region "$GKE_REGION" --project "$GCP_PROJECT_ID" 2>/dev/null; then
+            kubectl delete svc --all -n monitoring --ignore-not-found=true || true
+            kubectl delete svc --all -n analytics  --ignore-not-found=true || true
+            echo "Waiting 30s for the load balancers to deprovision..."
+            sleep 30
+          else
+            echo "GKE not reachable (already destroyed?) — skipping LB cleanup."
+          fi
+
+      # Phase 1: agent pipeline terraform (GCS data bucket + bucket IAM).
+      - name: Destroy agent pipeline infra (GCS + IAM)
+        working-directory: terraform
+        continue-on-error: true
+        run: |
+          terraform init -input=false || true
+          terraform destroy -auto-approve -input=false || true
+          echo "✅ Agent pipeline infra destroyed (or already absent)."
+
+      # Phase 2: bootstrap (GKE + Cloud SQL + Artifact Registry + SA + state bucket).
+      # NOTE: a data bucket guarded by prevent_destroy (or any non-empty bucket) will
+      # block terraform destroy — empty/remove it manually, or `terraform state rm` then
+      # delete via gcloud, if the teardown stops here. GKE + Cloud SQL (the cost) go first.
+      - name: Destroy bootstrap infra (GKE + Cloud SQL + AR)
+        working-directory: bootstrap/gcp
+        run: |
+          terraform init -input=false
+          terraform destroy -auto-approve -input=false
+          echo "✅ GCP bootstrap destroyed."

@@ -55,6 +55,30 @@ azure-resume: ## Start AKS + Postgres to resume work
 azure-status: ## Show Azure baseline power state (AKS + Postgres)
 	@bash bootstrap/azure/power.sh status
 
+.PHONY: aws-pause
+aws-pause: ## Stop RDS + EKS nodes to cut cost between sessions (keeps everything)
+	@bash bootstrap/aws/power.sh pause
+
+.PHONY: aws-resume
+aws-resume: ## Start RDS + EKS nodes to resume work
+	@bash bootstrap/aws/power.sh resume
+
+.PHONY: aws-status
+aws-status: ## Show AWS baseline power state (RDS + EKS node groups)
+	@bash bootstrap/aws/power.sh status
+
+.PHONY: gcp-pause
+gcp-pause: ## Stop Cloud SQL + scale GKE workloads to 0 to cut cost (keeps everything)
+	@bash bootstrap/gcp/power.sh pause
+
+.PHONY: gcp-resume
+gcp-resume: ## Start Cloud SQL + scale GKE workloads back up
+	@bash bootstrap/gcp/power.sh resume
+
+.PHONY: gcp-status
+gcp-status: ## Show GCP baseline power state (Cloud SQL + GKE workloads)
+	@bash bootstrap/gcp/power.sh status
+
 .PHONY: install
 install: ## Install all dependencies using uv
 	@echo "Installing dependencies..."
