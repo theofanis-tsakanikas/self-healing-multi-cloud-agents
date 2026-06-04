@@ -8,7 +8,7 @@ output "gke_cluster_endpoint" {
 }
 
 output "artifact_registry_url" {
-  description = "Docker registry URL — use with: gcloud auth configure-docker ${var.region}-docker.pkg.dev"
+  description = "Docker registry URL — use with: gcloud auth configure-docker <region>-docker.pkg.dev"
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/${var.artifact_registry_name}"
 }
 
