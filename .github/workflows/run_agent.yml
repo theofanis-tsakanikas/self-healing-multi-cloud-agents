@@ -169,6 +169,11 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "~1.9"
+          # Disable the output-capturing wrapper: with it ON, a failed `terraform apply`
+          # surfaces only as a generic "Terraform exited with code 1" and the real
+          # `│ Error:` block is swallowed. No step consumes the wrapper's stdout/exitcode
+          # outputs, so turning it off is pure error visibility (no behavioural change).
+          terraform_wrapper: false
 
       - name: Bootstrap — AWS
         if: inputs.bootstrap_cloud == 'aws' || inputs.bootstrap_cloud == 'all'
