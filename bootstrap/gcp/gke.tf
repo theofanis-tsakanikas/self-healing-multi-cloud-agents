@@ -20,6 +20,25 @@ resource "google_project_service" "sqladmin" {
   disable_on_destroy = false
 }
 
+# GKE (nodes, networking, the compute default service account data source below) needs
+# the Compute Engine API. It is NOT reliably auto-enabled by container.googleapis.com.
+resource "google_project_service" "compute" {
+  service            = "compute.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Workload Identity (GKE pods → GSA, and the GitHub-Actions OIDC federation) needs the
+# Security Token Service + IAM Service Account Credentials APIs.
+resource "google_project_service" "sts" {
+  service            = "sts.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "iamcredentials" {
+  service            = "iamcredentials.googleapis.com"
+  disable_on_destroy = false
+}
+
 # ── GKE Autopilot Cluster ─────────────────────────────────────────────────────
 # Autopilot manages node lifecycle automatically; no node pool configuration needed.
 # Workload Identity is enabled by default on Autopilot clusters.
@@ -43,7 +62,7 @@ resource "google_container_cluster" "main" {
     channel = "REGULAR"
   }
 
-  depends_on = [google_project_service.container]
+  depends_on = [google_project_service.container, google_project_service.compute]
 
   lifecycle {
     ignore_changes = [min_master_version]
@@ -55,7 +74,7 @@ resource "google_container_cluster" "main" {
 # Grant it the Artifact Registry Reader role.
 
 data "google_compute_default_service_account" "default" {
-  depends_on = [google_project_service.container]
+  depends_on = [google_project_service.compute]
 }
 
 resource "google_artifact_registry_repository_iam_member" "gke_pull" {
