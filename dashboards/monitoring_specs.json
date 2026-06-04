@@ -15,7 +15,6 @@
         "query": "label_values(pipeline_rows_processed_total, cloud_provider)",
         "refresh": 2,
         "includeAll": true,
-        "multi": true,
         "label": "Cloud"
       },
       {
