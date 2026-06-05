@@ -441,13 +441,27 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
 
         # All four infra standards are always read from disk to bypass Pinecone key-swapping.
         # The discovery-phase agent frequently stores query results under the wrong
-        # collected_specs key (e.g. cicd_standards.md ends up as infra_standard_k8s).
+        # collected_specs key (e.g. cicd_standards.md ends up as infra_standard_k8s) — or, for
+        # iac, returns ANOTHER cloud's terraform standard entirely (e.g. the Azure azurerm
+        # backend for a GCP pipeline → `terraform init` fails on the non-existent Azure
+        # resource group). The iac standard is cloud-specific, so it is keyed by cloud_provider.
         _kb_root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "knowledge_base")
+        _iac_by_cloud = {
+            "aws":   os.path.join(_kb_root, "infrastructure", "terraform_aws_s3.md"),
+            "gcp":   os.path.join(_kb_root, "infrastructure", "terraform_gcp_bucket.md"),
+            "azure": os.path.join(_kb_root, "infrastructure", "terraform_azure_blob.md"),
+        }
+        _iac_disk_path = (
+            os.path.join(_kb_root, "infrastructure", "terraform_databricks.md")
+            if is_databricks else _iac_by_cloud.get(cloud_provider)
+        )
         _disk_standards = {
             "infra_standard_k8s":        os.path.join(_kb_root, "infrastructure", "k8s_deployment_rules.md"),
             "infra_standard_dockerfile": os.path.join(_kb_root, "infrastructure", "dockerfile_standard.md"),
             "infra_standard_cicd":       os.path.join(_kb_root, "engineering",    "cicd_standards.md"),
         }
+        if _iac_disk_path:
+            _disk_standards["infra_standard_iac"] = _iac_disk_path
         for _std_key, _std_path in _disk_standards.items():
             if _std_key in relevant_keys and os.path.exists(_std_path):
                 with open(_std_path, encoding="utf-8") as _f:
