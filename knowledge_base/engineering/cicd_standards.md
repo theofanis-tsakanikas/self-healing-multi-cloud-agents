@@ -57,9 +57,15 @@ The Agent MUST select the logic block that matches the `target_cloud` identifier
 
 ### 3.2 Module: GCP (target_cloud: gcp)
 - **Auth:** Use `google-github-actions/auth@v2` with `credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}` — the SA-key JSON content. This is the EXACT secret name (same one the infra-agent Terraform and bootstrap use); never invent a different name (e.g. `GCP_CREDENTIALS`) or the deploy fails to authenticate to Artifact Registry / GKE.
-- **Registry:** `google-github-actions/setup-gcloud@v2` installs the CLI, then a SEPARATE explicit step **🔴 MANDATORY** — `run: gcloud auth configure-docker {{artifact_registry_region}}-docker.pkg.dev --quiet`. `setup-gcloud` alone does NOT wire Docker's credential helper, so `docker push` fails with `denied: Unauthenticated request ... artifactregistry.repositories.uploadArtifacts`. This is the GCP equivalent of Azure's mandatory `ACR Login` / AWS's `amazon-ecr-login` — never omit it. Use the Artifact Registry host `{{artifact_registry_region}}-docker.pkg.dev` (e.g. `europe-west3-docker.pkg.dev`), matching the image registry.
+- **Toolchain — 🔴 MANDATORY step right after auth:** `google-github-actions/setup-gcloud@v2` **with `install_components: 'gke-gcloud-auth-plugin'`**. This installs the gcloud CLI AND the GKE auth plugin. kubectl ≥1.26 authenticates to GKE **only** through this exec credential plugin, so the kubeconfig produced by `get-credentials` is useless without it — every `kubectl` command then fails `getting credentials: exec: executable gke-gcloud-auth-plugin not found`. (GCP analogue of AWS needing `aws-iam-authenticator` / Azure `kubelogin`.) Never omit the `install_components`.
+  ```yaml
+  - uses: google-github-actions/setup-gcloud@v2
+    with:
+      install_components: 'gke-gcloud-auth-plugin'
+  ```
+- **Registry:** a SEPARATE explicit step **🔴 MANDATORY** — `run: gcloud auth configure-docker {{artifact_registry_region}}-docker.pkg.dev --quiet`. `setup-gcloud` does NOT wire Docker's credential helper, so `docker push` otherwise fails `denied: Unauthenticated request ... artifactregistry.repositories.uploadArtifacts`. (GCP equivalent of Azure's `ACR Login` / AWS's `amazon-ecr-login`.) Use the Artifact Registry host `{{artifact_registry_region}}-docker.pkg.dev` (e.g. `europe-west3-docker.pkg.dev`).
 - **Image path:** GCP Artifact Registry images are `HOST/PROJECT/REPOSITORY/IMAGE:TAG` — the full image reference (resolved in context as `ecr_repository_url`) already includes the IMAGE segment (the pipeline name), so use it verbatim as `<ecr_repository_url>:${{ github.sha }}`. Never push to just `HOST/PROJECT/REPOSITORY:TAG` (no image name) — `docker push` fails `name invalid: Missing image name`. (Unlike AWS ECR, where the repository IS the image.)
-- **Kubeconfig:** `gcloud container clusters get-credentials {{gke_cluster_name}} --region {{region}} --project {{gcp_project_id}}`
+- **Kubeconfig:** `gcloud container clusters get-credentials {{gke_cluster_name}} --region {{region}} --project {{gcp_project_id}}` — requires the `gke-gcloud-auth-plugin` from the Toolchain step above.
 
 ### 3.3 Module: Azure (target_cloud: azure)
 - **Auth:** Use `azure/login@v2` with `creds: ${{ secrets.AZURE_CREDENTIALS }}`.
