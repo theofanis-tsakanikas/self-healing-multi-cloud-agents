@@ -447,22 +447,12 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         else:
             relevant_keys = []
 
-        # k8s/dockerfile/cicd are read from disk to bypass Pinecone key-swapping (the
-        # discovery agent often stores a query result under the wrong collected_specs key,
-        # e.g. cicd_standards.md ends up as infra_standard_k8s). The iac standard stays a
-        # Pinecone retrieval (it is cloud-specific and we want a single synced source) — its
-        # wrong-cloud overwrite is prevented by the cloud-match guard in the Smart Mapping.
-        _kb_root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "knowledge_base")
-        _disk_standards = {
-            "infra_standard_k8s":        os.path.join(_kb_root, "infrastructure", "k8s_deployment_rules.md"),
-            "infra_standard_dockerfile": os.path.join(_kb_root, "infrastructure", "dockerfile_standard.md"),
-            "infra_standard_cicd":       os.path.join(_kb_root, "engineering",    "cicd_standards.md"),
-        }
-        for _std_key, _std_path in _disk_standards.items():
-            if _std_key in relevant_keys and os.path.exists(_std_path):
-                with open(_std_path, encoding="utf-8") as _f:
-                    collected_specs[_std_key] = _f.read()
-
+        # ALL infra standards come from Pinecone via query_vector_store — same mechanism as
+        # the Architect, and chunking-ready (a future split into chunks keeps working; a
+        # fetch-by-id or disk read would not). The Smart Mapping above now assigns each query
+        # result to exactly one standard key (mutually-exclusive, distinctive keywords), so the
+        # old disk-override that masked the key-swapping is gone. Requires the knowledge base to
+        # be synced to Pinecone (run_agent.yml sync_knowledge_base: sync after editing standards).
         if relevant_keys:
             system_prompt += "\n\n## ENGINEERING STANDARDS — follow these exactly:\n"
             for key in relevant_keys:
@@ -637,16 +627,23 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                                 f"🚫 Ignored wrong-cloud iac query ({_q_cloud}) for a "
                                 f"{cloud_provider} pipeline — kept the correct infra_standard_iac."
                             )
-                    if any(x in q for x in ["kubernetes", "k8s", "manifest", "deployment", "orchestration"]):
-                        collected_specs["infra_standard_k8s"] = result_str
-                        matched = True
-                    if any(x in q for x in ["github", "actions", "cicd", "workflow", "pipeline"]):
-                        collected_specs["infra_standard_cicd"] = result_str
-                        matched = True
-                    if any(x in q for x in ["dockerfile", "docker", "non-root", "selective copy", "python image"]):
+                    # Mutually-exclusive elif (NOT separate ifs) with DISTINCTIVE keywords:
+                    # each query result maps to exactly ONE standard. Previously overlapping
+                    # keywords across separate ifs ("deployment" in cicd's query also matched
+                    # the k8s set; "pipeline" in dockerfile's query matched cicd) stored one
+                    # result under TWO keys and the last write won — the cicd result overwrote
+                    # infra_standard_k8s. That key-swapping is exactly what the disk-override
+                    # masked; first-match-wins on distinctive terms removes the need for it.
+                    elif "dockerfile" in q:
                         collected_specs["infra_standard_dockerfile"] = result_str
                         matched = True
-                    if any(x in q for x in ["service account", "workload identity", "irsa", "iam.gke", "azure.workload", "serviceaccount"]):
+                    elif any(x in q for x in ["kubernetes", "k8s", "job.yaml", "initcontainer", "manifest", "serviceaccount", "volumemount"]):
+                        collected_specs["infra_standard_k8s"] = result_str
+                        matched = True
+                    elif any(x in q for x in ["github", "actions", "cicd", "workflow"]):
+                        collected_specs["infra_standard_cicd"] = result_str
+                        matched = True
+                    elif any(x in q for x in ["workload identity", "irsa", "iam.gke", "azure.workload"]):
                         collected_specs["infra_standard_service_account"] = result_str
                         matched = True
 
