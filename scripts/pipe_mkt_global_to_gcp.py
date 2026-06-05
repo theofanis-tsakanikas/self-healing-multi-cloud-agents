@@ -46,48 +46,42 @@ def run():
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
     rejected_by_reason = {}    # rule_name → cumulative dropped rows
-    query = "SELECT * FROM raw_global_marketing"
+    query = "SELECT * FROM raw_global_marketing"  # source table from context
 
     try:
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
 
             # Business rules implementation
-            # 1. spend_integrity
             _before = len(chunk)
-            spend_columns = [col for col in chunk.columns if 'spend' in col or 'cost' in col or 'budget' in col]
-            for col in spend_columns:
-                chunk[col] = chunk[col].apply(lambda x: float(x) if isinstance(x, (int, float)) and x >= 0 else 0)
-            rejected_by_reason['spend_integrity'] = rejected_by_reason.get('spend_integrity', 0) + (_before - len(chunk))
+            chunk = chunk[chunk['ad_spend'].astype(float) >= 0.0]
+            rejected_by_reason['spend_integrity'] = _before - len(chunk)
 
-            # 2. temporal_validity
             _before = len(chunk)
             chunk = chunk[chunk['event_timestamp'] <= pd.Timestamp.now()]
-            rejected_by_reason['temporal_validity'] = rejected_by_reason.get('temporal_validity', 0) + (_before - len(chunk))
+            rejected_by_reason['temporal_validity'] = _before - len(chunk)
 
-            # 3. completeness_enforcement
             _before = len(chunk)
             chunk = chunk.dropna(subset=['campaign_id'])
-            rejected_by_reason['completeness_enforcement'] = rejected_by_reason.get('completeness_enforcement', 0) + (_before - len(chunk))
+            rejected_by_reason['completeness_enforcement'] = _before - len(chunk)
 
-            # 4. campaign_standardization
-            _before = len(chunk)
-            chunk['campaign_id'] = chunk['campaign_id'].where(chunk['campaign_id'].str.match(r'CMP-\d{4}'), other='UNASSIGNED_CAMPAIGN')
-            rejected_by_reason['campaign_standardization'] = rejected_by_reason.get('campaign_standardization', 0) + (_before - len(chunk))
+            chunk['campaign_id'] = chunk['campaign_id'].where(chunk['campaign_id'].str.match(r'^CMP-\d{4}$'), other='UNASSIGNED_CAMPAIGN')
 
-            # 5. engagement_logic_check
-            chunk['is_suspicious'] = chunk['clicks'] > chunk['impressions']
-
-            # 6. volume_sanity_check
-            chunk['is_suspicious'] = chunk['is_suspicious'] | (chunk['clicks'] >= 1000000)
+            chunk['is_suspicious'] = (chunk['clicks'] > chunk['impressions']) | (chunk['clicks'] >= 1000000)
 
             # Type casting
             int_cols = [c for c in chunk.select_dtypes(include='float64').columns if any(kw in c.lower() for kw in ['clicks', 'impressions'])]
             for col in int_cols:
                 chunk[col] = chunk[col].astype('Int64')
 
-            # Write to GCS
-            chunk.to_parquet(f"{partition_uri}part_{i}.parquet", engine="pyarrow", compression="snappy", index=False, storage_options=dict())
+            # Write to Parquet
+            chunk.to_parquet(
+                f"{partition_uri}part_{i}.parquet",
+                engine="pyarrow",
+                compression="snappy",
+                index=False,
+                storage_options=dict()
+            )
             logging.info(f"Chunk {i}: {len(chunk)} rows processed")
             total_rows += len(chunk)
 
@@ -101,7 +95,7 @@ def run():
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
-    schema, table = "marketing_global", "pipe_mkt_global_to_gcp"  # from CATALOG_AND_MONITORING.trino_metadata
+    schema, table = "marketing_global", "pipe_mkt_global_to_gcp"  # from context
     conn = trino_connect(host=trino_host, port=8080, user="pipeline")
     cursor = conn.cursor()
     cursor.execute(f"CALL hive.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
@@ -110,23 +104,36 @@ def run():
 
     # ── 5. METRICS EMISSION ───────────────────────────────────────────────────
     pushgateway_url = os.getenv("PUSHGATEWAY_URL", "http://pushgateway.monitoring.svc.cluster.local:9091")
-    project_id = os.getenv("PROJECT_ID", "unknown")
-    cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")
+    project_id = os.getenv("PROJECT_ID", "global_marketing")
+    cloud_provider = os.getenv("CLOUD_PROVIDER", "gcp")
 
     # Emit metrics
     registry = CollectorRegistry()
-    Gauge('pipeline_rows_processed_total', 'Total rows written to storage after business rules', ['project_id', 'cloud_provider'], registry=registry).labels(project_id=project_id, cloud_provider=cloud_provider).set(total_rows)
-    Gauge('pipeline_last_success_timestamp', 'Unix timestamp of last successful run', ['project_id', 'cloud_provider'], registry=registry).labels(project_id=project_id, cloud_provider=cloud_provider).set(time.time())
-    Gauge('pipeline_rows_rejected_total', 'Rows removed by DROP_RECORD / EXCLUDE_AND_LOG rules', ['project_id', 'cloud_provider'], registry=registry).labels(project_id=project_id, cloud_provider=cloud_provider).set(rejected_rows)
-    Gauge('pipeline_duration_seconds', 'Wall-clock duration of the extract-transform-write phase', ['project_id', 'cloud_provider'], registry=registry).labels(project_id=project_id, cloud_provider=cloud_provider).set(duration_seconds)
+    Gauge('pipeline_rows_processed_total', 'Total rows written to storage after business rules',
+          ['project_id', 'cloud_provider'], registry=registry) \
+        .labels(project_id=project_id, cloud_provider=cloud_provider).set(total_rows)
+    Gauge('pipeline_last_success_timestamp', 'Unix timestamp of last successful run',
+          ['project_id', 'cloud_provider'], registry=registry) \
+        .labels(project_id=project_id, cloud_provider=cloud_provider).set(time.time())
+    Gauge('pipeline_rows_rejected_total', 'Rows removed by DROP_RECORD / EXCLUDE_AND_LOG rules',
+          ['project_id', 'cloud_provider'], registry=registry) \
+        .labels(project_id=project_id, cloud_provider=cloud_provider).set(rejected_rows)
+    Gauge('pipeline_duration_seconds', 'Wall-clock duration of the extract-transform-write phase',
+          ['project_id', 'cloud_provider'], registry=registry) \
+        .labels(project_id=project_id, cloud_provider=cloud_provider).set(duration_seconds)
 
-    rejected_by_reason_gauge = Gauge('pipeline_rows_rejected_by_reason', 'Rows rejected per business rule, labelled by rule name', ['project_id', 'cloud_provider', 'reason'], registry=registry)
+    # Per-rule breakdown
+    rejected_by_reason_gauge = Gauge(
+        'pipeline_rows_rejected_by_reason', 'Rows rejected per business rule, labelled by rule name',
+        ['project_id', 'cloud_provider', 'reason'], registry=registry)
     for _reason, _count in rejected_by_reason.items():
-        rejected_by_reason_gauge.labels(project_id=project_id, cloud_provider=cloud_provider, reason=_reason).set(_count)
+        rejected_by_reason_gauge.labels(
+            project_id=project_id, cloud_provider=cloud_provider, reason=_reason).set(_count)
 
     push_to_gateway(pushgateway_url, job=project_id, registry=registry)
-    logging.info(f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, duration={duration_seconds:.1f}s, cloud={cloud_provider}")
-
+    logging.info(
+        f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, duration={duration_seconds:.1f}s, cloud={cloud_provider}"
+    )
 
 if __name__ == "__main__":
     run()

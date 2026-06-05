@@ -7,6 +7,7 @@ CREATE TABLE hive.marketing_global.pipe_mkt_global_to_gcp (
     clicks BIGINT,
     impressions DOUBLE,
     event_timestamp TIMESTAMP,
+    is_suspicious BOOLEAN,
     run_date DATE
 ) WITH (
     format = 'PARQUET',

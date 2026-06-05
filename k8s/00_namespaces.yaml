@@ -14,4 +14,4 @@ metadata:
   name: global-mkt-insights-sa
   namespace: analytics
   annotations:
-    iam.gke.io/gcp-service-account: global-mkt-insights-sa@multi-cloud-self-healing-agent.iam.gserviceaccount.com
+    iam.gke.io/gcp-service-account: "global-mkt-insights-sa@multi-cloud-self-healing-agent.iam.gserviceaccount.com"

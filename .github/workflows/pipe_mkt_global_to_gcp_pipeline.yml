@@ -11,23 +11,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Google Cloud Login
+      - name: Google Cloud Auth
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
 
-      - name: Configure Docker for GCP
-        uses: google-github-actions/setup-gcloud@v2
+      - name: Configure Docker
+        run: gcloud auth configure-docker europe-west3-docker.pkg.dev --quiet
 
-      - name: Update Kubeconfig
-        run: gcloud container clusters get-credentials multi-cloud-agent-gke --region europe-west3 --project multi-cloud-self-healing-agent
-
-      - name: Build and Push Docker Image
+      - name: Build Docker Image
         run: |
           docker build -t europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo:${{ github.sha }} -f Dockerfile .
           docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo:${{ github.sha }}
           docker tag europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo:${{ github.sha }} europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo:latest
           docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo:latest
+
+      - name: Update Kubeconfig
+        run: gcloud container clusters get-credentials multi-cloud-agent-gke --region europe-west3 --project multi-cloud-self-healing-agent
 
       - name: Set Image Tag in Job Manifest
         run: |
@@ -44,11 +44,11 @@ jobs:
       - name: Create DB Credentials Secret
         run: |
           kubectl create secret generic pipe-mkt-global-to-gcp-db-credentials -n analytics \
-            --from-literal=CRM_DB_HOST=${{ secrets.CRM_DB_HOST }} \
-            --from-literal=CRM_DB_PORT=${{ secrets.CRM_DB_PORT }} \
-            --from-literal=CRM_DB_USER=${{ secrets.CRM_DB_USER }} \
-            --from-literal=CRM_DB_PASSWORD=${{ secrets.CRM_DB_PASSWORD }} \
-            --from-literal=CRM_DB_NAME=${{ secrets.CRM_DB_NAME }} \
+            --from-literal=MYSQL_DB_HOST=${{ vars.MYSQL_DB_HOST }} \
+            --from-literal=MYSQL_DB_PORT=${{ vars.MYSQL_DB_PORT }} \
+            --from-literal=MYSQL_DB_USER=${{ vars.MYSQL_DB_USER }} \
+            --from-literal=MYSQL_DB_NAME=${{ vars.MYSQL_DB_NAME }} \
+            --from-literal=MYSQL_DB_PASSWORD=${{ secrets.MYSQL_DB_PASSWORD }} \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy Pipeline Job to Kubernetes
@@ -58,8 +58,6 @@ jobs:
 
       - name: Check Deployment Status
         run: |
-          kubectl get pods -n analytics
-          kubectl get pods -n monitoring
           for i in $(seq 1 60); do
             SUCCEEDED=$(kubectl get job -l component=pipeline-job -n analytics -o jsonpath='{.items[0].status.succeeded}' 2>/dev/null)
             FAILED=$(kubectl get job -l component=pipeline-job -n analytics -o jsonpath='{.items[0].status.failed}' 2>/dev/null)
