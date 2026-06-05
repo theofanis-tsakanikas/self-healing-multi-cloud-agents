@@ -91,8 +91,13 @@ def _is_suspicious_xcheck(script_path: Path, sql_path: Path):
     chunk['is_suspicious'], which lands in the parquet — but the Hive connector matches by
     name, so the Trino DDL MUST declare 'is_suspicious BOOLEAN' or the flag is silently
     dropped (invisible in Trino). The reverse (DDL column with no script flag) yields a
-    perpetually-null column. The validator runs per-file, so this is checked whenever the
-    SECOND of the two artifacts is written — at architect generation time, before the medic.
+    perpetually-null column.
+
+    Called ONLY from the .sql branch so the failure is attributed to setup_trino.sql — the
+    file that must change (the script's chunk['is_suspicious'] is correct). Attributing it to
+    the .py instead would lock the architect's fix-target to the script and it would wrongly
+    try to add the SQL column to the Python file. By the time the DDL is generated the script
+    already exists on disk (script-first order, or a prior run's artifact), so the check fires.
 
     Returns an error string if the two disagree; None if consistent or a sibling is absent
     (best-effort — a missing sibling means it just hasn't been generated yet).
@@ -335,14 +340,6 @@ def validate_generated_code(filename: str) -> str:
                         "per-reason dict, so the Rejection Rate and Rejections-by-Reason panels "
                         "disagree). See python_standards.md."
                     )
-
-        # is_suspicious must agree with the Trino DDL (the sibling sql/setup_trino.sql).
-        # Runs for every .py (not gated on rejected_by_reason) and is checked from both
-        # sides so whichever artifact is written SECOND catches a mismatch.
-        _sql_path = Path(filename).resolve().parent.parent / "sql" / "setup_trino.sql"
-        _xc = _is_suspicious_xcheck(Path(filename).resolve(), _sql_path)
-        if _xc:
-            errors.append(_xc)
 
     # ── JSON (Grafana dashboard) ──────────────────────────────────────────────
     elif ext == ".json":
