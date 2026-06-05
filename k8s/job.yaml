@@ -32,7 +32,7 @@ spec:
           mountPath: /scripts
       containers:
       - name: pipeline
-        image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo:latest
+        image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260605-0744:${{ github.sha }}
         env:
         - name: PROJECT_ID
           value: "pipe_mkt_global_to_gcp"
