@@ -1461,6 +1461,59 @@ def execute_docker_command(image_name: str, registry_url: str = None, tag: str =
     except Exception as e:
         return f"STATUS: ERROR | Message: System error during Docker execution: {str(e)}"
 
+class _LiteralStr(str):
+    """A str that YAML serialises as a literal block scalar (`|`)."""
+
+
+def _literal_str_representer(dumper, data):
+    return dumper.represent_scalar("tag:yaml.org,2002:str", str(data), style="|")
+
+
+yaml.add_representer(_LiteralStr, _literal_str_representer)
+
+
+# ConfigMap data key → the canonical source artifact the architect already generated.
+# The configmap must embed the EXACT file content, not an LLM re-typed copy (which drifts
+# and corrupts — e.g. a stray ';' after the dashboard JSON's closing brace). Cloud-agnostic.
+_CONFIGMAP_EMBED_SOURCES = {
+    "monitoring_specs.json": os.path.join("dashboards", "monitoring_specs.json"),
+    "setup_trino.sql":       os.path.join("sql", "setup_trino.sql"),
+}
+
+
+def _embed_source_files_into_configmap(content: str) -> str:
+    """Replace re-typed `monitoring_specs.json` / `setup_trino.sql` block scalars in a
+    ConfigMap with the VERBATIM content of the architect's source files — single source of
+    truth, so the embedded copy can never diverge from (or corrupt) the validated original.
+    No-op when the keys/sources are absent or the YAML cannot be parsed (the validator still
+    guards correctness); falls back to the LLM's value if a source file is missing."""
+    if not any(k in content for k in _CONFIGMAP_EMBED_SOURCES):
+        return content
+    try:
+        docs = list(yaml.safe_load_all(content))
+    except yaml.YAMLError:
+        return content
+    changed = False
+    for doc in docs:
+        if not isinstance(doc, dict) or doc.get("kind") != "ConfigMap":
+            continue
+        data = doc.get("data")
+        if not isinstance(data, dict):
+            continue
+        for key, val in list(data.items()):
+            src = _CONFIGMAP_EMBED_SOURCES.get(key)
+            if src and os.path.exists(src):
+                with open(src, encoding="utf-8") as _sf:
+                    data[key] = _LiteralStr(_sf.read())
+                changed = True
+            elif isinstance(val, str) and "\n" in val:
+                # Preserve every other multi-line value as a block scalar on re-dump.
+                data[key] = _LiteralStr(val)
+    if not changed:
+        return content
+    return yaml.dump_all(docs, default_flow_style=False, sort_keys=False)
+
+
 @tool
 def generate_k8s_manifest(filename: str, content: str):
     """
@@ -1500,7 +1553,11 @@ def generate_k8s_manifest(filename: str, content: str):
         clean_name = clean_name.replace(".sql", "_config")
 
     filepath = os.path.join(target_dir, f"{clean_name}.yaml")
-    
+
+    # Single source of truth: embed the architect's verbatim dashboard JSON / Trino DDL
+    # into the ConfigMap instead of trusting the LLM's re-typed copy (no-op otherwise).
+    content = _embed_source_files_into_configmap(content)
+
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(content)
     return f"K8s manifest saved to {filepath}"

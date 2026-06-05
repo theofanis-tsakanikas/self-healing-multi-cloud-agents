@@ -1,5 +1,7 @@
 import json
 
+import yaml
+
 # Heavy SDK constructors are patched globally in conftest.py before collection,
 # so a plain import is safe and credential-free.
 from agents.tools import _normalize_handoff_agent, request_fix
@@ -89,3 +91,32 @@ class TestRequestFix:
         data = json.loads(result)
         assert data["status"] == "REJECTED_BY_MEDIC"   # accepted by the guard, handed off
         assert data["target_agent"] == "infra"
+
+
+class TestConfigMapVerbatimEmbed:
+    """The ConfigMap must embed the architect's verbatim dashboard JSON / Trino DDL,
+    not an LLM re-typed copy that can introduce transcription errors (a stray ';')."""
+
+    def test_retyped_dashboard_json_replaced_by_verbatim_source(self, tmp_path, monkeypatch):
+        from agents.tools import _embed_source_files_into_configmap
+        (tmp_path / "dashboards").mkdir()
+        (tmp_path / "sql").mkdir()
+        (tmp_path / "dashboards" / "monitoring_specs.json").write_text('{"uid": "x", "panels": []}')
+        (tmp_path / "sql" / "setup_trino.sql").write_text("CREATE TABLE x (a INT);\n")
+        monkeypatch.chdir(tmp_path)
+        # The exact bug: a re-typed dashboard JSON with a stray ';' after the closing brace.
+        bad = (
+            "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: grafana-dash-config\n"
+            'data:\n  monitoring_specs.json: |\n    {"uid": "x", "panels": []};\n'
+        )
+        out = _embed_source_files_into_configmap(bad)
+        docs = list(yaml.safe_load_all(out))
+        val = docs[0]["data"]["monitoring_specs.json"]
+        json.loads(val)                 # parses now — stray ';' gone
+        assert "};" not in val
+
+    def test_noop_for_manifest_without_embed_keys(self, tmp_path, monkeypatch):
+        from agents.tools import _embed_source_files_into_configmap
+        monkeypatch.chdir(tmp_path)
+        manifest = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: analytics\n"
+        assert _embed_source_files_into_configmap(manifest) == manifest
