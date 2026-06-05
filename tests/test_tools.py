@@ -72,3 +72,20 @@ class TestRequestFix:
         })
         data = json.loads(result)
         assert data["status"] == "TOOL_ERROR"
+
+    def test_kubectl_immutable_job_error_is_accepted(self):
+        # A genuine kubectl deploy failure must NOT be wrongly rejected — its text
+        # carries no Python/CI marker, so the kubectl markers ('is invalid' /
+        # 'Invalid value' / 'immutable') must let it through to the infra agent.
+        result = request_fix.invoke({
+            "target_agent": "infra",
+            "issue_description": 'The Job "pipe-mkt-global-to-gcp-job" is invalid',
+            "suggested_fix": "Use the two-step delete+apply deploy pattern",
+            "evidence_quote": (
+                'The Job "pipe-mkt-global-to-gcp-job" is invalid: spec.template: '
+                "Invalid value: ...: field is immutable"
+            ),
+        })
+        data = json.loads(result)
+        assert data["status"] == "REJECTED_BY_MEDIC"   # accepted by the guard, handed off
+        assert data["target_agent"] == "infra"

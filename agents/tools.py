@@ -1806,6 +1806,9 @@ _EVIDENCE_MARKERS = (
     "Traceback",          # Python traceback header
     "exit code",          # shell/Docker non-zero exit
     "rejected",           # auth/API rejection
+    "is invalid",         # kubectl resource validation: `The Job "..." is invalid`
+    "Invalid value",      # kubectl field validation error
+    "immutable",          # k8s immutable-field error (e.g. Job spec.template)
 )
 
 @tool
@@ -1819,7 +1822,8 @@ def request_fix(target_agent: str, issue_description: str, suggested_fix: str, e
       For local failures: the exact 'VALIDATION FAILED' block from validate_generated_code.
       For CI failures: the exact error lines from fetch_github_action_logs.
       Must contain at least one error marker (e.g. 'VALIDATION FAILED', 'Error:', 'FAILED',
-      'Exception', 'Traceback', 'exit code'). Rejected if empty or contains no error marker —
+      'Exception', 'Traceback', 'exit code', or kubectl markers 'is invalid' / 'Invalid value'
+      / 'immutable'). Rejected if empty or contains no error marker —
       you MUST NOT call this tool based on your own analysis of artifact content.
     """
     if not evidence_quote or not any(m in evidence_quote for m in _EVIDENCE_MARKERS):
