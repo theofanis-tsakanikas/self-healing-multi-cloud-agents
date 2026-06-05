@@ -173,3 +173,47 @@ class TestConfigMapEmbeddedJSON:
         out = _validate(tmp_path, "configmaps.yaml",
                         self._BASE.format(body='{"uid": "x", "panels": []};'))
         assert "is not valid JSON" in out
+
+
+class TestIsSuspiciousCrossFile:
+    _DDL_NO_FLAG = (
+        "CREATE TABLE hive.s.pipe_x (\n"
+        "  campaign_id VARCHAR,\n"
+        "  run_date DATE\n"
+        ") WITH (format='PARQUET', external_location='gs://b/processed/', "
+        "partitioned_by=ARRAY['run_date']);\n"
+    )
+    _DDL_WITH_FLAG = (
+        "CREATE TABLE hive.s.pipe_x (\n"
+        "  campaign_id VARCHAR,\n"
+        "  is_suspicious BOOLEAN,\n"
+        "  run_date DATE\n"
+        ") WITH (format='PARQUET', external_location='gs://b/processed/', "
+        "partitioned_by=ARRAY['run_date']);\n"
+    )
+    _PY_FLAG = "chunk['is_suspicious'] = chunk['clicks'] > chunk['impressions']\n"
+    _PY_NO_FLAG = "chunk = chunk.dropna(subset=['campaign_id'])\n"
+
+    def _validate_sql(self, tmp_path, ddl, py):
+        (tmp_path / "sql").mkdir()
+        (tmp_path / "scripts").mkdir()
+        (tmp_path / "scripts" / "pipe_x.py").write_text(py)
+        sql_f = tmp_path / "sql" / "setup_trino.sql"
+        sql_f.write_text(ddl)
+        return validate_generated_code.invoke({"filename": str(sql_f)})
+
+    def test_script_flags_but_ddl_omits_is_flagged(self, tmp_path):
+        out = self._validate_sql(tmp_path, self._DDL_NO_FLAG, self._PY_FLAG)
+        assert "consistency" in out.lower() and "is_suspicious" in out
+
+    def test_both_have_is_suspicious_is_clean(self, tmp_path):
+        out = self._validate_sql(tmp_path, self._DDL_WITH_FLAG, self._PY_FLAG)
+        assert "consistency" not in out.lower()
+
+    def test_neither_has_is_suspicious_is_clean(self, tmp_path):
+        out = self._validate_sql(tmp_path, self._DDL_NO_FLAG, self._PY_NO_FLAG)
+        assert "consistency" not in out.lower()
+
+    def test_ddl_has_but_script_omits_is_flagged(self, tmp_path):
+        out = self._validate_sql(tmp_path, self._DDL_WITH_FLAG, self._PY_NO_FLAG)
+        assert "consistency" in out.lower()

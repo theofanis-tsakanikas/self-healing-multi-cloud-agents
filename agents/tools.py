@@ -85,7 +85,44 @@ def get_embedding(text):
         print(f"Error calling OpenAI Embedding API: {e}")
         return None
 
-    
+
+def _is_suspicious_xcheck(script_path: Path, sql_path: Path):
+    """Cross-file consistency: a FLAG_AS_SUSPICIOUS rule makes the pipeline script write
+    chunk['is_suspicious'], which lands in the parquet — but the Hive connector matches by
+    name, so the Trino DDL MUST declare 'is_suspicious BOOLEAN' or the flag is silently
+    dropped (invisible in Trino). The reverse (DDL column with no script flag) yields a
+    perpetually-null column. The validator runs per-file, so this is checked whenever the
+    SECOND of the two artifacts is written — at architect generation time, before the medic.
+
+    Returns an error string if the two disagree; None if consistent or a sibling is absent
+    (best-effort — a missing sibling means it just hasn't been generated yet).
+    """
+    try:
+        if not (script_path.is_file() and sql_path.is_file()):
+            return None
+        py = script_path.read_text(encoding="utf-8")
+        sql = sql_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    # `= False` is the placeholder (flagged separately) — not a real flag assignment.
+    script_flags = bool(re.search(r"chunk\[['\"]is_suspicious['\"]\]\s*=\s*(?!False\b)", py))
+    ddl_has = "is_suspicious" in sql.lower()
+    if script_flags and not ddl_has:
+        return (
+            "PY/SQL consistency: the pipeline script sets chunk['is_suspicious'] (a "
+            "FLAG_AS_SUSPICIOUS rule) but the Trino DDL omits 'is_suspicious BOOLEAN'. Add it "
+            "immediately BEFORE run_date (the partition key must stay last) — otherwise the flag "
+            "is written to parquet but invisible in Trino (the Hive connector matches by name)."
+        )
+    if ddl_has and not script_flags:
+        return (
+            "PY/SQL consistency: the Trino DDL declares 'is_suspicious BOOLEAN' but the pipeline "
+            "script never sets chunk['is_suspicious']. Either implement the FLAG_AS_SUSPICIOUS "
+            "rule in the script or remove the column from the DDL."
+        )
+    return None
+
+
 @tool
 def validate_generated_code(filename: str) -> str:
     """
@@ -299,6 +336,14 @@ def validate_generated_code(filename: str) -> str:
                         "disagree). See python_standards.md."
                     )
 
+        # is_suspicious must agree with the Trino DDL (the sibling sql/setup_trino.sql).
+        # Runs for every .py (not gated on rejected_by_reason) and is checked from both
+        # sides so whichever artifact is written SECOND catches a mismatch.
+        _sql_path = Path(filename).resolve().parent.parent / "sql" / "setup_trino.sql"
+        _xc = _is_suspicious_xcheck(Path(filename).resolve(), _sql_path)
+        if _xc:
+            errors.append(_xc)
+
     # ── JSON (Grafana dashboard) ──────────────────────────────────────────────
     elif ext == ".json":
         try:
@@ -403,6 +448,16 @@ def validate_generated_code(filename: str) -> str:
                         f"{_col_names[-_n:]}. Move the partition column(s) to the end — Trino "
                         f"fails at runtime with 'Partition keys must be the last columns in the table'."
                     )
+
+            # is_suspicious must agree with the pipeline script (FLAG_AS_SUSPICIOUS rule).
+            # Derive the script name from the DDL table name (hive.<schema>.<table> →
+            # scripts/<table>.py) so we compare the right pair, then cross-check.
+            _tbl_m = re.search(r"CREATE\s+TABLE\s+[\w.]*?(\w+)\s*\(", _raw_sql, re.IGNORECASE)
+            if _tbl_m:
+                _script_path = Path(filename).resolve().parent.parent / "scripts" / f"{_tbl_m.group(1)}.py"
+                _xc = _is_suspicious_xcheck(_script_path, Path(filename).resolve())
+                if _xc:
+                    errors.append(_xc)
 
     # ── requirements.txt ─────────────────────────────────────────────────────
     elif base == "requirements.txt":
