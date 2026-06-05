@@ -88,7 +88,7 @@ spec:
         image: <ecr_image_uri>                          # full ECR URL — never a placeholder
         env:
         - name: PROJECT_ID
-          value: "<project_id>"
+          value: "<project_id>"                         # the PIPELINE id (e.g. pipe_mkt_global_to_gcp) — same as every project_id label / metric label. On GCP NEVER the cloud project (gcp_project_id); that is terraform-only.
         - name: CLOUD_PROVIDER
           value: "<cloud_provider>"                     # aws | azure | gcp
         - name: DESTINATION_URI
