@@ -115,6 +115,14 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                 _proj = os.getenv(_gcp.get("project_id_env", "GCP_PROJECT_ID")) or os.getenv("GCP_PROJECT_ID", "")
                 if _region and _repo and _proj:
                     ecr_repository_url = f"{_region}-docker.pkg.dev/{_proj}/{_repo}"
+            # GCP Artifact Registry images are HOST/PROJECT/REPOSITORY/IMAGE — both the
+            # bootstrap output and the assembled URL stop at REPOSITORY, so append the
+            # pipeline as the IMAGE name (mirrors Azure appending the image to the ACR host).
+            # Without it `docker push` fails: "name invalid: Missing image name". Idempotent.
+            if ecr_repository_url:
+                _gcp_img = (project_id or "pipeline").replace("_", "-").lower()
+                if not ecr_repository_url.rstrip("/").endswith("/" + _gcp_img):
+                    ecr_repository_url = ecr_repository_url.rstrip("/") + "/" + _gcp_img
         else:
             # AWS: single source of truth is SSM (bootstrap/aws/ssm.tf), with a
             # .bootstrap_outputs.json fallback for local dev.
