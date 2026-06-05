@@ -46,8 +46,9 @@ The following structured context defines your mission. You must strictly adhere 
 - The 3-step mapping always succeeds: every rule's `target_criteria` contains at least one keyword that matches a real column via substring. If a match seems ambiguous, use the first meaningful noun in `target_criteria` and pick the closest column name — a best-effort implementation is required.
 - No rule may appear only as a comment. Omit step 3b **only** when TRANSFORMATION_LOGIC itself is absent from your context. Never omit it because mapping felt difficult.
 - **`is_suspicious` is conditional — not a default column:**
-  - `TRANSFORMATION_LOGIC` contains `FLAG_AS_SUSPICIOUS` → implement as `chunk['is_suspicious'] = ~condition` AND add `is_suspicious BOOLEAN` to the SQL DDL.
+  - `TRANSFORMATION_LOGIC` contains `FLAG_AS_SUSPICIOUS` → implement as `chunk['is_suspicious'] = ~condition` AND add `is_suspicious BOOLEAN` to the SQL DDL, placed **immediately before `run_date`** (the partition key must stay strictly last).
   - `TRANSFORMATION_LOGIC` has NO `FLAG_AS_SUSPICIOUS` rule → omit `is_suspicious` entirely from both the Python script and the SQL DDL. No placeholder, no default, no column.
+  - **Cross-file consistency is mandatory and bidirectional:** if the Python script sets `chunk['is_suspicious']`, the SQL DDL MUST declare `is_suspicious BOOLEAN` — and vice versa. The two files are generated in separate steps; a column present in one but missing from the other is a defect (the Hive connector matches by name, so a parquet `is_suspicious` with no DDL column is silently dropped and the flag is lost). Before finishing, verify both files agree.
   - **`chunk['is_suspicious'] = False` is never valid** — it is a placeholder, not an implementation. If there are no rules to apply, omit the column.
 
 ### 4. UNIVERSAL CODE GENERATION (PYTHON)
@@ -60,9 +61,9 @@ Generate `scripts/*.py` following `arch_standard_python` exactly. The standard d
 - **Cloud SDK guards:** All cloud SDK calls (`boto3`, `gcs`, `BlobServiceClient`) MUST be inside `if _CLOUD == "..."` guards — never called unconditionally after a conditional import.
 - **Business rules:** Every `TRANSFORMATION_LOGIC` item as real pandas code (see Section 3).
 - **Type casting:** Step 3c in `arch_standard_python` is mandatory — cast `float64` → `Int64` for all quantity/count/units columns before every `to_parquet()`.
-- **Storage:** `storage_options={}` in every `to_parquet()` call.
+- **Storage:** `storage_options=dict()` in every `to_parquet()` call — use `dict()`, NOT `{}` (an empty-brace literal can get double-braced into `{{}}` → `SyntaxError`).
 - **Chunking:** Each chunk writes to `part_{i}.parquet` — never the same filename twice.
-- **Idempotency, Observability, Metrics Emission, Partition Registration:** Follow `arch_standard_python` exactly.
+- **Idempotency, Observability, Metrics Emission, Partition Registration:** Follow `arch_standard_python` exactly. In the `sync_partition_metadata` call, `schema` is the **bare** schema name (the middle segment of `hive.<schema>.<table>`) — NEVER catalog-prefixed. ❌ `"hive.marketing_global"` · ✅ `"marketing_global"`. The objective may print the target fully-qualified; split it and pass only the middle segment.
 - **NO helper functions:** define the entire pipeline inline inside `run()`. NEVER call a function you did not define (e.g. `apply_business_rules(...)`) — implement each business rule directly in the loop. A call to an undefined name fails with `F821`.
 - **COMPLETE script — never abbreviate:** emit ALL FIVE numbered sections in full (1 idempotency · 2 credentials · 3 extract+transform+write · 4 Trino `sync_partition_metadata` registration · 5 push of all FIVE metrics). NEVER replace a section with a placeholder comment like `# Trino sync logic here` and never drop the `trino` import or any of the five Gauges — a missing section silently produces an empty dashboard / unregistered table.
 

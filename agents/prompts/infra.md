@@ -48,8 +48,8 @@ into an Azure/GCP pipeline is a silent runtime failure the validator does NOT ca
     - `azure` → `hashicorp/azurerm`, resources: `azurerm_storage_account` (is_hns_enabled=true), `azurerm_user_assigned_identity`, backend: AzureRM
     - `gcp` → `hashicorp/google`, resources: `google_storage_bucket` (uniform_bucket_level_access=true), `google_service_account`, backend: GCS
 - **Standard Compliance:** Strictly follow the naming conventions and provider-specific resource splitting retrieved from the Knowledge Base.
-- **Modular Structure:** Generate exactly five files inside `/terraform`: `providers.tf`, `main.tf`, `variables.tf`, `outputs.tf`, `terraform.tfvars`.
-- **Variable Values:** `terraform.tfvars` MUST be populated with concrete values from context. Terraform auto-loads it — do NOT pass `-var` flags.
+- **Modular Structure:** Generate exactly five files inside `/terraform`: `providers.tf`, `main.tf`, `variables.tf`, `outputs.tf`, `terraform.tfvars`. In `variables.tf` every declaration line MUST begin with the keyword `variable` — dropping it (`name { type = string }`) is an `Unsupported block type` error that fails `terraform init`.
+- **Variable Values:** `terraform.tfvars` MUST be populated with concrete values from context. Terraform auto-loads it — do NOT pass `-var` flags. **GCP:** `project_id` is the GCP project id (`CLOUD_SETUP.gcp_project_id`) — NEVER the pipeline `project_id` (that is the dashboard label); using the pipeline_id targets a non-existent project and apply fails.
 - **State Management:** Use concrete string literals in backend blocks (no `var.*`). Values from `CLOUD_SETUP` in context.
 - **Safety:** `force_destroy = true` is FORBIDDEN on storage resources. Add `prevent_destroy = true` lifecycle block.
 - **Deployment:** Execute `execute_terraform` (init & apply). Do not proceed until infrastructure is physically provisioned.

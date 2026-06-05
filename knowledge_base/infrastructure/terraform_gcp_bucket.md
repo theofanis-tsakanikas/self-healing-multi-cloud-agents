@@ -69,6 +69,8 @@ provider "google" {
 }
 ```
 
+**`var.project_id` is the GCP PROJECT ID** — the cloud project that owns the bucket, SA and Artifact Registry — supplied in context as `CLOUD_SETUP.gcp_project_id`. It is **NOT** the pipeline `project_id` (that value is the pipeline_id / dashboard label). Putting the pipeline_id here makes the bucket and the `data "google_service_account"` lookup target a non-existent project and Terraform apply fails. See §5 for the `terraform.tfvars` mapping.
+
 **State Prerequisite:** The GCS state bucket must be created manually once before `terraform init`. It is NOT managed by this Terraform configuration.
 
 ---
@@ -179,7 +181,7 @@ The `<service_account_email>` is the GCP service account email from Terraform ou
 
 ## 5. NAMING & TAGGING
 
-`variables.tf` MUST declare:
+`variables.tf` MUST declare exactly these five — **copy the block verbatim**. Every line begins with the keyword `variable`; dropping the keyword (e.g. `k8s_service_account_name { type = string }`) is an `Unsupported block type` error that fails `terraform init`:
 ```hcl
 variable "project_id"             { type = string }
 variable "region"                 { type = string }
@@ -188,7 +190,22 @@ variable "service_account_id"     { type = string }
 variable "k8s_service_account_name" { type = string }
 ```
 
-`terraform.tfvars` MUST be populated with concrete values — never placeholders.
+`terraform.tfvars` MUST be populated with concrete values from context — never placeholders. Map each value precisely:
+
+| tfvars key | Source in context | Example |
+|---|---|---|
+| `project_id` | `CLOUD_SETUP.gcp_project_id` — the **GCP project id**, NOT the pipeline `project_id` | `multi-cloud-self-healing-agent` |
+| `region` | `CLOUD_SETUP.region` | `europe-west3` |
+| `bucket_name` | `CLOUD_SETUP.bucket_name` | `global-marketing-insights-data` |
+| `service_account_id` | `CLOUD_SETUP.service_account_id` | `global-mkt-insights-sa` |
+| `k8s_service_account_name` | `CLOUD_SETUP.k8s_service_account_name` | `global-mkt-insights-sa` |
+
+```hcl
+# ❌ WRONG — pipeline_id used as the GCP project → bucket/SA target a non-existent project
+project_id = "pipe_mkt_global_to_gcp"
+# ✅ CORRECT — the real GCP project id from CLOUD_SETUP.gcp_project_id
+project_id = "multi-cloud-self-healing-agent"
+```
 
 ---
 

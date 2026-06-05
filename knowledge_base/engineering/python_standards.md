@@ -369,6 +369,14 @@ def run():
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
     schema, table = "<schema>", "<table>"  # from CATALOG_AND_MONITORING.trino_metadata
+    # `schema` is the BARE schema name — the MIDDLE segment of the fully-qualified
+    # trino target `hive.<schema>.<table>`. NEVER catalog-prefix it: the catalog is
+    # supplied separately by `hive.system.` below, so prefixing duplicates it and the
+    # CALL fails at runtime with "schema not found".
+    #   ❌ schema = "hive.marketing_global"   → CALL ...('hive.marketing_global', ...) → crash
+    #   ✅ schema = "marketing_global"         → CALL ...('marketing_global', ...)
+    # If the objective text shows the target as `hive.<schema>.<table>`, split it and use
+    # only the middle segment here — do NOT copy the qualified literal verbatim.
     # The catalog is ALWAYS "hive" (the hive-catalog-config ConfigMap key is hive.properties
     # on every cloud). Use the literal "hive" — do NOT assign a `catalog` variable: filling it
     # with the literal and then writing CALL hive.system leaves it unused → ruff F841.

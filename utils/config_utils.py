@@ -193,6 +193,13 @@ def build_infra_context(pipeline_conf: dict, infra_conf: dict) -> str:
             "object_ownership": infra_conf.get("object_ownership", "private")
         }
     elif provider == 'gcp':
+        # The GCP project id is a non-sensitive GitHub Variable surfaced via the env var
+        # named in project_id_env (default GCP_PROJECT_ID). Resolve it to its VALUE here so
+        # the infra agent puts the REAL project in terraform.tfvars / provider "google".
+        # NEVER use project_metadata.project_id for this — that is the pipeline_id (the
+        # dashboard/metric label); on GCP it is NOT the cloud project and pointing
+        # terraform at it makes the bucket + SA data source target a non-existent project.
+        _gcp_proj_env = cloud_setup.get("project_id_env") or "GCP_PROJECT_ID"
         infra_setup = {
             "bucket_name": cloud_setup.get("bucket_name"),
             "state_bucket": cloud_setup.get("state_bucket"),
@@ -201,7 +208,8 @@ def build_infra_context(pipeline_conf: dict, infra_conf: dict) -> str:
             "artifact_registry_region": cloud_setup.get("artifact_registry_region"),
             "artifact_registry_repo": cloud_setup.get("artifact_registry_repo"),
             "service_account_id": cloud_setup.get("service_account_id"),
-            "project_id_env": cloud_setup.get("project_id_env")
+            "project_id_env": _gcp_proj_env,
+            "gcp_project_id": os.getenv(_gcp_proj_env) or os.getenv("GCP_PROJECT_ID", "")
         }
 
     # 4. Orchestration Metadata (K8s / Identity)
