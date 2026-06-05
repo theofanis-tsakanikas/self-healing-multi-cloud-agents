@@ -138,7 +138,7 @@ def build_databricks_architect_context(pipeline_conf: dict, db_conf: dict, rules
     return json.dumps(context, indent=2)
 
 
-def build_infra_context(pipeline_conf: dict, infra_conf: dict) -> str:
+def build_infra_context(pipeline_conf: dict, infra_conf: dict, db_conf: dict = None) -> str:
     """
     Unified context for the Infra Engineer.
     Focuses on physical resource identifiers, cloud providers, 
@@ -210,6 +210,15 @@ def build_infra_context(pipeline_conf: dict, infra_conf: dict) -> str:
             "service_account_id": cloud_setup.get("service_account_id"),
             "project_id_env": _gcp_proj_env,
             "gcp_project_id": os.getenv(_gcp_proj_env) or os.getenv("GCP_PROJECT_ID", "")
+        }
+
+    # 3b. DB credential env-var names — the EXACT --from-literal keys for the deploy
+    # workflow's db-credentials Secret (e.g. MYSQL_DB_HOST / CRM_DB_HOST / POSTGRES_DB_HOST).
+    # Sourced from the pipeline's OWN DB config so they are always cloud-correct — the infra
+    # agent must never hardcode one cloud's prefix (CRM_DB_*) into another cloud's pipeline.
+    if db_conf:
+        infra_setup["connection_vars"] = {
+            k: v for k, v in db_conf.items() if k.startswith("env_var_")
         }
 
     # 4. Orchestration Metadata (K8s / Identity)

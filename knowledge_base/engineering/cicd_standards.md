@@ -242,6 +242,15 @@ The following steps MUST appear in this exact order:
     #     --dry-run=client -o yaml | kubectl apply -f -
     #
     # ✅ GCP — POPULATED secret with the MYSQL_DB_* keys (PASSWORD from secrets, rest from vars).
+    #   Source = GCP Cloud SQL MySQL; the pod reads these via cloud_get("gcp", …, db_type="mysql").
+    #   NO AZURE_STORAGE_CONNECTION_STRING (GCS uses the pod's Workload Identity).
+    #   kubectl create secret generic <project_id_rfc1123>-db-credentials -n analytics \
+    #     --from-literal=MYSQL_DB_HOST=${{ vars.MYSQL_DB_HOST }} \
+    #     --from-literal=MYSQL_DB_PORT=${{ vars.MYSQL_DB_PORT }} \
+    #     --from-literal=MYSQL_DB_USER=${{ vars.MYSQL_DB_USER }} \
+    #     --from-literal=MYSQL_DB_NAME=${{ vars.MYSQL_DB_NAME }} \
+    #     --from-literal=MYSQL_DB_PASSWORD=${{ secrets.MYSQL_DB_PASSWORD }} \
+    #     --dry-run=client -o yaml | kubectl apply -f -
     #
     # Replace the comment above with the single uncommented block for the active cloud.
 

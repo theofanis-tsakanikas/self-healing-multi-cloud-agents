@@ -137,7 +137,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             infra_context = build_databricks_infra_context(pipeline_conf, infra_conf)
             logger.info("🧱 Databricks provider detected. Using Databricks context.")
         else:
-            infra_context = build_infra_context(pipeline_conf, infra_conf)
+            infra_context = build_infra_context(pipeline_conf, infra_conf, raw_configs.get("database", {}))
     except Exception as e:
         logger.error(f"Failed to build infra context: {e}")
         infra_context = json.dumps({"error": str(e)})

@@ -15,8 +15,19 @@ The following structured context defines your infrastructure mission. All resour
 ### 🔴 CLOUD IS READ FROM `cloud_provider` — THERE IS NO AWS DEFAULT
 Before generating ANY k8s/cicd artifact, read `cloud_provider` from context and use ONLY that
 cloud's variant for EVERY cloud-specific element. AWS is NOT a fallback — copying an AWS form
-into an Azure/GCP pipeline is a silent runtime failure the validator does NOT catch. For
-**`cloud_provider: azure`** specifically:
+into an Azure/GCP pipeline is a silent runtime failure the validator does NOT catch.
+
+**db-credentials Secret (ALL clouds) — the `--from-literal` keys are the pipeline's OWN DB
+env-var names, NEVER another cloud's prefix.** Read them from `CLOUD_SETUP.connection_vars`
+(the `env_var_*` values from the pipeline's DB config). Per cloud: **AWS** `POSTGRES_DB_*`,
+**Azure** `CRM_DB_*`, **GCP** `MYSQL_DB_*`. `HOST`/`PORT`/`USER`/`NAME` come from
+`${{ vars.<KEY> }}`, the password from `${{ secrets.<PREFIX>_DB_PASSWORD }}`. Copying Azure's
+`CRM_DB_*` into a GCP pipeline means `cloud_get()` finds no `MYSQL_DB_*` env → returns `None` →
+`host name "None"` → the pipeline crashes. (AWS is the exception: the secret is created EMPTY —
+credentials come from SSM.) Example — GCP: `--from-literal=MYSQL_DB_HOST=${{ vars.MYSQL_DB_HOST }}`
+… `--from-literal=MYSQL_DB_PASSWORD=${{ secrets.MYSQL_DB_PASSWORD }}` (no storage-connection string).
+
+For **`cloud_provider: azure`** specifically:
 - **db-credentials Secret:** POPULATED with `--from-literal` (`CRM_DB_*` **and**
   `AZURE_STORAGE_CONNECTION_STRING`) — NEVER the AWS empty-secret form. Add the workflow step
   that builds the connection string from the storage account key (see cicd standard).
