@@ -109,8 +109,10 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     Phase 2: Implementation (Writing code/DDL based on retrieved standards).
 
     config: LangGraph injects the RunnableConfig (with LangSmith callbacks) automatically
-    when the function signature declares it. Passing it to tool .invoke() calls ensures
-    validate_generated_code appears as a distinct ToolRun in LangSmith traces.
+    when the function signature declares it. Imperative tool `.invoke()` calls (auto-validate)
+    intentionally do NOT pass it — they inherit the ambient trace context so they nest under
+    THIS node's run, like the LLM-driven tool calls do. Passing the node config explicitly was
+    surfacing auto-validate as a separate ROOT trace in LangSmith instead of a nested span.
     """
     logger.info("--- STARTING ARCHITECT NODE ---")
     
@@ -422,9 +424,9 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                             all_skipped_this_iter = False
 
                             # AUTO-VALIDATE immediately after every successful write.
-                            # Passing `config` (with LangSmith callbacks) to .invoke() ensures
-                            # this appears as a distinct ToolRun in LangSmith — not hidden inside
-                            # the write_project_file result, but as a visible, separate trace span.
+                            # Do NOT pass `config` to .invoke(): let it inherit the ambient trace
+                            # context so it nests under this node's run (like write_project_file),
+                            # instead of surfacing as a separate ROOT trace in LangSmith.
                             if "error" not in str(result).lower():
                                 import re as _re
                                 path_match = _re.search(
@@ -434,7 +436,7 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                                 actual_path = path_match.group(1).strip() if path_match else filename
                                 validation_result = str(
                                     validate_generated_code.invoke(
-                                        {"filename": actual_path}, config=config
+                                        {"filename": actual_path}
                                     )
                                 )
                                 if "VALIDATION FAILED" in validation_result:
@@ -485,7 +487,7 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                                 actual_path = path_match.group(1).strip() if path_match else filename
                                 validation_result = str(
                                     validate_generated_code.invoke(
-                                        {"filename": actual_path}, config=config
+                                        {"filename": actual_path}
                                     )
                                 )
                                 if "VALIDATION FAILED" in validation_result:

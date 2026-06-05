@@ -74,8 +74,9 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     3. Action Lock: Permanently removes execution tools (Docker/Push) once SUCCESS is detected.
 
     config: LangGraph injects RunnableConfig (with LangSmith callbacks) automatically.
-    Passed to validate_generated_code.invoke() so auto-validation appears as a distinct
-    ToolRun in LangSmith, not hidden inside another tool's output.
+    Imperative auto-validation .invoke() calls intentionally do NOT pass it — they inherit the
+    ambient trace context and nest under this node's run, instead of surfacing as separate ROOT
+    traces in LangSmith.
     """
     logger.info("--- STARTING INFRASTRUCTURE NODE ---")
     llm = get_llm(temperature=TEMPERATURE)
@@ -681,12 +682,12 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                             auto_validate_path = patch_filename
 
                     # Trigger auto-validation for files that have a validator.
-                    # Passing `config` ensures this appears as a distinct ToolRun in
-                    # LangSmith (same callbacks as the parent node invocation).
+                    # Do NOT pass `config`: let it inherit the ambient trace context so it nests
+                    # under this node's run instead of surfacing as a separate ROOT trace.
                     if auto_validate_path and os.path.exists(auto_validate_path):
                         from agents.tools import validate_generated_code as _validate
                         validation_result = str(
-                            _validate.invoke({"filename": auto_validate_path}, config=config)
+                            _validate.invoke({"filename": auto_validate_path})
                         )
                         if "VALIDATION FAILED" in validation_result:
                             any_tool_error = True
