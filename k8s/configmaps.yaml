@@ -4,21 +4,22 @@ metadata:
   name: trino-sql-config
   namespace: analytics
   labels:
-    project_id: pipe-crm-us-to-azure
+    project_id: pipe-mkt-global-to-gcp
 data:
   setup_trino.sql: |
-    CREATE SCHEMA IF NOT EXISTS hive.crm_us;
-    DROP TABLE IF EXISTS hive.crm_us.pipe_crm_us_to_azure;
-    CREATE TABLE hive.crm_us.pipe_crm_us_to_azure (
-        cust_id BIGINT,
-        full_name VARCHAR,
-        email_address VARCHAR,
-        phone_number VARCHAR,
-        is_suspicious BOOLEAN,
+    CREATE SCHEMA IF NOT EXISTS hive.marketing_global;
+    DROP TABLE IF EXISTS hive.marketing_global.pipe_mkt_global_to_gcp;
+    CREATE TABLE hive.marketing_global.pipe_mkt_global_to_gcp (
+        campaign_id VARCHAR,
+        platform_name VARCHAR,
+        ad_spend DECIMAL(18,2),
+        clicks BIGINT,
+        impressions DOUBLE,
+        event_timestamp TIMESTAMP,
         run_date DATE
     ) WITH (
         format = 'PARQUET',
-        external_location = 'abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/',
+        external_location = 'gs://global-marketing-insights-data/processed/',
         partitioned_by = ARRAY['run_date']
     );
 ---
@@ -28,14 +29,13 @@ metadata:
   name: hive-catalog-config
   namespace: analytics
   labels:
-    project_id: pipe-crm-us-to-azure
+    project_id: pipe-mkt-global-to-gcp
 data:
   hive.properties: |
     connector.name=hive
     hive.metastore=file
-    hive.metastore.catalog.dir=abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/metastore/
-    hive.azure.abfs-storage-account=uscrminsightsstorage
-    hive.azure.abfs-access-key=__ABFS_KEY__
+    hive.metastore.catalog.dir=gs://global-marketing-insights-data/metastore/
+    hive.gcs.use-access-token=false
     hive.allow-drop-table=true
     hive.allow-rename-table=true
 ---
@@ -45,7 +45,7 @@ metadata:
   name: grafana-dash-config
   namespace: monitoring
   labels:
-    project_id: pipe-crm-us-to-azure
+    project_id: pipe-mkt-global-to-gcp
 data:
   dashboard-provider.yaml: |
     apiVersion: 1
@@ -60,50 +60,93 @@ data:
         path: /etc/grafana/provisioning/dashboards
   monitoring_specs.json: |
     {
-      "uid": "pipe-crm-us-to-azure-dashboard",
-      "title": "US CRM to Azure Data Observability",
+      "uid": "pipe-mkt-global-to-gcp-dashboard",
+      "title": "Global Marketing Data Observability",
       "schemaVersion": 37,
       "version": 1,
       "refresh": "5m",
       "time": { "from": "now-6h", "to": "now" },
-      "tags": ["data-pipeline", "us-crm"],
+      "tags": ["data-pipeline", "global-marketing", "gcp"],
+      "templating": {
+        "list": [
+          {
+            "name": "cloud_provider",
+            "type": "query",
+            "datasource": "Prometheus",
+            "query": "label_values(pipeline_rows_processed_total, cloud_provider)",
+            "refresh": 2,
+            "includeAll": true,
+            "multi": true,
+            "label": "Cloud"
+          },
+          {
+            "name": "project_id",
+            "type": "query",
+            "datasource": "Prometheus",
+            "query": "label_values(pipeline_rows_processed_total{cloud_provider=~\"$cloud_provider\"}, project_id)",
+            "refresh": 2,
+            "includeAll": true,
+            "label": "Pipeline Run"
+          }
+        ]
+      },
       "panels": [
         {
           "id": 1,
           "title": "Record Count",
-          "type": "timeseries",
+          "type": "stat",
           "datasource": "Prometheus",
           "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+          "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" }, "graphMode": "area" } },
           "targets": [
             {
-              "expr": "pipeline_rows_processed_total{project_id=\"unknown\"}",
-              "legendFormat": "Rows Processed"
+              "expr": "pipeline_rows_processed_total{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}",
+              "legendFormat": "{{cloud_provider}} / {{project_id}}"
             }
           ]
         },
         {
           "id": 2,
-          "title": "Freshness",
-          "type": "timeseries",
+          "title": "Last Success",
+          "type": "stat",
           "datasource": "Prometheus",
           "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "time:YYYY-MM-DD HH:mm:ss",
+              "color": { "mode": "fixed", "fixedColor": "blue" }
+            }
+          },
           "targets": [
             {
-              "expr": "pipeline_last_success_timestamp{project_id=\"unknown\"}",
-              "legendFormat": "Last Success"
+              "expr": "pipeline_last_success_timestamp{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"} * 1000",
+              "legendFormat": "{{cloud_provider}} / {{project_id}}"
             }
           ]
         },
         {
           "id": 3,
           "title": "Rejection Rate",
-          "type": "timeseries",
+          "type": "stat",
           "datasource": "Prometheus",
           "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+          "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 20 },
+                { "color": "red", "value": 50 }
+              ] }
+            }
+          },
           "targets": [
             {
-              "expr": "pipeline_rows_rejected_total{project_id=\"unknown\"} / clamp_min(pipeline_rows_processed_total{project_id=\"unknown\"} + pipeline_rows_rejected_total{project_id=\"unknown\"}, 1) * 100",
-              "legendFormat": "Rejection Rate"
+              "expr": "pipeline_rows_rejected_total{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"} / clamp_min(pipeline_rows_processed_total{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"} + pipeline_rows_rejected_total{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}, 1) * 100",
+              "legendFormat": "{{cloud_provider}} / {{project_id}}"
             }
           ]
         },
@@ -113,10 +156,20 @@ data:
           "type": "gauge",
           "datasource": "Prometheus",
           "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 60 },
+                { "color": "red", "value": 120 }
+              ] }
+            }
+          },
           "targets": [
             {
-              "expr": "pipeline_duration_seconds{project_id=\"unknown\"}",
-              "legendFormat": "Duration"
+              "expr": "pipeline_duration_seconds{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}",
+              "legendFormat": "{{cloud_provider}} / {{project_id}}"
             }
           ]
         },
@@ -126,21 +179,26 @@ data:
           "type": "piechart",
           "datasource": "Prometheus",
           "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
+          "options": {
+            "pieType": "pie",
+            "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] },
+            "reduceOptions": { "values": false, "calcs": ["lastNotNull"] }
+          },
           "targets": [
             {
-              "expr": "pipeline_rows_rejected_by_reason{project_id=\"unknown\"}",
+              "expr": "pipeline_rows_rejected_by_reason{cloud_provider=~\"$cloud_provider\", project_id=~\"$project_id\"}",
               "legendFormat": "{{reason}}"
             }
           ]
         }
       ],
       "alerting": {
-        "name": "Data Silence Alert",
+        "name": "Global Marketing — Data Silence Alert",
         "condition": "no data for 60 minutes",
         "severity": "critical",
         "for": "60m",
-        "labels": { "severity": "critical", "project_id": "unknown" },
-        "annotations": { "summary": "No data received for US CRM to Azure pipeline in the last 60 minutes." }
+        "labels": { "severity": "critical", "pipeline": "global-marketing", "cloud_provider": "gcp" },
+        "annotations": { "summary": "No data received for Global Marketing pipeline (GCP) in the last 60 minutes." }
       }
     }
 ---
@@ -150,7 +208,7 @@ metadata:
   name: grafana-datasource-config
   namespace: monitoring
   labels:
-    project_id: pipe-crm-us-to-azure
+    project_id: pipe-mkt-global-to-gcp
 data:
   datasource.yaml: |
     apiVersion: 1
@@ -167,7 +225,7 @@ metadata:
   name: prometheus-config
   namespace: monitoring
   labels:
-    project_id: pipe-crm-us-to-azure
+    project_id: pipe-mkt-global-to-gcp
 data:
   prometheus.yml: |
     global:

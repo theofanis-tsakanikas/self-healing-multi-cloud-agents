@@ -1,20 +1,20 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pipe-crm-us-to-azure-job
+  name: pipe-mkt-global-to-gcp-job
   namespace: analytics
   labels:
-    project_id: pipe-crm-us-to-azure
+    project_id: pipe_mkt_global_to_gcp
     component: pipeline-job
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        project_id: pipe-crm-us-to-azure
+        project_id: pipe_mkt_global_to_gcp
         component: pipeline-job
     spec:
-      serviceAccountName: us-crm-insights-sa
+      serviceAccountName: global-mkt-insights-sa
       restartPolicy: Never
       initContainers:
       - name: init-trino
@@ -32,21 +32,21 @@ spec:
           mountPath: /scripts
       containers:
       - name: pipeline
-        image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}
+        image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo:latest
         env:
         - name: PROJECT_ID
-          value: "pipe-crm-us-to-azure"
+          value: "pipe_mkt_global_to_gcp"
         - name: CLOUD_PROVIDER
-          value: "azure"
+          value: "gcp"
         - name: DESTINATION_URI
-          value: "abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/"
+          value: "gs://global-marketing-insights-data/processed/"
         - name: TRINO_HOST
           value: "trino.analytics.svc.cluster.local"
         - name: PUSHGATEWAY_URL
           value: "http://pushgateway.monitoring.svc.cluster.local:9091"
         envFrom:
         - secretRef:
-            name: pipe-crm-us-to-azure-db-credentials
+            name: pipe-mkt-global-to-gcp-db-credentials
         resources:
           requests:
             memory: "1Gi"

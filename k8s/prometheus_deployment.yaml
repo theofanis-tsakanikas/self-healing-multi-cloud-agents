@@ -4,7 +4,7 @@ metadata:
   name: prometheus
   namespace: monitoring
   labels:
-    project_id: pipe-crm-us-to-azure
+    project_id: pipe-mkt-global-to-gcp
     component: prometheus
 spec:
   replicas: 1
@@ -15,7 +15,7 @@ spec:
     metadata:
       labels:
         app: prometheus
-        project_id: pipe-crm-us-to-azure
+        project_id: pipe-mkt-global-to-gcp
         component: prometheus
     spec:
       containers:
@@ -46,7 +46,7 @@ metadata:
   name: prometheus
   namespace: monitoring
   labels:
-    project_id: pipe-crm-us-to-azure
+    project_id: pipe-mkt-global-to-gcp
     component: prometheus
 spec:
   selector:
@@ -62,7 +62,7 @@ metadata:
   name: pushgateway
   namespace: monitoring
   labels:
-    project_id: pipe-crm-us-to-azure
+    project_id: pipe-mkt-global-to-gcp
     component: pushgateway
 spec:
   replicas: 1
@@ -73,7 +73,7 @@ spec:
     metadata:
       labels:
         app: pushgateway
-        project_id: pipe-crm-us-to-azure
+        project_id: pipe-mkt-global-to-gcp
         component: pushgateway
     spec:
       containers:
@@ -95,7 +95,7 @@ metadata:
   name: pushgateway
   namespace: monitoring
   labels:
-    project_id: pipe-crm-us-to-azure
+    project_id: pipe-mkt-global-to-gcp
     component: pushgateway
 spec:
   selector:
