@@ -119,3 +119,57 @@ class TestGrafanaDashboard:
     def test_invalid_json_flagged(self, tmp_path):
         out = _validate(tmp_path, "monitoring_specs.json", "{not valid json")
         assert "JSON SYNTAX ERROR" in out
+
+
+class TestK8sImageTagPolicy:
+    _PUBLIC_ERROR = "found for public images"
+
+    def _manifest(self, image):
+        return (
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: x\n"
+            "spec:\n  template:\n    spec:\n      containers:\n"
+            f"      - name: c\n        image: {image}\n"
+        )
+
+    def test_public_image_latest_is_flagged(self, tmp_path):
+        out = _validate(tmp_path, "dep.yaml", self._manifest("redis:latest"))
+        assert self._PUBLIC_ERROR in out
+
+    def test_gcp_artifact_registry_latest_is_exempt(self, tmp_path):
+        # Private app image whose tag CI rewrites to the commit SHA → acceptable.
+        out = _validate(tmp_path, "dep.yaml",
+                        self._manifest("europe-west3-docker.pkg.dev/proj/repo:latest"))
+        assert self._PUBLIC_ERROR not in out
+
+    def test_azure_acr_latest_is_exempt(self, tmp_path):
+        out = _validate(tmp_path, "dep.yaml",
+                        self._manifest("myreg.azurecr.io/app/repo:latest"))
+        assert self._PUBLIC_ERROR not in out
+
+    def test_aws_ecr_latest_is_exempt(self, tmp_path):
+        out = _validate(tmp_path, "dep.yaml",
+                        self._manifest("123.dkr.ecr.eu-central-1.amazonaws.com/repo:latest"))
+        assert self._PUBLIC_ERROR not in out
+
+
+class TestConfigMapEmbeddedJSON:
+    _BASE = (
+        "apiVersion: v1\n"
+        "kind: ConfigMap\n"
+        "metadata:\n"
+        "  name: grafana-dash-config\n"
+        "data:\n"
+        "  monitoring_specs.json: |\n"
+        "    {body}\n"
+    )
+
+    def test_valid_embedded_json_is_clean(self, tmp_path):
+        out = _validate(tmp_path, "configmaps.yaml",
+                        self._BASE.format(body='{"uid": "x", "panels": []}'))
+        assert "is not valid JSON" not in out
+
+    def test_stray_semicolon_in_embedded_json_flagged(self, tmp_path):
+        # The exact infra-transcription bug: a ';' after the root closing brace.
+        out = _validate(tmp_path, "configmaps.yaml",
+                        self._BASE.format(body='{"uid": "x", "panels": []};'))
+        assert "is not valid JSON" in out

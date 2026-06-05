@@ -612,15 +612,24 @@ def validate_generated_code(filename: str) -> str:
                     f"replace every <...> token with its actual value from context before applying.{hint}"
                 )
 
-            # :latest tags are policy violations for public images.
-            # ECR images (.dkr.ecr.amazonaws.com) are exempt — CI/CD patches the tag on
-            # deployment via the commit SHA. Public images must use pinned versions.
+            # :latest tags are policy violations for PUBLIC base images (trino, grafana…).
+            # The pipeline's OWN image lives in a PRIVATE cloud registry whose tag the
+            # CI/CD step rewrites to the commit SHA on deployment, so a committed ':latest'
+            # there is acceptable. The exemption is cloud-agnostic — match all three clouds,
+            # never AWS-only:
+            #   AWS ECR               → .dkr.ecr.       (123…dkr.ecr.eu-central-1.amazonaws.com/…)
+            #   GCP Artifact Registry → .pkg.dev        (europe-west3-docker.pkg.dev/…)
+            #   Azure ACR             → .azurecr.io     (myregistry.azurecr.io/…)
+            _PRIVATE_REGISTRY_MARKERS = (".dkr.ecr.", ".pkg.dev", ".azurecr.io")
             all_latest = _re.findall(r"image:\s*(\S+):latest", raw, _re.IGNORECASE)
             # Placeholder images (e.g. <ECR_REPOSITORY_URL>) are already caught by the
             # placeholder check above — exclude them from the :latest check to avoid
             # a confusing second error about the same token.
-            public_latest = [img for img in all_latest if ".dkr.ecr." not in img and not img.startswith("<")]
-            ecr_latest = [img for img in all_latest if ".dkr.ecr." in img]
+            public_latest = [
+                img for img in all_latest
+                if not any(m in img for m in _PRIVATE_REGISTRY_MARKERS) and not img.startswith("<")
+            ]
+            registry_latest = [img for img in all_latest if any(m in img for m in _PRIVATE_REGISTRY_MARKERS)]
             if public_latest:
                 fixes = []
                 for img in public_latest:
@@ -633,10 +642,38 @@ def validate_generated_code(filename: str) -> str:
                     f"K8S: ':latest' image tag(s) found for public images — replace with pinned versions:\n"
                     + "\n".join(fixes)
                 )
-            if ecr_latest:
+            if registry_latest:
                 warnings.append(
-                    f"ECR image(s) {ecr_latest} use ':latest' — CI/CD will pin to commit SHA on deployment. Acceptable."
+                    f"Private-registry image(s) {registry_latest} use ':latest' — CI/CD will pin to commit SHA on deployment. Acceptable."
                 )
+
+            # ── Embedded JSON in ConfigMaps must be valid JSON ────────────────
+            # grafana-dash-config carries a COPY of monitoring_specs.json as a YAML
+            # block scalar. The standalone dashboards/monitoring_specs.json is validated
+            # separately, but the embedded copy can be corrupted during transcription
+            # (e.g. a stray ';' after the closing brace). kubectl never parses it — it is
+            # an opaque string value — so invalid JSON here slips through and Grafana
+            # silently provisions NO dashboard ("No data"). Parse every *.json key.
+            if "kind: ConfigMap" in raw and ".json" in raw:
+                try:
+                    for doc in yaml.safe_load_all(raw):
+                        if not isinstance(doc, dict):
+                            continue
+                        cm_name = (doc.get("metadata") or {}).get("name", "?")
+                        for key, val in (doc.get("data") or {}).items():
+                            if key.endswith(".json") and isinstance(val, str):
+                                try:
+                                    json.loads(val)
+                                except json.JSONDecodeError as _je:
+                                    errors.append(
+                                        f"K8S: ConfigMap '{cm_name}' key '{key}' is not valid JSON "
+                                        f"({_je.msg} at line {_je.lineno} col {_je.colno}). The embedded "
+                                        f"dashboard JSON must parse exactly — a stray character (e.g. a "
+                                        f"trailing ';' after the closing brace) makes Grafana provision no "
+                                        f"dashboard. Copy monitoring_specs.json verbatim, no extra tokens."
+                                    )
+                except yaml.YAMLError as _ye:
+                    errors.append(f"K8S: ConfigMap YAML is unparseable: {_ye}")
 
             # ── Per-file project policy checks ────────────────────────────────
             if fname == "job.yaml":
