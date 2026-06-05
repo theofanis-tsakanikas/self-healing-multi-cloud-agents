@@ -57,7 +57,7 @@ The Agent MUST select the logic block that matches the `target_cloud` identifier
 
 ### 3.2 Module: GCP (target_cloud: gcp)
 - **Auth:** Use `google-github-actions/auth@v2` with `credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}` — the SA-key JSON content. This is the EXACT secret name (same one the infra-agent Terraform and bootstrap use); never invent a different name (e.g. `GCP_CREDENTIALS`) or the deploy fails to authenticate to Artifact Registry / GKE.
-- **Registry:** `google-github-actions/setup-gcloud@v2` to configure Docker for Artifact Registry/GCR.
+- **Registry:** `google-github-actions/setup-gcloud@v2` installs the CLI, then a SEPARATE explicit step **🔴 MANDATORY** — `run: gcloud auth configure-docker {{artifact_registry_region}}-docker.pkg.dev --quiet`. `setup-gcloud` alone does NOT wire Docker's credential helper, so `docker push` fails with `denied: Unauthenticated request ... artifactregistry.repositories.uploadArtifacts`. This is the GCP equivalent of Azure's mandatory `ACR Login` / AWS's `amazon-ecr-login` — never omit it. Use the Artifact Registry host `{{artifact_registry_region}}-docker.pkg.dev` (e.g. `europe-west3-docker.pkg.dev`), matching the image registry.
 - **Kubeconfig:** `gcloud container clusters get-credentials {{gke_cluster_name}} --region {{region}} --project {{gcp_project_id}}`
 
 ### 3.3 Module: Azure (target_cloud: azure)

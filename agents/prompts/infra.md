@@ -126,7 +126,7 @@ For **`cloud_provider: azure`** specifically:
 - **Cloud-Specific Auth:** Use the correct module from `infra_standard_cicd`:
     - AWS: `aws-actions/configure-aws-credentials@v4` + ECR login + `aws eks update-kubeconfig`. Region MUST be `${{ vars.AWS_DEFAULT_REGION }}` — never substitute the literal region value from context (e.g. never write `eu-central-1` directly).
     - Azure: `azure/login@v2` + `azure/docker-login@v1` + `az aks get-credentials`
-    - GCP: `google-github-actions/auth@v2` + `gcloud auth configure-docker` + `gcloud container clusters get-credentials`
+    - GCP: `google-github-actions/auth@v2` + `setup-gcloud@v2` + a SEPARATE explicit `run: gcloud auth configure-docker {{artifact_registry_region}}-docker.pkg.dev --quiet` step (🔴 MANDATORY — `setup-gcloud` alone does NOT authenticate `docker push`; without this step it fails `denied: Unauthenticated ... artifactregistry...uploadArtifacts`) + `gcloud container clusters get-credentials`
 - **Heartbeat Signal:** Final step MUST be `run: echo "Deployment Complete"`.
 
 ### 5. PERSISTENCE & SELF-HEALING
