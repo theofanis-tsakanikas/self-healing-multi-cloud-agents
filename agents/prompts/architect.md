@@ -58,7 +58,8 @@ Generate `scripts/*.py` following `arch_standard_python` exactly. The standard d
 - **Destination URI:** `destination_uri = os.getenv("DESTINATION_URI")` — never hardcode a URI string in the script. `LOGICAL_DESTINATION.uri` from context identifies the bucket but must not appear as a literal in the generated code. The K8s Job injects the real value at runtime.
 - **Partition path:** Always `{destination_uri}run_date=YYYY-MM-DD/` — never use `project_id` or the pipeline name as a path component.
 - **Error handling:** `create_engine` AND the extraction loop must be in the same `try` block.
-- **Cloud SDK guards:** All cloud SDK calls (`boto3`, `gcs`, `BlobServiceClient`) MUST be inside `if _CLOUD == "..."` guards — never called unconditionally after a conditional import.
+- **Cloud SDK guards:** All cloud SDK calls (`boto3.client`, `storage.Client`, `BlobServiceClient`) MUST be inside the single `if _CLOUD == "<cloud>":` guard. NEVER flatten the idempotency or credentials block to a bare unguarded call — at least one `if _CLOUD ==` guard must remain in the file (the CLOUD-GUARD validator fails otherwise).
+- **Cloud SDK import (single-cloud collapse):** Emit ONE PLAIN module-level import for the target cloud — GCP `from google.cloud import storage` (used as `storage.Client()`), AWS `import boto3`, Azure `from azure.storage.blob import BlobServiceClient`. Keep it at module level and NEVER drop it when you collapse the run() guards — a missing import is the F821 `Undefined name` failure (e.g. `storage.Client()` with no import).
 - **Business rules:** Every `TRANSFORMATION_LOGIC` item as real pandas code (see Section 3).
 - **Type casting:** Step 3c in `arch_standard_python` is mandatory — cast `float64` → `Int64` for all quantity/count/units columns before every `to_parquet()`.
 - **Storage:** `storage_options=dict()` in every `to_parquet()` call — use `dict()`, NOT `{}` (an empty-brace literal can get double-braced into `{{}}` → `SyntaxError`).
