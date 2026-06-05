@@ -439,29 +439,17 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         else:
             relevant_keys = []
 
-        # All four infra standards are always read from disk to bypass Pinecone key-swapping.
-        # The discovery-phase agent frequently stores query results under the wrong
-        # collected_specs key (e.g. cicd_standards.md ends up as infra_standard_k8s) — or, for
-        # iac, returns ANOTHER cloud's terraform standard entirely (e.g. the Azure azurerm
-        # backend for a GCP pipeline → `terraform init` fails on the non-existent Azure
-        # resource group). The iac standard is cloud-specific, so it is keyed by cloud_provider.
+        # k8s/dockerfile/cicd are read from disk to bypass Pinecone key-swapping (the
+        # discovery agent often stores a query result under the wrong collected_specs key,
+        # e.g. cicd_standards.md ends up as infra_standard_k8s). The iac standard stays a
+        # Pinecone retrieval (it is cloud-specific and we want a single synced source) — its
+        # wrong-cloud overwrite is prevented by the cloud-match guard in the Smart Mapping.
         _kb_root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "knowledge_base")
-        _iac_by_cloud = {
-            "aws":   os.path.join(_kb_root, "infrastructure", "terraform_aws_s3.md"),
-            "gcp":   os.path.join(_kb_root, "infrastructure", "terraform_gcp_bucket.md"),
-            "azure": os.path.join(_kb_root, "infrastructure", "terraform_azure_blob.md"),
-        }
-        _iac_disk_path = (
-            os.path.join(_kb_root, "infrastructure", "terraform_databricks.md")
-            if is_databricks else _iac_by_cloud.get(cloud_provider)
-        )
         _disk_standards = {
             "infra_standard_k8s":        os.path.join(_kb_root, "infrastructure", "k8s_deployment_rules.md"),
             "infra_standard_dockerfile": os.path.join(_kb_root, "infrastructure", "dockerfile_standard.md"),
             "infra_standard_cicd":       os.path.join(_kb_root, "engineering",    "cicd_standards.md"),
         }
-        if _iac_disk_path:
-            _disk_standards["infra_standard_iac"] = _iac_disk_path
         for _std_key, _std_path in _disk_standards.items():
             if _std_key in relevant_keys and os.path.exists(_std_path):
                 with open(_std_path, encoding="utf-8") as _f:
@@ -618,8 +606,29 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                     res_lower = result_str.lower()
                     matched = False
                     if any(x in q for x in ["terraform", "iac", "backend", "s3 bucket", "storage account", "gcs"]):
-                        collected_specs["infra_standard_iac"] = result_str
-                        matched = True
+                        # The prompt lists ALL THREE clouds' iac queries; when discovery spans
+                        # turns the agent sometimes fires another cloud's iac query too. Both map
+                        # here, so an unguarded overwrite of the shared infra_standard_iac key
+                        # replaces the correct standard (e.g. an Azure azurerm-backend result
+                        # lands in a GCP pipeline → terraform init hits the non-existent Azure RG).
+                        # Store the result ONLY if the query targets THIS pipeline's cloud.
+                        if "azure" in q or "adls" in q or "azurerm" in q:
+                            _q_cloud = "azure"
+                        elif "gcs" in q or "gcp" in q or "google cloud storage" in q:
+                            _q_cloud = "gcp"
+                        elif "s3" in q or "dynamodb" in q:
+                            _q_cloud = "aws"
+                        else:
+                            _q_cloud = cloud_provider  # generic terraform query → current cloud
+                        if is_databricks or _q_cloud == cloud_provider:
+                            collected_specs["infra_standard_iac"] = result_str
+                            matched = True
+                        else:
+                            matched = True  # consume it (don't fall through to fallback) but DROP it
+                            logger.warning(
+                                f"🚫 Ignored wrong-cloud iac query ({_q_cloud}) for a "
+                                f"{cloud_provider} pipeline — kept the correct infra_standard_iac."
+                            )
                     if any(x in q for x in ["kubernetes", "k8s", "manifest", "deployment", "orchestration"]):
                         collected_specs["infra_standard_k8s"] = result_str
                         matched = True
