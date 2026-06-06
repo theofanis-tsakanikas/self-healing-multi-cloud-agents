@@ -595,6 +595,20 @@ def validate_generated_code(filename: str) -> str:
                     "replace every <...> token with its actual value from context "
                     "(e.g. <AWS_ACCOUNT_ID> → the 12-digit account ID from Terraform outputs)."
                 )
+            # Image-tag sed must keep the SHA as the TAG (after ':'), never append it to the
+            # image NAME. The mangled form `…/pipe-x-${{ github.sha }}` (no colon) drops the tag
+            # → Docker defaults to :latest → the Job fails ImagePullBackOff (image not found).
+            for _sed in _re.findall(r"sed -i [^\n]*image:[^\n]*github\.sha[^\n]*", raw):
+                if not _re.search(r":\$\{\{\s*github\.sha", _sed):
+                    errors.append(
+                        "GHA [image tag]: the Set-Image-Tag sed appends ${{ github.sha }} to the "
+                        "image NAME, not the TAG — the replacement must be "
+                        "'<image>:${{ github.sha }}' (a colon immediately before the SHA). Without "
+                        "the colon the tag is dropped, Docker pulls ':latest', and the Job fails "
+                        "ImagePullBackOff. Also never add a timestamp/date suffix to the image "
+                        "name. See cicd_standards.md Section 3.2."
+                    )
+
             # Secret name in kubectl create must be RFC 1123 (lowercase + hyphens, no underscores).
             secret_creates = _re.findall(r"kubectl create secret generic\s+(\S+)", raw)
             bad_secret_names = [n for n in secret_creates if _re.search(r"[A-Z_]", n)]

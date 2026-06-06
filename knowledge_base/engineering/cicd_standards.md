@@ -66,6 +66,20 @@ The Agent MUST select the logic block that matches the `target_cloud` identifier
 - **Registry:** a SEPARATE explicit step **🔴 MANDATORY** — `run: gcloud auth configure-docker {{artifact_registry_region}}-docker.pkg.dev --quiet`. `setup-gcloud` does NOT wire Docker's credential helper, so `docker push` otherwise fails `denied: Unauthenticated request ... artifactregistry.repositories.uploadArtifacts`. (GCP equivalent of Azure's `ACR Login` / AWS's `amazon-ecr-login`.) Use the Artifact Registry host `{{artifact_registry_region}}-docker.pkg.dev` (e.g. `europe-west3-docker.pkg.dev`).
 - **Image path:** GCP Artifact Registry images are `HOST/PROJECT/REPOSITORY/IMAGE:TAG` — the full image reference (resolved in context as `ecr_repository_url`) already includes the IMAGE segment (the pipeline name), so use it verbatim as `<ecr_repository_url>:${{ github.sha }}`. Never push to just `HOST/PROJECT/REPOSITORY:TAG` (no image name) — `docker push` fails `name invalid: Missing image name`. (Unlike AWS ECR, where the repository IS the image.)
 - **Kubeconfig:** `gcloud container clusters get-credentials {{gke_cluster_name}} --region {{region}} --project {{gcp_project_id}}` — requires the `gke-gcloud-auth-plugin` from the Toolchain step above.
+- **Build, push & image-tag steps — 🔴 use these VERBATIM:**
+  ```yaml
+  - name: Build & Push Image
+    run: |
+      docker build -t <ecr_repository_url>:${{ github.sha }} -f Dockerfile .
+      docker push <ecr_repository_url>:${{ github.sha }}
+      docker tag  <ecr_repository_url>:${{ github.sha }} <ecr_repository_url>:latest
+      docker push <ecr_repository_url>:latest
+  # ... (kubeconfig + Deploy Shared Services) ...
+  - name: Set Image Tag in Job Manifest
+    run: |
+      sed -i 's|image: <ecr_repository_url>:.*|image: <ecr_repository_url>:${{ github.sha }}|' k8s/job.yaml
+  ```
+  **🔴 The image NAME is `<ecr_repository_url>` VERBATIM — it already includes HOST/PROJECT/REPOSITORY/IMAGE.** Do NOT append a timestamp, date, build-id or any other suffix to it (e.g. `…/pipe-x-20260606-0153`): the image name must be byte-for-byte IDENTICAL in the build, the push, `k8s/job.yaml`, and the `sed` pattern, or the pull fails `not found`. In the `sed`, the pattern is anchored on the tag separator `…:.*` and the replacement keeps `…:${{ github.sha }}` — the SHA is the TAG (after the colon). NEVER write the replacement as `<ecr_repository_url>-${{ github.sha }}` / `<ecr_repository_url>${{ github.sha }}` (no colon): that moves the SHA into the image NAME and drops the tag, so Docker defaults to `:latest` and pulls a non-existent image.
 
 ### 3.3 Module: Azure (target_cloud: azure)
 - **Auth:** Use `azure/login@v2` with `creds: ${{ secrets.AZURE_CREDENTIALS }}`.

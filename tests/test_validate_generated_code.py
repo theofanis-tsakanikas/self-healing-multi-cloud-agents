@@ -240,3 +240,31 @@ class TestTerraformGcpProcessedDir:
         monkeypatch.setenv("CLOUD_PROVIDER", "aws")
         out = _validate(tmp_path, "main.tf", 'resource "aws_s3_bucket" "data" {}\n')
         assert "pre-created processed" not in out
+
+
+class TestGhaImageTagSed:
+    def _wf(self, tmp_path, sed_line):
+        d = tmp_path / ".github" / "workflows"
+        d.mkdir(parents=True)
+        f = d / "x_pipeline.yml"
+        f.write_text(
+            "name: Deploy\non:\n  push:\n    paths: ['k8s/**']\n"
+            "jobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - name: Set Image Tag\n        run: |\n          " + sed_line + "\n"
+        )
+        return validate_generated_code.invoke({"filename": str(f)})
+
+    def test_mangled_sed_sha_in_name_flagged(self, tmp_path):
+        # The exact bug: SHA appended to the image NAME with '-' (no colon) → tag dropped.
+        out = self._wf(
+            tmp_path,
+            "sed -i 's|image: host/repo/img-.*|image: host/repo/img-${{ github.sha }}|' k8s/job.yaml",
+        )
+        assert "image NAME" in out and "ImagePullBackOff" in out
+
+    def test_correct_tag_sed_is_clean(self, tmp_path):
+        out = self._wf(
+            tmp_path,
+            "sed -i 's|image: host/repo/img:.*|image: host/repo/img:${{ github.sha }}|' k8s/job.yaml",
+        )
+        assert "image NAME" not in out
