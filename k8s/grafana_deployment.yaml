@@ -4,7 +4,7 @@ metadata:
   name: grafana
   namespace: monitoring
   labels:
-    project_id: pipe-mkt-global-to-gcp
+    project_id: multi-cloud-self-healing-agent
     component: grafana
 spec:
   replicas: 1
@@ -15,7 +15,7 @@ spec:
     metadata:
       labels:
         app: grafana
-        project_id: pipe-mkt-global-to-gcp
+        project_id: multi-cloud-self-healing-agent
         component: grafana
     spec:
       containers:
@@ -52,7 +52,7 @@ metadata:
   name: grafana
   namespace: monitoring
   labels:
-    project_id: pipe-mkt-global-to-gcp
+    project_id: multi-cloud-self-healing-agent
     component: grafana
 spec:
   selector:

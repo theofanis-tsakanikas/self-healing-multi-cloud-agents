@@ -27,10 +27,11 @@ def run():
     prefix = parsed.path.lstrip('/')
 
     if _CLOUD == "gcp":
+        from google.cloud import storage
         client = storage.Client()
         blobs = list(client.list_blobs(bucket, prefix=prefix, max_results=1))
         if blobs:
-            logging.info("Destination already populated. Skipping.")
+            logging.info("Partition already populated. Skipping.")
             return
 
     # ── 2. CREDENTIALS via cloud_get() ───────────────────────────────────────
@@ -50,6 +51,7 @@ def run():
     try:
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
+
             # Business rules implementation
             _before = len(chunk)
             chunk = chunk[chunk['ad_spend'].astype(float) >= 0.0]
@@ -63,12 +65,12 @@ def run():
             chunk = chunk.dropna(subset=['campaign_id'])
             rejected_by_reason['completeness_enforcement'] = _before - len(chunk)
 
-            chunk['campaign_id'] = chunk['campaign_id'].where(chunk['campaign_id'].str.match(r'CMP-\d{4}'), other='UNASSIGNED_CAMPAIGN')
+            chunk['campaign_id'] = chunk['campaign_id'].where(chunk['campaign_id'].str.match(r'^CMP-\d{4}$'), other='UNASSIGNED_CAMPAIGN')
 
-            chunk['is_suspicious'] = (chunk['clicks'] > chunk['impressions']) | (chunk['clicks'] < 0) | (chunk['clicks'] >= 1000000)
+            chunk['is_suspicious'] = (chunk['clicks'] > chunk['impressions']) | (chunk['clicks'] >= 1000000)
 
             # Type casting
-            int_cols = [c for c in chunk.select_dtypes(include='float64').columns if any(kw in c.lower() for kw in ['clicks'])]
+            int_cols = [c for c in chunk.select_dtypes(include='float64').columns if any(kw in c.lower() for kw in ['clicks', 'impressions'])]
             for col in int_cols:
                 chunk[col] = chunk[col].astype('Int64')
 
@@ -87,7 +89,7 @@ def run():
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
-    schema, table = "marketing_global", "pipe_mkt_global_to_gcp"  # from CATALOG_AND_MONITORING.trino_metadata
+    schema, table = "marketing_global", "pipe_mkt_global_to_gcp"  # from context
     conn = trino_connect(host=trino_host, port=8080, user="pipeline")
     cursor = conn.cursor()
     cursor.execute(f"CALL hive.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
@@ -96,9 +98,10 @@ def run():
 
     # ── 5. METRICS EMISSION ───────────────────────────────────────────────────
     pushgateway_url = os.getenv("PUSHGATEWAY_URL", "http://pushgateway.monitoring.svc.cluster.local:9091")
-    project_id = os.getenv("PROJECT_ID", "unknown")
+    project_id = os.getenv("PROJECT_ID", "global_marketing")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "gcp")
 
+    # Emit metrics
     registry = CollectorRegistry()
     Gauge('pipeline_rows_processed_total', 'Total rows written to storage after business rules', ['project_id', 'cloud_provider'], registry=registry).labels(project_id=project_id, cloud_provider=cloud_provider).set(total_rows)
     Gauge('pipeline_last_success_timestamp', 'Unix timestamp of last successful run', ['project_id', 'cloud_provider'], registry=registry).labels(project_id=project_id, cloud_provider=cloud_provider).set(time.time())
@@ -110,7 +113,8 @@ def run():
         rejected_by_reason_gauge.labels(project_id=project_id, cloud_provider=cloud_provider, reason=_reason).set(_count)
 
     push_to_gateway(pushgateway_url, job=project_id, registry=registry)
-    logging.info(f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, duration={duration_seconds:.1f}s, cloud={cloud_provider}")
+    logging.info(f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, duration={duration_seconds:.1f}s")
+
 
 if __name__ == "__main__":
     run()

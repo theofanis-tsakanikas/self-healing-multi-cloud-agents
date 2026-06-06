@@ -39,9 +39,3 @@ resource "google_storage_bucket_object" "processed_dir" {
   bucket  = google_storage_bucket.data.name
   content = " "
 }
-
-resource "google_storage_bucket_iam_member" "pipeline" {
-  bucket = google_storage_bucket.data.name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${data.google_service_account.pipeline.email}"
-}
