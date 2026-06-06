@@ -35,7 +35,9 @@ def create_chaos_data(target, n_rows=100):
     """
     logger.info(f"Generating chaos data for target: {target}")
     
-    if target == "eu_sales":
+    if target in ("eu_sales", "sales_lakehouse"):
+        # sales_lakehouse reuses the EU-Sales schema (same business rules) but lands in its
+        # OWN dedicated RDS / table — see build_engine + raw_{target}.
         data_list = []
         for _ in range(n_rows):
             data_list.append({
@@ -92,6 +94,7 @@ def build_engine(db_type, target):
     # Target-specific credential prefix — each cloud has its own DB secrets
     CREDENTIAL_MAP = {
         "eu_sales":         {"prefix": "POSTGRES", "driver": "postgresql+psycopg2", "default_port": "5432"},
+        "sales_lakehouse":  {"prefix": "POSTGRES", "driver": "postgresql+psycopg2", "default_port": "5432"},
         "us_crm":           {"prefix": "CRM",      "driver": "postgresql+psycopg2", "default_port": "5432"},
         "global_marketing": {"prefix": "MYSQL",    "driver": "mysql+pymysql",       "default_port": "3306"},
     }
@@ -116,7 +119,7 @@ def build_engine(db_type, target):
             user    = cloud_get("gcp", "db_user",     db_type="mysql")
             password = cloud_get("gcp", "db_password", db_type="mysql")
             db_name = cloud_get("gcp", "db_name",     db_type="mysql")
-        else:  # us_crm (Azure) — env var fallback until Azure Secret Manager is set up
+        else:  # us_crm (Azure) / sales_lakehouse (Databricks RDS) — read {PREFIX}_DB_* env vars
             prefix = cfg["prefix"]
             host    = os.getenv(f"{prefix}_DB_HOST")
             port    = os.getenv(f"{prefix}_DB_PORT", default_port)
@@ -178,7 +181,7 @@ if __name__ == "__main__":
     
     parser.add_argument(
         "--target", 
-        choices=["eu_sales", "us_crm", "global_marketing", "all"], 
+        choices=["eu_sales", "sales_lakehouse", "us_crm", "global_marketing", "all"],
         default="all",
         help="The functional scope of the data"
     )

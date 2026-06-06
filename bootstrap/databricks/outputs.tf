@@ -22,3 +22,8 @@ output "catalog_name" {
   description = "Name of the Unity Catalog catalog created for this project."
   value       = databricks_catalog.main.name
 }
+
+output "source_db_endpoint" {
+  description = "Endpoint of the Lakehouse source Postgres — set this as the POSTGRES_DB_HOST variable."
+  value       = aws_db_instance.source_db.address
+}

@@ -3,10 +3,11 @@ owner: "analytics_team"
 project_name: "sales-lakehouse-insights"
 project_folder_name: "multi-cloud-self-healing-agent"
 
-# 1. SOURCE (reuse EU Sales Postgres — same source as pipe_eu_sales_to_s3)
-source_config: "configs/databases/postgres_sales.yaml"
+# 1. SOURCE (dedicated Lakehouse RDS Postgres — own instance/db/table, provisioned by
+#    bootstrap/databricks/database.tf; same sales SCHEMA as eu_sales)
+source_config: "configs/databases/postgres_lakehouse.yaml"
 
-# 2. LOGIC (reuse EU Sales business rules)
+# 2. LOGIC (reuse EU Sales business rules — same sales schema)
 business_rules_config: "configs/business_rules/sales_logic.yaml"
 
 # 3. DESTINATION (Databricks Delta Lake on Unity Catalog)
