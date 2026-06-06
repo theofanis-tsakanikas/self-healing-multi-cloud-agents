@@ -27,11 +27,10 @@ def run():
     prefix = parsed.path.lstrip('/')
 
     if _CLOUD == "gcp":
-        from google.cloud import storage
         client = storage.Client()
         blobs = list(client.list_blobs(bucket, prefix=prefix, max_results=1))
         if blobs:
-            logging.info("Partition already populated. Skipping.")
+            logging.info("Destination already populated. Skipping.")
             return
 
     # ── 2. CREDENTIALS via cloud_get() ───────────────────────────────────────
@@ -46,35 +45,34 @@ def run():
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
     rejected_by_reason = {}    # rule_name → cumulative dropped rows
-    query = "SELECT * FROM raw_global_marketing"  # source table from context
+    query = "SELECT * FROM raw_global_marketing"
 
     try:
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
-
             # Business rules implementation
             _before = len(chunk)
             chunk = chunk[chunk['ad_spend'].astype(float) >= 0.0]
-            rejected_by_reason['spend_integrity'] = rejected_by_reason.get('spend_integrity', 0) + (_before - len(chunk))
+            rejected_by_reason['spend_integrity'] = _before - len(chunk)
 
             _before = len(chunk)
             chunk = chunk[chunk['event_timestamp'] <= pd.Timestamp.now()]
-            rejected_by_reason['temporal_validity'] = rejected_by_reason.get('temporal_validity', 0) + (_before - len(chunk))
+            rejected_by_reason['temporal_validity'] = _before - len(chunk)
 
             _before = len(chunk)
             chunk = chunk.dropna(subset=['campaign_id'])
-            rejected_by_reason['completeness_enforcement'] = rejected_by_reason.get('completeness_enforcement', 0) + (_before - len(chunk))
+            rejected_by_reason['completeness_enforcement'] = _before - len(chunk)
 
             chunk['campaign_id'] = chunk['campaign_id'].where(chunk['campaign_id'].str.match(r'CMP-\d{4}'), other='UNASSIGNED_CAMPAIGN')
 
-            chunk['is_suspicious'] = (chunk['clicks'] > chunk['impressions']) | (chunk['clicks'] >= 1000000)
+            chunk['is_suspicious'] = (chunk['clicks'] > chunk['impressions']) | (chunk['clicks'] < 0) | (chunk['clicks'] >= 1000000)
 
             # Type casting
-            int_cols = [c for c in chunk.select_dtypes(include='float64').columns if any(kw in c.lower() for kw in ['clicks', 'impressions'])]
+            int_cols = [c for c in chunk.select_dtypes(include='float64').columns if any(kw in c.lower() for kw in ['clicks'])]
             for col in int_cols:
                 chunk[col] = chunk[col].astype('Int64')
 
-            # Write to Parquet
+            # Write to parquet
             chunk.to_parquet(f"{partition_uri}part_{i}.parquet", engine="pyarrow", compression="snappy", index=False, storage_options=dict())
             logging.info(f"Chunk {i}: {len(chunk)} rows processed")
             total_rows += len(chunk)
@@ -89,7 +87,7 @@ def run():
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
-    schema, table = "marketing_global", "pipe_mkt_global_to_gcp"  # from context
+    schema, table = "marketing_global", "pipe_mkt_global_to_gcp"  # from CATALOG_AND_MONITORING.trino_metadata
     conn = trino_connect(host=trino_host, port=8080, user="pipeline")
     cursor = conn.cursor()
     cursor.execute(f"CALL hive.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
@@ -98,7 +96,7 @@ def run():
 
     # ── 5. METRICS EMISSION ───────────────────────────────────────────────────
     pushgateway_url = os.getenv("PUSHGATEWAY_URL", "http://pushgateway.monitoring.svc.cluster.local:9091")
-    project_id = os.getenv("PROJECT_ID", "global_marketing")
+    project_id = os.getenv("PROJECT_ID", "unknown")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "gcp")
 
     registry = CollectorRegistry()

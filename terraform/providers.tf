@@ -13,3 +13,8 @@ terraform {
     prefix = "gcp/global-marketing-insights/terraform.tfstate"
   }
 }
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}

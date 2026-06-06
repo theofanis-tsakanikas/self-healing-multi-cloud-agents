@@ -16,25 +16,23 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
 
-      - name: Setup Gcloud CLI
+      - name: Setup Gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           install_components: 'gke-gcloud-auth-plugin'
 
-      - name: Configure Docker for GCP
+      - name: Configure Docker
         run: gcloud auth configure-docker europe-west3-docker.pkg.dev --quiet
 
-      - name: Build and Push Docker Image
+      - name: Build & Push Image
         run: |
-          docker build -t europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0153:${{ github.sha }} -f Dockerfile .
-          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0153:${{ github.sha }}
+          docker build -t europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0357:${{ github.sha }} -f Dockerfile .
+          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0357:${{ github.sha }}
+          docker tag europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0357:${{ github.sha }} europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0357:latest
+          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0357:latest
 
       - name: Update Kubeconfig
         run: gcloud container clusters get-credentials multi-cloud-agent-gke --region europe-west3 --project multi-cloud-self-healing-agent
-
-      - name: Set Image Tag in Job Manifest
-        run: |
-          sed -i 's|image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-.*|image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-${{ github.sha }}|' k8s/job.yaml
 
       - name: Deploy Shared Services to Kubernetes
         run: |
@@ -42,7 +40,6 @@ jobs:
           kubectl apply -f k8s/configmaps.yaml
           kubectl apply -f k8s/trino_deployment.yaml
           kubectl apply -f k8s/grafana_deployment.yaml
-          kubectl apply -f k8s/prometheus_deployment.yaml
 
       - name: Create DB Credentials Secret
         run: |
