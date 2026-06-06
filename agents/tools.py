@@ -692,6 +692,19 @@ def validate_generated_code(filename: str) -> str:
                     f"replace every <...> token with its actual value from context before applying.{hint}"
                 )
 
+            # GCP job.yaml references <ecr_repository_url>:latest directly (no tag-rewrite sed),
+            # so a GitHub Actions expression in a k8s image is a bug — Kubernetes never evaluates
+            # ${{ … }}, and an unresolved ${{ github.sha }} reaches the cluster as InvalidImageName.
+            if os.getenv("CLOUD_PROVIDER", "").lower() == "gcp" and \
+                    any("image:" in ln and "${{" in ln for ln in raw.split("\n")):
+                errors.append(
+                    "K8S [GCP]: a manifest 'image:' uses a ${{ … }} GitHub Actions expression — "
+                    "Kubernetes never evaluates it, so it reaches the cluster verbatim and the pod "
+                    "fails 'InvalidImageName'. The GCP job.yaml must reference "
+                    "<ecr_repository_url>:latest directly (the build pushes :latest; there is no "
+                    "image-tag sed step). See cicd_standards.md Section 3.2."
+                )
+
             # :latest tags are policy violations for PUBLIC base images (trino, grafana…).
             # The pipeline's OWN image lives in a PRIVATE cloud registry whose tag the
             # CI/CD step rewrites to the commit SHA on deployment, so a committed ':latest'

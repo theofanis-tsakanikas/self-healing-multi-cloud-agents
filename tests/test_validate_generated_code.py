@@ -268,3 +268,24 @@ class TestGhaImageTagSed:
             "sed -i 's|image: host/repo/img:.*|image: host/repo/img:${{ github.sha }}|' k8s/job.yaml",
         )
         assert "image NAME" not in out
+
+
+class TestGcpJobImageNoGhaExpr:
+    def _job(self, image):
+        return (
+            "apiVersion: batch/v1\nkind: Job\nmetadata:\n  name: x\n"
+            "spec:\n  template:\n    spec:\n      containers:\n"
+            f"      - name: pipeline\n        image: {image}\n"
+        )
+
+    def test_gha_expr_in_gcp_image_flagged(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
+        out = _validate(tmp_path, "job.yaml",
+                        self._job("europe-west3-docker.pkg.dev/p/r/img:${{ github.sha }}"))
+        assert "InvalidImageName" in out
+
+    def test_latest_gcp_image_clean(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
+        out = _validate(tmp_path, "job.yaml",
+                        self._job("europe-west3-docker.pkg.dev/p/r/img:latest"))
+        assert "InvalidImageName" not in out
