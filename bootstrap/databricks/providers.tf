@@ -27,17 +27,21 @@ terraform {
 }
 
 # Databricks account-level provider (for Unity Catalog metastore and workspace creation).
-# Auth via environment variables: DATABRICKS_ACCOUNT_ID, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET.
+# Auth via DATABRICKS_ACCOUNT_ID, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET. auth_type is
+# pinned to oauth-m2m so the provider ignores the ARM_*/GOOGLE_CREDENTIALS env the agent run also
+# sets (otherwise: "more than one authorization method configured: azure and google and oauth").
 provider "databricks" {
   alias      = "accounts"
   host       = "https://accounts.cloud.databricks.com"
   account_id = var.account_id
+  auth_type  = "oauth-m2m"
 }
 
 # Databricks workspace-level provider (for cluster, warehouse, catalog objects).
 provider "databricks" {
-  alias = "workspace"
-  host  = databricks_mws_workspaces.this.workspace_url
+  alias     = "workspace"
+  host      = databricks_mws_workspaces.this.workspace_url
+  auth_type = "oauth-m2m"
 }
 
 provider "aws" {

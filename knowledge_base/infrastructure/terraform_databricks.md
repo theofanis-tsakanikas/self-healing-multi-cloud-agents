@@ -34,8 +34,12 @@ terraform {
     region = "<region>"
   }
 }
-# Databricks auth: DATABRICKS_HOST + DATABRICKS_TOKEN env vars (never hardcode).
-provider "databricks" {}
+# Databricks auth: DATABRICKS_HOST + DATABRICKS_TOKEN env vars (never hardcode). auth_type is
+# pinned to "pat" so the provider ignores the ARM_*/GOOGLE_CREDENTIALS env the agent run also sets
+# (otherwise: "more than one authorization method configured: azure and google and oauth").
+provider "databricks" {
+  auth_type = "pat"
+}
 # AWS auth: the runner's AWS creds (same as the S3 backend) — used ONLY to read SSM.
 provider "aws" {
   region = "<region>"
