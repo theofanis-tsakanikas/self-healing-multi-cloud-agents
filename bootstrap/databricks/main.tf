@@ -260,9 +260,10 @@ resource "databricks_catalog" "main" {
   force_destroy = true # ephemeral demo — drop the catalog (and its schemas/tables) on teardown
 
   # Governed MANAGED storage: the Spark job uses saveAsTable (managed tables), so pin the
-  # catalog's managed location to a subprefix of our own external location. Without this,
-  # managed tables fall back to the metastore default (or fail when the metastore has none).
-  storage_root = "s3://${var.bucket_name}/managed"
+  # catalog's managed location to a STRICT SUBPATH of the external location (which is /managed).
+  # A strict subpath is unambiguously "within" the external location; without this, managed
+  # tables fall back to the metastore default (or fail when the metastore has none).
+  storage_root = "s3://${var.bucket_name}/managed/catalog"
 
   properties = {
     Project   = "multi-cloud-agent"
@@ -359,11 +360,14 @@ resource "databricks_storage_credential" "s3" {
 }
 
 resource "databricks_external_location" "s3" {
-  provider        = databricks.workspace
-  name            = "${var.workspace_name}-s3-location"
-  url             = "s3://${var.bucket_name}"
+  provider = databricks.workspace
+  name     = "${var.workspace_name}-s3-location"
+  # Subpath, NOT the bucket root: the bucket root is the workspace DBFS storage configuration,
+  # and an external location may not overlap workspace storage ("conflicts with a storage
+  # configuration"). /managed is the catalog's managed storage_root, so this covers exactly it.
+  url             = "s3://${var.bucket_name}/managed"
   credential_name = databricks_storage_credential.s3.name
-  comment         = "External location pointing to s3://${var.bucket_name}"
+  comment         = "External location for the Unity Catalog managed storage (s3://${var.bucket_name}/managed)"
 
   depends_on = [databricks_storage_credential.s3]
 }
