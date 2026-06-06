@@ -29,7 +29,7 @@ terraform {
   # host_cloud = aws → reuse the existing S3 state bucket
   backend "s3" {
     bucket = "<state_bucket>"
-    key    = "<state_key>"            # e.g. terraform/eu-sales-delta/terraform.tfstate
+    key    = "<state_key>"            # e.g. terraform/sales-lakehouse/terraform.tfstate
     region = "<region>"
   }
 }

@@ -1,6 +1,6 @@
-# MISSION OBJECTIVE: PIPE_EU_SALES_TO_DELTA
+# MISSION OBJECTIVE: PIPE_SALES_LAKEHOUSE
 
-**Natural Language Input:** EU sales pipeline to Databricks Delta Lake
+**Natural Language Input:** Sales data to a Databricks Delta Lakehouse (Unity Catalog)
 
 > **PLATFORM NOTE — Databricks, NOT a Kubernetes/Trino pipeline.** No Dockerfile, no Kubernetes,
 > no Trino, no Grafana/Prometheus, no parquet. Compute = Databricks jobs cluster; storage = Delta
@@ -16,7 +16,7 @@
 - Credentials: `dbutils.secrets` from the pipeline's secret scope — never `cloud_get()`, never `os.getenv()`.
 - Output: Delta, written to the Unity Catalog table `DELTA_DESTINATION.unity_catalog.table` from your context, partitioned by `run_date`.
 - Idempotency: if the `run_date` partition already exists in the Delta table, log and return before writing.
-- Save script to: `scripts/pipe_eu_sales_to_delta.py`
+- Save script to: `scripts/pipe_sales_lakehouse.py`
 
 **BUSINESS RULES:**
   - See `TRANSFORMATION_LOGIC` in your context — this is the authoritative and complete rules list. Do not infer or skip rules based on this task description.
@@ -30,7 +30,7 @@
 ## 🛠️ 2. INFRA SCOPE (DEPLOYMENT & AUTOMATION)
 
 **TERRAFORM:** `databricks_job` (Spark task on the existing bootstrap jobs cluster) + `databricks_secret_scope` for the DB password. NO storage bucket, NO IAM, NO Kubernetes — the workspace, cluster, and Unity Catalog are provisioned by `bootstrap/databricks/`.
-**CI/CD:** `/.github/workflows/pipe_eu_sales_to_delta_pipeline.yml` — Databricks CLI authenticated via `DATABRICKS_HOST` + `DATABRICKS_TOKEN`. NO docker build, NO `kubectl`, NO ECR.
+**CI/CD:** `/.github/workflows/pipe_sales_lakehouse_pipeline.yml` — Databricks CLI authenticated via `DATABRICKS_HOST` + `DATABRICKS_TOKEN`. NO docker build, NO `kubectl`, NO ECR.
 
 ---
 

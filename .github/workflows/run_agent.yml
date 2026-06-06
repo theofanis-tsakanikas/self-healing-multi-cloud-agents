@@ -13,7 +13,7 @@ on:
           - eu_sales
           - global_marketing
           - us_crm
-          - eu_sales_delta
+          - sales_lakehouse
         default: eu_sales
 
       bootstrap_cloud:

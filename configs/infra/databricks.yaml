@@ -51,7 +51,7 @@ unity_catalog:
 # set it concretely when enabling MLflow for a pipeline that trains models.
 mlflow:
   enabled: false
-  experiment_name: "pipe_eu_sales_to_delta-experiment"
+  experiment_name: "pipe_sales_lakehouse-experiment"
 
 # State backend (Terraform): the per-pipeline state_bucket / state_key are the single source
 # of truth in the PIPELINE config's host-cloud setup (e.g. aws_setup.state_bucket /
