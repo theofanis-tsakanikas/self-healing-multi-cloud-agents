@@ -27,6 +27,7 @@ sql_warehouse:
   size: XSMALL                  # XSMALL | SMALL | MEDIUM
   auto_stop_mins: 10
   channel: CURRENT
+  serverless: true              # instant start, zero idle cost (PRO type) — requires account serverless enablement
 
 # Storage — Delta Lake backend
 delta_storage:

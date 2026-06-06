@@ -201,7 +201,12 @@ resource "databricks_cluster" "jobs" {
 }
 
 # ---------------------------------------------------------------------------
-# SQL Warehouse — 2X-Small, auto-stops after 10 minutes
+# SQL Warehouse — SERVERLESS, 2X-Small, auto-stops after 10 minutes.
+# Serverless = instant start (no ~7-min EC2 spin-up), zero idle cost (compute runs in the
+# Databricks account, billed per-query), nothing to manage. Requires warehouse_type = PRO and
+# serverless enabled at the account (Account console → Settings → Feature enablement).
+# The jobs cluster stays CLASSIC — serverless jobs compute restricts the Maven JDBC driver the
+# pipeline needs to read Postgres.
 # ---------------------------------------------------------------------------
 resource "databricks_sql_endpoint" "main" {
   provider                  = databricks.workspace
@@ -209,7 +214,8 @@ resource "databricks_sql_endpoint" "main" {
   cluster_size              = "2X-Small"
   auto_stop_mins            = 10
   max_num_clusters          = 1
-  enable_serverless_compute = false
+  warehouse_type            = "PRO"
+  enable_serverless_compute = true
 
   tags {
     custom_tags {
