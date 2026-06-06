@@ -16,7 +16,7 @@ Exactly five files in `/terraform`:
 |---|---|
 | `providers.tf` | `databricks` provider + remote backend on the host cloud (S3 for host_cloud=aws) |
 | `main.tf` | `databricks_secret_scope` + `databricks_secret` (source DB creds) and `databricks_job` running the Spark task on the existing cluster |
-| `variables.tf` | `databricks_host`, `existing_cluster_id`, `catalog`, `schema`, `notebook_path`/`spark_python_task`, `db_password` (sensitive) |
+| `variables.tf` | `catalog`, `schema`, `db_host`/`db_name`/`db_user` (non-sensitive, from CI `TF_VAR_db_*`), `db_password` (sensitive). NO `existing_cluster_id` — the cluster is resolved by the `databricks_cluster` data source (by name). |
 | `outputs.tf` | `job_id`, `job_url` |
 | `terraform.tfvars` | Concrete values from the infra context |
 
@@ -45,10 +45,16 @@ resource "databricks_secret_scope" "pipeline" {
   name = "<pipeline_id>"
 }
 
+# ONLY the password is sensitive. host/name/user travel as job parameters (below).
 resource "databricks_secret" "db_password" {
   key          = "db_password"
   string_value = var.db_password           # from TF_VAR_db_password (a GitHub secret)
   scope        = databricks_secret_scope.pipeline.name
+}
+
+# Resolve the bootstrap jobs cluster BY NAME — no cluster id has to be wired through context.
+data "databricks_cluster" "jobs" {
+  cluster_name = "<workspace_name>-jobs-cluster"   # bootstrap names it "${workspace_name}-jobs-cluster"
 }
 
 resource "databricks_job" "pipeline" {
@@ -56,20 +62,28 @@ resource "databricks_job" "pipeline" {
 
   task {
     task_key            = "etl"
-    existing_cluster_id = var.existing_cluster_id      # the bootstrap jobs cluster
+    existing_cluster_id = data.databricks_cluster.jobs.id
+
+    # The cluster ships NO source-DB JDBC driver — attach it, or spark.read.format("jdbc")
+    # fails ClassNotFoundException. Postgres source → postgresql; MySQL source → mysql-connector-j.
+    library {
+      maven { coordinates = "org.postgresql:postgresql:42.7.3" }
+    }
 
     spark_python_task {
-      python_file = "dbfs:/pipelines/<pipeline_id>/<script_name>.py"
-      # OR notebook_task pointing at a workspace-imported notebook.
-      parameters  = [
+      python_file = "dbfs:/pipelines/<pipeline_id>/<script_name>.py"   # CI uploads the script here first
+      parameters = [
         "--catalog", var.catalog,
-        "--schema",  var.schema,
+        "--schema", var.schema,
         "--secret-scope", databricks_secret_scope.pipeline.name,
+        "--db-host", var.db_host,
+        "--db-name", var.db_name,
+        "--db-user", var.db_user,
       ]
     }
   }
 
-  # Daily schedule (matches update_frequency); quartz cron in UTC.
+  # Daily schedule (matches update_frequency); the CI additionally `run-now`s once to verify.
   schedule {
     quartz_cron_expression = "0 0 6 * * ?"
     timezone_id            = "UTC"

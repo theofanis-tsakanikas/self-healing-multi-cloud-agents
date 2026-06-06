@@ -13,10 +13,20 @@ pandas/parquet/Trino/Prometheus model — do NOT use `to_parquet`, `cloud_get()`
 | Trino `sync_partition_metadata` | Unity Catalog (automatic) |
 | Prometheus gauges → Pushgateway | **Delta audit table** (one row per run) |
 
-## Credentials — Databricks secret scope ONLY
-The source DB password is read from a Databricks secret scope (provisioned by the pipeline
-Terraform). NEVER use `cloud_get()`, and NEVER use `os.getenv()` with `POSTGRES_DB_*` / `MYSQL_DB_*`
-names. Host/user/db arrive as job parameters; the password comes from the secret scope.
+## Credentials — host/user/db are job parameters, PASSWORD is a secret scope
+The non-sensitive connection info (`--db-host`, `--db-name`, `--db-user`) arrives as **job
+parameters** (the `databricks_job` passes them; values come from CI `TF_VAR_db_*`). Only the
+**password** is sensitive → read it from the Databricks **secret scope** (provisioned by the
+pipeline Terraform) with `dbutils.secrets.get(scope, "db_password")`. NEVER use `cloud_get()`,
+and NEVER use `os.getenv()` with `POSTGRES_DB_*` / `MYSQL_DB_*` names. (The Terraform stores
+ONLY `db_password` in the scope — the script must NOT `secrets.get` host/name/user, those keys
+do not exist; read them from the parsed args.)
+
+## Source JDBC driver — 🔴 the job MUST load it
+A Databricks cluster does NOT ship the Postgres/MySQL JDBC driver. The `databricks_job`'s task
+MUST attach it as a Maven `library` (e.g. `org.postgresql:postgresql:42.7.3`) — see
+`terraform_databricks.md`. Without it the `spark.read.format("jdbc")` fails
+`java.lang.ClassNotFoundException: org.postgresql.Driver`.
 
 ## MANDATORY SCRIPT STRUCTURE
 ```python
@@ -40,6 +50,9 @@ def run():
     parser.add_argument("--catalog", required=True)
     parser.add_argument("--schema", required=True)
     parser.add_argument("--secret-scope", required=True)
+    parser.add_argument("--db-host", required=True)
+    parser.add_argument("--db-name", required=True)
+    parser.add_argument("--db-user", required=True)
     args, _ = parser.parse_known_args()
 
     catalog, schema = args.catalog, args.schema
@@ -48,11 +61,9 @@ def run():
     run_date = datetime.date.today().isoformat()
     start_time = time.time()
 
-    # ── 2. CREDENTIALS via Databricks secret scope (NOT cloud_get) ────────────
-    db_host = dbutils.secrets.get(args.secret_scope, "db_host")          # noqa: F821 (dbutils is injected by Databricks)
-    db_name = dbutils.secrets.get(args.secret_scope, "db_name")          # noqa: F821
-    db_user = dbutils.secrets.get(args.secret_scope, "db_user")          # noqa: F821
-    db_password = dbutils.secrets.get(args.secret_scope, "db_password")  # noqa: F821
+    # ── 2. CREDENTIALS — host/name/user from job params; PASSWORD from the secret scope ──
+    db_host, db_name, db_user = args.db_host, args.db_name, args.db_user
+    db_password = dbutils.secrets.get(args.secret_scope, "db_password")  # noqa: F821 (dbutils injected by Databricks)
     jdbc_url = f"jdbc:postgresql://{db_host}:5432/{db_name}"
 
     # ── 3. IDEMPOTENCY — skip if this run_date already landed ─────────────────
@@ -77,9 +88,10 @@ def run():
     # Track per-rule rejections with a FRESH count before each row-removing rule.
     rejected_by_reason = {}
 
-    # DROP_RECORD example (monetary_integrity):
+    # DROP_RECORD example (monetary_integrity) — cast numeric columns explicitly so a dirty
+    # value becomes NULL (dropped by the filter), never a runtime cast error:
     _before = df.count()
-    df = df.filter(F.col("unit_price") > 0.0)
+    df = df.filter(F.col("unit_price").cast("double") > 0.0)
     rejected_by_reason["monetary_integrity"] = _before - df.count()
 
     # EXCLUDE_AND_LOG example (temporal_validity):
@@ -110,7 +122,7 @@ def run():
     # One row per run: the Delta equivalent of the Prometheus gauges. Every pipeline
     # records its own health, consistently across all clouds.
     audit_row = [(
-        datetime.datetime.utcnow(),               # run_timestamp
+        datetime.datetime.now(datetime.timezone.utc),  # run_timestamp
         run_date,                                  # run_date
         int(rows_processed),                       # rows_processed
         int(rows_rejected),                        # rows_rejected

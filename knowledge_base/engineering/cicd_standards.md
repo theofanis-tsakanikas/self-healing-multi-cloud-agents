@@ -324,3 +324,75 @@ Per-cloud `--from-literal` key mapping:
 **## 5. SECURITY & COMPLIANCE**
 - **Secret Usage:** DB credentials are read at runtime by `cloud_get()` — AWS reads from SSM Parameter Store via IRSA (K8s secret exists but is empty), GCP/Azure read from env vars injected via K8s secret. Never hardcode credentials in workflow files.
 - **Isolation:** Pipelines must be restricted to their respective project namespaces to prevent cross-project interference.
+
+---
+
+### 3.5 Module: Databricks (provider: databricks) — COMPLETE ordered workflow
+
+A Databricks deploy is **not** docker/kubectl. NO docker build, NO `kubectl`, NO ECR/AR, NO
+image tag. The artifacts are a PySpark script (`scripts/<pipeline_id>.py`) + Unity Catalog DDL
+(`sql/setup_unity_catalog.sql`). **Terraform (the secret scope + `databricks_job`) is applied by
+the agent's `execute_terraform`, exactly like the other clouds — NOT in this workflow.** This
+deploy workflow does only: upload the script to DBFS → trigger the job → wait. Auth for both
+the CLI and the agent's terraform provider is `DATABRICKS_HOST` + `DATABRICKS_TOKEN`. The job
+id is read from the terraform output the agent already created.
+
+```yaml
+name: Deploy Pipeline
+on:
+  push:
+    paths: ['scripts/**', 'sql/**', 'terraform/**']
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST:  ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - uses: databricks/setup-cli@main          # the unified `databricks` CLI
+
+      - name: Upload Spark script to DBFS
+        run: |
+          databricks fs mkdirs "dbfs:/pipelines/<pipeline_id>" || true
+          databricks fs cp scripts/<pipeline_id>.py "dbfs:/pipelines/<pipeline_id>/<pipeline_id>.py" --overwrite
+
+      - name: Trigger job run and wait
+        working-directory: terraform
+        run: |
+          terraform init -input=false
+          JOB_ID=$(terraform output -raw job_id)
+          RUN_ID=$(databricks jobs run-now "$JOB_ID" -o json | jq -r '.run_id')
+          echo "Triggered run $RUN_ID for job $JOB_ID"
+          for i in $(seq 1 80); do
+            RUN=$(databricks jobs get-run "$RUN_ID" -o json)
+            STATE=$(echo "$RUN" | jq -r '.state.life_cycle_state')
+            RESULT=$(echo "$RUN" | jq -r '.state.result_state // empty')
+            echo "run $RUN_ID: $STATE $RESULT ($i/80)"
+            if [ "$STATE" = "TERMINATED" ]; then
+              [ "$RESULT" = "SUCCESS" ] && { echo "Job succeeded"; exit 0; }
+              echo "Job failed: $RESULT"; echo "$RUN" | jq '.tasks[].state'; exit 1
+            fi
+            [ "$STATE" = "INTERNAL_ERROR" ] && { echo "Internal error"; exit 1; }
+            sleep 15
+          done
+          echo "Timeout waiting for run"; exit 1
+
+      - run: echo "Deployment Complete"
+```
+
+**Notes:**
+- `DATABRICKS_HOST`/`DATABRICKS_TOKEN` are repo **Secrets** (workspace URL + a PAT) — used by
+  both this workflow's CLI and the agent's terraform provider.
+- The secret scope + job are created by the **agent's `execute_terraform`** (run via
+  `run_agent.yml`), which supplies `db_host`/`db_name`/`db_user` from the pipeline config
+  (terraform.tfvars) and `TF_VAR_db_password` from the `POSTGRES_DB_PASSWORD` repo Secret. Only
+  the password is sensitive.
+- The Unity Catalog tables are created by the Spark job's `saveAsTable` on first run; the
+  `sql/setup_unity_catalog.sql` artifact is the explicit-schema reference (apply it via the SQL
+  Warehouse only if you want the schema pre-created).
+- The job resolves its cluster by name (`data "databricks_cluster"`) and attaches the JDBC
+  driver as a Maven library — see `terraform_databricks.md`. Do NOT `kubectl`/`docker` here.

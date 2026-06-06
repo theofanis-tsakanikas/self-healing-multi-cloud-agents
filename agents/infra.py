@@ -219,11 +219,13 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         elif not github_action_ready or medic_triggered_fix:
             selected_keys = ["generate_github_action"]
             orchestration_phase_instruction = (
-                "CURRENT OPERATIONAL PHASE: DATABRICKS CI/CD. "
-                "Generate the GitHub Actions workflow for Databricks deployment. "
-                "Use databricks-cli for authentication and job execution. "
-                "Do NOT generate Dockerfile or K8s manifests — "
-                "Databricks manages its own compute."
+                "CURRENT OPERATIONAL PHASE: DATABRICKS CI/CD. Generate the GitHub Actions "
+                "workflow following the Databricks module in the CI/CD standard (§3.5) VERBATIM: "
+                "actions/checkout + setup-terraform + databricks/setup-cli, then terraform apply "
+                "(secret scope + databricks_job, with TF_VAR_db_host/name/user/password), upload "
+                "the Spark script to DBFS (databricks fs cp), and `databricks jobs run-now` the "
+                "job + poll the run to SUCCESS. Auth = DATABRICKS_HOST + DATABRICKS_TOKEN. "
+                "NO docker build, NO kubectl, NO Dockerfile/K8s — Databricks manages its compute."
             )
             logger.info("🧱 Databricks GATE: CI/CD phase.")
 

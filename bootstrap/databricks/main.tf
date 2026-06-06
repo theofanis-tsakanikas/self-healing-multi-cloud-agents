@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 resource "aws_s3_bucket" "dbfs_root" {
   bucket        = var.bucket_name
-  force_destroy = false
+  force_destroy = true # ephemeral demo — let destroy.yml tear it down even with DBFS data
 
   tags = {
     Name        = var.bucket_name
@@ -143,7 +143,7 @@ resource "databricks_cluster" "jobs" {
 
   spark_conf = {
     "spark.databricks.cluster.profile" = "singleNode"
-    "spark.master"                      = "local[*]"
+    "spark.master"                     = "local[*]"
   }
 
   custom_tags = {
@@ -166,11 +166,11 @@ data "databricks_node_type" "smallest" {
 # SQL Warehouse — 2X-Small, auto-stops after 10 minutes
 # ---------------------------------------------------------------------------
 resource "databricks_sql_endpoint" "main" {
-  provider             = databricks.workspace
-  name                 = "${var.workspace_name}-warehouse"
-  cluster_size         = "2X-Small"
-  auto_stop_mins       = 10
-  max_num_clusters     = 1
+  provider                  = databricks.workspace
+  name                      = "${var.workspace_name}-warehouse"
+  cluster_size              = "2X-Small"
+  auto_stop_mins            = 10
+  max_num_clusters          = 1
   enable_serverless_compute = false
 
   tags {
@@ -192,7 +192,7 @@ resource "databricks_metastore" "this" {
   provider      = databricks.accounts
   name          = var.metastore_name
   region        = var.region
-  force_destroy = false
+  force_destroy = true # ephemeral demo — allow teardown even with catalogs attached
 }
 
 resource "databricks_metastore_assignment" "this" {
@@ -202,10 +202,11 @@ resource "databricks_metastore_assignment" "this" {
 }
 
 resource "databricks_catalog" "main" {
-  provider     = databricks.workspace
-  metastore_id = databricks_metastore.this.id
-  name         = replace(var.workspace_name, "-", "_")
-  comment      = "Primary catalog for ${var.workspace_name}"
+  provider      = databricks.workspace
+  metastore_id  = databricks_metastore.this.id
+  name          = replace(var.workspace_name, "-", "_")
+  comment       = "Primary catalog for ${var.workspace_name}"
+  force_destroy = true # ephemeral demo — drop the catalog (and its schemas/tables) on teardown
 
   properties = {
     Project   = "multi-cloud-agent"

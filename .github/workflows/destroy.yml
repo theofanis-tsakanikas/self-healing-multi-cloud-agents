@@ -26,6 +26,7 @@ on:
           - aws
           - azure
           - gcp
+          - databricks
         default: aws
       confirm:
         description: 'Type exactly "destroy" to confirm — this is irreversible.'
@@ -277,3 +278,56 @@ jobs:
             -target=google_storage_bucket.tfstate
           terraform destroy -auto-approve -input=false
           echo "✅ GCP bootstrap destroyed."
+
+  # ════════════════════════════════════════════════════════════════════════════
+  #  DATABRICKS  (host cloud = AWS — S3 DBFS root + cross-account IAM)
+  # ════════════════════════════════════════════════════════════════════════════
+  destroy-databricks:
+    if: inputs.confirm == 'destroy' && inputs.cloud == 'databricks'
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST:       ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN:      ${{ secrets.DATABRICKS_TOKEN }}
+      AWS_ACCESS_KEY_ID:     ${{ secrets.BOOTSTRAP_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.BOOTSTRAP_AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION:    eu-central-1
+      TF_VAR_account_id:     ${{ secrets.DATABRICKS_ACCOUNT_ID }}
+      TF_VAR_bucket_name:    ${{ vars.DATABRICKS_DBFS_BUCKET }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      # Phase 1: pipeline terraform (databricks_job + secret scope) — no buckets, no prevent_destroy.
+      - name: Destroy agent pipeline infra (job + secret scope)
+        working-directory: terraform
+        continue-on-error: true
+        env:
+          TF_VAR_db_host:     ${{ vars.POSTGRES_DB_HOST }}
+          TF_VAR_db_name:     ${{ vars.POSTGRES_DB_NAME }}
+          TF_VAR_db_user:     ${{ vars.POSTGRES_DB_USER }}
+          TF_VAR_db_password: ${{ secrets.POSTGRES_DB_PASSWORD }}
+        run: |
+          terraform init -input=false || true
+          terraform destroy -auto-approve -input=false || true
+          echo "✅ Agent pipeline infra destroyed (or already absent)."
+
+      # Phase 2: bootstrap (workspace + cluster + warehouse + Unity Catalog + S3 + IAM).
+      # The S3 DBFS root, the metastore and the catalog carry force_destroy in the .tf; a
+      # targeted apply flips those in state, then terraform destroy removes everything.
+      # (Bootstrap state lives in s3://multi-cloud-agent-bootstrap-state, kept.)
+      - name: Destroy bootstrap infra (workspace + Unity Catalog + S3)
+        working-directory: bootstrap/databricks
+        run: |
+          terraform init -input=false
+          terraform apply -auto-approve -input=false \
+            -target=aws_s3_bucket.dbfs_root \
+            -target=databricks_metastore.this \
+            -target=databricks_catalog.main
+          terraform destroy -auto-approve -input=false
+          echo "✅ Databricks teardown complete."
