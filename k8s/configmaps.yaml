@@ -4,7 +4,7 @@ metadata:
   name: trino-sql-config
   namespace: analytics
   labels:
-    project_id: pipe-mkt-global-to-gcp
+    project_id: multi-cloud-self-healing-agent
 data:
   setup_trino.sql: |-
     CREATE SCHEMA IF NOT EXISTS hive.marketing_global;
@@ -30,7 +30,7 @@ metadata:
   name: hive-catalog-config
   namespace: analytics
   labels:
-    project_id: pipe-mkt-global-to-gcp
+    project_id: multi-cloud-self-healing-agent
 data:
   hive.properties: |
     connector.name=hive
@@ -46,7 +46,7 @@ metadata:
   name: grafana-dash-config
   namespace: monitoring
   labels:
-    project_id: pipe-mkt-global-to-gcp
+    project_id: multi-cloud-self-healing-agent
 data:
   dashboard-provider.yaml: |
     apiVersion: 1
@@ -133,7 +133,7 @@ metadata:
   name: grafana-datasource-config
   namespace: monitoring
   labels:
-    project_id: pipe-mkt-global-to-gcp
+    project_id: multi-cloud-self-healing-agent
 data:
   datasource.yaml: |
     apiVersion: 1
@@ -150,9 +150,9 @@ metadata:
   name: prometheus-config
   namespace: monitoring
   labels:
-    project_id: pipe-mkt-global-to-gcp
+    project_id: multi-cloud-self-healing-agent
 data:
-  prometheus.yml: |
+  prometheus.yml: |-
     global:
       scrape_interval: 15s
     scrape_configs:
