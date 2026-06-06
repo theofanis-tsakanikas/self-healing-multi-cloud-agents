@@ -8,6 +8,10 @@ name: Destroy Cloud Infrastructure
 #   AWS   → s3://multi-cloud-agent-bootstrap-state
 #   Azure → the tfstate storage account is bootstrap-managed and IS destroyed;
 #           nothing manual to keep (Azure backend lives inside the bootstrap RG).
+#   GCP   → gs://multi-cloud-agent-bootstrap-tfstate (the bootstrap's OWN backend, kept).
+#           The agent state bucket gs://multi-cloud-agent-tfstate is bootstrap-created and
+#           IS destroyed. GKE deletion_protection + the prevent_destroy data bucket are
+#           handled in-job (state rm + gcloud).
 #
 # A typed confirmation guards every run.
 
@@ -203,6 +207,8 @@ jobs:
       TF_VAR_db_password: ${{ secrets.MYSQL_DB_PASSWORD }}
       GKE_CLUSTER:        multi-cloud-agent-gke
       GKE_REGION:         europe-west3
+      DATA_BUCKET:        global-marketing-insights-data
+      STATE_BUCKET:       multi-cloud-agent-tfstate
 
     steps:
       - name: Checkout repository
@@ -237,22 +243,37 @@ jobs:
             echo "GKE not reachable (already destroyed?) — skipping LB cleanup."
           fi
 
-      # Phase 1: agent pipeline terraform (GCS data bucket + bucket IAM).
+      # Phase 1: agent pipeline terraform (GCS data bucket + processed/ object + bucket IAM).
+      # The data bucket is prevent_destroy-guarded AND non-empty (parquet/metastore), so
+      # terraform cannot destroy it — detach it (+ the processed/ object + IAM) from state,
+      # then nuke it via gcloud (recursive removes all object versions + the bucket itself).
       - name: Destroy agent pipeline infra (GCS + IAM)
         working-directory: terraform
         continue-on-error: true
         run: |
           terraform init -input=false || true
+          for res in \
+            google_storage_bucket.data \
+            google_storage_bucket_object.processed_dir \
+            google_storage_bucket_iam_member.pipeline ; do
+            terraform state rm "$res" 2>/dev/null || true
+          done
           terraform destroy -auto-approve -input=false || true
-          echo "✅ Agent pipeline infra destroyed (or already absent)."
+          echo "Nuking data bucket gs://$DATA_BUCKET (all versions + bucket)..."
+          gcloud storage rm --recursive "gs://$DATA_BUCKET" --quiet || true
+          echo "✅ Agent pipeline infra destroyed."
 
       # Phase 2: bootstrap (GKE + Cloud SQL + Artifact Registry + SA + state bucket).
-      # NOTE: a data bucket guarded by prevent_destroy (or any non-empty bucket) will
-      # block terraform destroy — empty/remove it manually, or `terraform state rm` then
-      # delete via gcloud, if the teardown stops here. GKE + Cloud SQL (the cost) go first.
+      # Two destroy-blockers (GKE deletion_protection, state-bucket force_destroy) are read
+      # from STATE at destroy time. gke.tf / storage.tf now set them destroy-friendly, so a
+      # targeted apply flips just those two in place — no state surgery, outputs stay valid.
+      # (Bootstrap's OWN state lives in the separate multi-cloud-agent-bootstrap-tfstate bucket.)
       - name: Destroy bootstrap infra (GKE + Cloud SQL + AR)
         working-directory: bootstrap/gcp
         run: |
           terraform init -input=false
+          terraform apply -auto-approve -input=false \
+            -target=google_container_cluster.main \
+            -target=google_storage_bucket.tfstate
           terraform destroy -auto-approve -input=false
           echo "✅ GCP bootstrap destroyed."

@@ -7,6 +7,10 @@ resource "google_storage_bucket" "tfstate" {
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 
+  # Ephemeral demo: let `terraform destroy` (and destroy.yml) remove the bucket even with
+  # versioned pipeline state inside. Without this a versioned, non-empty bucket blocks teardown.
+  force_destroy = true
+
   versioning {
     enabled = true
   }

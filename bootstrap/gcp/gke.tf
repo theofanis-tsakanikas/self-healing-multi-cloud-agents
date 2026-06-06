@@ -52,6 +52,10 @@ resource "google_container_cluster" "main" {
   # Autopilot: fully managed node lifecycle
   enable_autopilot = true
 
+  # Ephemeral demo cluster — allow `terraform destroy` (and destroy.yml) to remove it.
+  # Provider v5 defaults this to true, which blocks teardown.
+  deletion_protection = false
+
   # Workload Identity is enabled automatically on Autopilot
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
