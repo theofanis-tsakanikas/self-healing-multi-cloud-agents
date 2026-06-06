@@ -39,12 +39,7 @@ variable "metastore_name" {
 }
 
 # ── Source RDS Postgres (the Lakehouse OLTP source) ──────────────────────────
-variable "db_password" {
-  description = "Master password for the Lakehouse source Postgres (= POSTGRES_DB_PASSWORD secret)."
-  type        = string
-  sensitive   = true
-}
-
+# The password is auto-generated (database.tf) and published to SSM (ssm.tf) — never a var.
 variable "db_name" {
   description = "Database name for the Lakehouse source (POSTGRES_DB_NAME). Distinct from AWS eu_sales."
   type        = string

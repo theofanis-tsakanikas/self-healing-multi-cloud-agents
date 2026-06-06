@@ -54,6 +54,14 @@ resource "aws_db_subnet_group" "source_db" {
   }
 }
 
+# Auto-generate the password (like bootstrap/aws/rds.tf) — never human-set, never a GitHub
+# secret. Stored only in SSM (ssm.tf), read from there by the pipeline terraform + seeding.
+resource "random_password" "source_db" {
+  length           = 32
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}|;"
+}
+
 resource "aws_db_instance" "source_db" {
   identifier        = "sales-lakehouse-raw-data"
   engine            = "postgres"
@@ -63,7 +71,7 @@ resource "aws_db_instance" "source_db" {
 
   db_name  = var.db_name     # lakehouse_raw — distinct from the AWS eu_sales "sales_raw"
   username = var.db_username # postgres
-  password = var.db_password # = TF_VAR_db_password (the POSTGRES_DB_PASSWORD secret)
+  password = random_password.source_db.result
 
   db_subnet_group_name   = aws_db_subnet_group.source_db.name
   vpc_security_group_ids = [aws_security_group.source_db.id]

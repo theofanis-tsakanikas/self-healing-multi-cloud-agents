@@ -138,13 +138,8 @@ jobs:
       # (databricks_job + secret scope) and the databricks-cli deploy workflow.
       DATABRICKS_HOST:  ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
-      # The Databricks pipeline terraform reads the EU-Sales Postgres connection as TF_VARs:
-      # host/name/user are non-sensitive (job parameters), only the password is a secret.
-      # Unused on non-databricks runs (their pipeline terraform has no db_* variables).
-      TF_VAR_db_host:     ${{ vars.POSTGRES_DB_HOST }}
-      TF_VAR_db_name:     ${{ vars.POSTGRES_DB_NAME }}
-      TF_VAR_db_user:     ${{ vars.POSTGRES_DB_USER }}
-      TF_VAR_db_password: ${{ secrets.POSTGRES_DB_PASSWORD }}
+      # The Databricks pipeline terraform reads the source DB connection from SSM
+      # (data "aws_ssm_parameter") using the AWS creds above — no TF_VAR_db_*.
 
       # ── Trino & Prometheus ────────────────────────────────────────────────────
       TRINO_HOST:     ${{ vars.TRINO_HOST }}
@@ -258,8 +253,7 @@ jobs:
           # Required bootstrap variables (no defaults).
           TF_VAR_account_id:  ${{ secrets.DATABRICKS_ACCOUNT_ID }}
           TF_VAR_bucket_name: ${{ vars.DATABRICKS_DBFS_BUCKET }}
-          # Source RDS Postgres password (same secret the pipeline + seeding use).
-          TF_VAR_db_password: ${{ secrets.POSTGRES_DB_PASSWORD }}
+          # The source RDS password is auto-generated and published to SSM — no TF_VAR.
         run: |
           terraform init
           terraform apply -auto-approve

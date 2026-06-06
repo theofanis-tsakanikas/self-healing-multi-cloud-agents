@@ -16,7 +16,7 @@ Exactly five files in `/terraform`:
 |---|---|
 | `providers.tf` | `databricks` provider + remote backend on the host cloud (S3 for host_cloud=aws) |
 | `main.tf` | `databricks_secret_scope` + `databricks_secret` (source DB creds) and `databricks_job` running the Spark task on the existing cluster |
-| `variables.tf` | `catalog`, `schema`, `db_host`/`db_name`/`db_user` (non-sensitive, from CI `TF_VAR_db_*`), `db_password` (sensitive). NO `existing_cluster_id` — the cluster is resolved by the `databricks_cluster` data source (by name). |
+| `variables.tf` | `catalog`, `schema` only. NO `db_*` (the connection is read from SSM via `data "aws_ssm_parameter"`), and NO `existing_cluster_id` (resolved by the `databricks_cluster` data source by name). |
 | `outputs.tf` | `job_id`, `job_url` |
 | `terraform.tfvars` | Concrete values from the infra context |
 
@@ -25,6 +25,7 @@ Exactly five files in `/terraform`:
 terraform {
   required_providers {
     databricks = { source = "databricks/databricks", version = "~> 1.0" }
+    aws        = { source = "hashicorp/aws", version = "~> 5.0" }   # to read the DB creds from SSM
   }
   # host_cloud = aws → reuse the existing S3 state bucket
   backend "s3" {
@@ -33,22 +34,34 @@ terraform {
     region = "<region>"
   }
 }
-# Auth comes from DATABRICKS_HOST + DATABRICKS_TOKEN env vars (never hardcode).
+# Databricks auth: DATABRICKS_HOST + DATABRICKS_TOKEN env vars (never hardcode).
 provider "databricks" {}
+# AWS auth: the runner's AWS creds (same as the S3 backend) — used ONLY to read SSM.
+provider "aws" {
+  region = "<region>"
+}
 ```
 
 ### Secret scope + job (`main.tf`)
-The source DB password is stored in a **Databricks secret scope** — the Spark job reads it via
-`dbutils.secrets.get(...)`. NEVER pass credentials as plaintext job parameters.
+The source DB connection is published to **SSM by the bootstrap** (`bootstrap/databricks/ssm.tf`,
+under `/multi-cloud-self-healing-agent/aws/lakehouse_db_*`) — never a GitHub secret, never plaintext.
+This terraform reads it from SSM: the **password** into a Databricks secret scope (the Spark job
+reads it via `dbutils.secrets.get`), and host/name/user become job parameters.
 ```hcl
 resource "databricks_secret_scope" "pipeline" {
   name = "<pipeline_id>"
 }
 
-# ONLY the password is sensitive. host/name/user travel as job parameters (below).
+# DB connection from SSM (published by bootstrap/databricks/ssm.tf). One source of truth.
+data "aws_ssm_parameter" "db_host"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_host" }
+data "aws_ssm_parameter" "db_name"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_name" }
+data "aws_ssm_parameter" "db_user"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_user" }
+data "aws_ssm_parameter" "db_password" { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_password" }
+
+# ONLY the password goes into the secret scope; host/name/user are non-sensitive job params.
 resource "databricks_secret" "db_password" {
   key          = "db_password"
-  string_value = var.db_password           # from TF_VAR_db_password (a GitHub secret)
+  string_value = data.aws_ssm_parameter.db_password.value
   scope        = databricks_secret_scope.pipeline.name
 }
 
@@ -76,9 +89,9 @@ resource "databricks_job" "pipeline" {
         "--catalog", var.catalog,
         "--schema", var.schema,
         "--secret-scope", databricks_secret_scope.pipeline.name,
-        "--db-host", var.db_host,
-        "--db-name", var.db_name,
-        "--db-user", var.db_user,
+        "--db-host", data.aws_ssm_parameter.db_host.value,
+        "--db-name", data.aws_ssm_parameter.db_name.value,
+        "--db-user", data.aws_ssm_parameter.db_user.value,
       ]
     }
   }

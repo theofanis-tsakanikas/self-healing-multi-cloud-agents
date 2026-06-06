@@ -111,6 +111,14 @@ def build_engine(db_type, target):
             user    = cloud_get("aws", "rds_username")
             password = cloud_get("aws", "rds_password")
             db_name = cloud_get("aws", "rds_db_name")
+        elif target == "sales_lakehouse":
+            # Databricks source RDS — its own SSM keys (lakehouse_db_*), same as the AWS
+            # 3-tier pattern. No POSTGRES_DB_* env / .env dependency.
+            host    = cloud_get("aws", "lakehouse_db_host")
+            port    = cloud_get("aws", "lakehouse_db_port") or default_port
+            user    = cloud_get("aws", "lakehouse_db_user")
+            password = cloud_get("aws", "lakehouse_db_password")
+            db_name = cloud_get("aws", "lakehouse_db_name")
         elif target == "global_marketing":
             # GCP source is Cloud SQL for MySQL → db_type="mysql" so cloud_get resolves the
             # MYSQL_DB_* env fallbacks (not the POSTGRES_DB_* default), matching the prefix above.
@@ -119,7 +127,7 @@ def build_engine(db_type, target):
             user    = cloud_get("gcp", "db_user",     db_type="mysql")
             password = cloud_get("gcp", "db_password", db_type="mysql")
             db_name = cloud_get("gcp", "db_name",     db_type="mysql")
-        else:  # us_crm (Azure) / sales_lakehouse (Databricks RDS) — read {PREFIX}_DB_* env vars
+        else:  # us_crm (Azure) — env var fallback until Azure Secret Manager is set up
             prefix = cfg["prefix"]
             host    = os.getenv(f"{prefix}_DB_HOST")
             port    = os.getenv(f"{prefix}_DB_PORT", default_port)
