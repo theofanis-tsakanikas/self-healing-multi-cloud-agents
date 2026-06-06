@@ -1081,6 +1081,36 @@ def validate_generated_code(filename: str) -> str:
     return msg
 
 
+# A pipeline script's cloud-SDK import is mechanically determined by the SDK call it
+# makes (storage.Client → google.cloud.storage, etc.), but the architect intermittently
+# drops it → F821 'Undefined name'. Inject it deterministically: the call uniquely fixes
+# the import, and the matching SDK is the one installed on that cloud's image. A generation
+# guarantee (like the ConfigMap verbatim-embed), not an output patch. Only fires when the
+# call is used AND its import is absent — a full skeleton already carries it, so it's a no-op.
+_CLOUD_SDK_IMPORTS = (
+    ("storage.Client", "from google.cloud import storage"),
+    ("boto3.", "import boto3"),
+    ("BlobServiceClient", "from azure.storage.blob import BlobServiceClient"),
+)
+
+
+def _ensure_cloud_sdk_import(content: str) -> str:
+    needed = [imp for marker, imp in _CLOUD_SDK_IMPORTS
+              if marker in content and imp not in content]
+    if not needed:
+        return content
+    lines = content.split("\n")
+    last_import = -1
+    for i, ln in enumerate(lines):
+        if ln.startswith("import ") or ln.startswith("from "):   # top-level only (column 0)
+            last_import = i
+    if last_import == -1:
+        return content   # no import block to anchor to — let the validator flag it
+    for offset, imp in enumerate(needed, start=1):
+        lines.insert(last_import + offset, imp)
+    return "\n".join(lines)
+
+
 @tool
 def write_project_file(filename: str, content: str):
     """
@@ -1112,11 +1142,15 @@ def write_project_file(filename: str, content: str):
         filepath = os.path.join(target_dir, base_name)
         final_dir = target_dir
 
+    # Deterministic F821 guard: guarantee the cloud-SDK import a pipeline script needs.
+    if filepath.endswith(".py"):
+        content = _ensure_cloud_sdk_import(content)
+
     # Create the directory and write the file
     try:
         if final_dir and final_dir != ".":
             os.makedirs(final_dir, exist_ok=True)
-            
+
         with open(filepath, 'w', encoding="utf-8") as f:
             f.write(content)
         return f"File saved successfully to {filepath}"

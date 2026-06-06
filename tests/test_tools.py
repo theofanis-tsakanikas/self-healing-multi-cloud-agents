@@ -141,3 +141,43 @@ class TestConfigMapVerbatimEmbed:
         docs = list(yaml.safe_load_all(out))
         json.loads(docs[1]["data"]["monitoring_specs.json"])  # real JSON now
         assert "CREATE TABLE x" in docs[0]["data"]["setup_trino.sql"]
+
+
+class TestCloudSdkImportGuard:
+    """The cloud-SDK import is mechanically required by the SDK call; the architect
+    intermittently drops it (F821). _ensure_cloud_sdk_import injects it deterministically."""
+
+    def test_dropped_gcp_import_is_injected(self):
+        import ast
+        from agents.tools import _ensure_cloud_sdk_import
+        bad = (
+            "import os\nfrom utils.cloud_config import cloud_get\n\n"
+            "_CLOUD = os.getenv('CLOUD_PROVIDER', 'gcp')\n\n"
+            "def run():\n    if _CLOUD == 'gcp':\n        client = storage.Client()\n"
+        )
+        out = _ensure_cloud_sdk_import(bad)
+        ast.parse(out)
+        assert "from google.cloud import storage" in out
+        assert out.index("from google.cloud import storage") < out.index("_CLOUD =")
+
+    def test_present_import_is_noop(self):
+        from agents.tools import _ensure_cloud_sdk_import
+        ok = (
+            "import os\n_CLOUD = os.getenv('CLOUD_PROVIDER', 'gcp')\n"
+            "if _CLOUD == 'aws':\n    import boto3\n"
+            "elif _CLOUD == 'gcp':\n    from google.cloud import storage\n"
+            "def run():\n    client = storage.Client()\n"
+        )
+        assert _ensure_cloud_sdk_import(ok) == ok
+
+    def test_boto3_and_azure_markers(self):
+        from agents.tools import _ensure_cloud_sdk_import
+        b = "import os\nfrom x import y\ndef r():\n    s = boto3.client('s3')\n"
+        assert "import boto3" in _ensure_cloud_sdk_import(b)
+        a = "import os\nfrom x import y\ndef r():\n    c = BlobServiceClient.from_connection_string(z)\n"
+        assert "from azure.storage.blob import BlobServiceClient" in _ensure_cloud_sdk_import(a)
+
+    def test_non_cloud_script_untouched(self):
+        from agents.tools import _ensure_cloud_sdk_import
+        n = "import os\nimport pandas as pd\ndef r():\n    pass\n"
+        assert _ensure_cloud_sdk_import(n) == n
