@@ -125,7 +125,23 @@ resource "google_storage_bucket" "data" {
     prevent_destroy = true
   }
 }
+
+# Pre-create the processed/ "directory" — see §2.2.1.
+resource "google_storage_bucket_object" "processed_dir" {
+  name    = "processed/"   # last path segment of LOGICAL_DESTINATION.uri + trailing slash
+  bucket  = google_storage_bucket.data.name
+  content = " "
+}
 ```
+
+### 2.2.1 Pre-created `processed/` directory — 🔴 MANDATORY
+Trino's Hive connector `CREATE TABLE ... external_location = 'gs://.../processed/'` fails with
+`External location must be a directory: gs://.../processed` unless that directory already EXISTS
+— and `init-trino` runs the DDL BEFORE the pipeline writes any object there. On GCS a "directory"
+is a zero-/near-zero-byte object whose name ends in `/` (the directory marker), so the
+`google_storage_bucket_object "processed_dir"` above (name `processed/`) creates it. This is the
+GCS equivalent of Azure's `azurerm_storage_data_lake_gen2_path`; omitting it makes every first
+deploy fail at the `CREATE TABLE`.
 
 ### 2.2 URI Pattern for Trino / Python
 The destination URI for Parquet writes MUST follow this pattern:

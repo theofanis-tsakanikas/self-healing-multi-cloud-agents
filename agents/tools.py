@@ -502,6 +502,17 @@ def validate_generated_code(filename: str) -> str:
                     "glue:BatchCreatePartition etc. are required for CREATE TABLE and sync_partition_metadata. "
                     "See terraform_aws_s3.md Section 3."
                 )
+            # GCP: the processed/ "directory" must be pre-created (a google_storage_bucket_object
+            # named "processed/"). Trino CREATE TABLE external_location = gs://.../processed/ fails
+            # "External location must be a directory" otherwise — init-trino runs before any object
+            # is written. (GCS equivalent of Azure's azurerm_storage_data_lake_gen2_path.)
+            if _tf_cloud == "gcp" and "google_storage_bucket_object" not in tf_content:
+                errors.append(
+                    "TERRAFORM [project policy]: GCP main.tf is missing the pre-created processed/ "
+                    "directory — add a `google_storage_bucket_object` named \"processed/\" on the data "
+                    "bucket. Without it the first Trino CREATE TABLE fails 'External location must be a "
+                    "directory'. See terraform_gcp_bucket.md Section 2.2.1."
+                )
 
     # ── Dockerfile ───────────────────────────────────────────────────────────
     # hadolint covers: base image tag, COPY . ., non-root user, pip flags, layer hygiene.

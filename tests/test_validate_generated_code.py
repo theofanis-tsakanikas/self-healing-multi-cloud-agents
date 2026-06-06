@@ -217,3 +217,26 @@ class TestIsSuspiciousCrossFile:
     def test_ddl_has_but_script_omits_is_flagged(self, tmp_path):
         out = self._validate_sql(tmp_path, self._DDL_WITH_FLAG, self._PY_NO_FLAG)
         assert "consistency" in out.lower()
+
+
+class TestTerraformGcpProcessedDir:
+    _BUCKET = 'resource "google_storage_bucket" "data" {\n  name = "b"\n}\n'
+
+    def test_gcp_missing_processed_dir_flagged(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
+        out = _validate(tmp_path, "main.tf", self._BUCKET)
+        assert "processed/" in out and "directory" in out.lower()
+
+    def test_gcp_with_processed_dir_clean(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
+        tf = self._BUCKET + (
+            'resource "google_storage_bucket_object" "processed_dir" {\n'
+            '  name = "processed/"\n  bucket = google_storage_bucket.data.name\n  content = " "\n}\n'
+        )
+        out = _validate(tmp_path, "main.tf", tf)
+        assert "pre-created processed" not in out
+
+    def test_aws_main_tf_not_flagged_for_processed_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLOUD_PROVIDER", "aws")
+        out = _validate(tmp_path, "main.tf", 'resource "aws_s3_bucket" "data" {}\n')
+        assert "pre-created processed" not in out
