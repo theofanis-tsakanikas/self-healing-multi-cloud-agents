@@ -245,8 +245,12 @@ jobs:
         if: inputs.bootstrap_cloud == 'databricks' || inputs.bootstrap_cloud == 'all'
         working-directory: bootstrap/databricks
         env:
-          DATABRICKS_HOST:  ${{ secrets.DATABRICKS_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          # The account-level provider (creates the workspace + Unity Catalog metastore) auths
+          # with an ACCOUNT SERVICE PRINCIPAL — not a workspace token, which does not exist until
+          # the workspace is created. The workspace-level provider re-uses the same SP.
+          DATABRICKS_ACCOUNT_ID:    ${{ secrets.DATABRICKS_ACCOUNT_ID }}
+          DATABRICKS_CLIENT_ID:     ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
           # host_cloud = aws → S3 DBFS root + cross-account IAM + remote state backend.
           AWS_ACCESS_KEY_ID:     ${{ secrets.BOOTSTRAP_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.BOOTSTRAP_AWS_SECRET_ACCESS_KEY }}
