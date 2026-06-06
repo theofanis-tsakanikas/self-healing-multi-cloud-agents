@@ -294,8 +294,12 @@ def validate_generated_code(filename: str) -> str:
                     f'CLOUD GUARD: cloud_get("{_cld}", ...) is called without an '
                     f'"if _CLOUD == \\"{_cld}\\":" guard — the script uses {_cld.upper()} '
                     f"credentials unconditionally, breaking deployment on other clouds. "
-                    f"Wrap all cloud_get() calls and the connection_string in cloud-specific "
-                    f"if/elif blocks as shown in arch_standard_python Section 2 skeleton."
+                    f'Wrap the cloud_get() calls and the connection_string in a SINGLE '
+                    f'`if _CLOUD == "{_cld}":` block. This is a single-cloud script: add ONLY '
+                    f"that one branch — do NOT add `elif` branches for the other clouds. An "
+                    f"empty or comment-only elif body (e.g. `# AWS credentials logic here`) is "
+                    f"a SyntaxError that makes the patch fail and the fix loop never converge "
+                    f"(see arch_standard_python single-cloud guard)."
                 )
 
         # rejected_by_reason per-rule attribution must use a FRESH baseline per rule.
