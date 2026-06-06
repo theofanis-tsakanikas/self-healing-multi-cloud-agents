@@ -99,6 +99,14 @@ resource "aws_iam_role_policy" "cross_account" {
   policy = data.aws_iam_policy_document.cross_account_policy.json
 }
 
+# IAM is eventually consistent — Databricks validates the cross-account role the instant
+# databricks_mws_credentials is created, but the just-created role/policy may not have
+# propagated yet → "Failed credential validation checks". Give IAM a moment to settle.
+resource "time_sleep" "wait_for_iam" {
+  depends_on      = [aws_iam_role.cross_account, aws_iam_role_policy.cross_account]
+  create_duration = "30s"
+}
+
 # ---------------------------------------------------------------------------
 # Databricks workspace (MWS — multi-workspace / E2 deployment model)
 # ---------------------------------------------------------------------------
@@ -107,6 +115,7 @@ resource "databricks_mws_credentials" "this" {
   account_id       = var.account_id
   credentials_name = "${var.workspace_name}-credentials"
   role_arn         = aws_iam_role.cross_account.arn
+  depends_on       = [time_sleep.wait_for_iam]
 }
 
 resource "databricks_mws_storage_configurations" "this" {
