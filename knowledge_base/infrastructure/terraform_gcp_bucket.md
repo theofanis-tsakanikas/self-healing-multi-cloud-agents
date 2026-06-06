@@ -58,10 +58,20 @@ terraform {
   }
 
   backend "gcs" {
-    bucket = "multi-cloud-agent-tfstate"
-    prefix = "gcp/<pipeline_id>/terraform.tfstate"
+    bucket = "<state_bucket>"
+    prefix = "<state_prefix>"
   }
 }
+```
+
+**Backend `bucket` and `prefix` are the EXACT `CLOUD_SETUP.state_bucket` and
+`CLOUD_SETUP.state_prefix` values — copy them verbatim, the SINGLE source of truth.**
+NEVER derive the prefix yourself from `pipeline_id` / `project_name` (e.g.
+`gcp/<pipeline_id>/terraform.tfstate`): the config's `state_prefix` may use a different
+segment, and any mismatch makes Terraform read a DIFFERENT (empty) state on the next run →
+it tries to re-create the already-existing bucket → `Error 409: ... you already own it`.
+```hcl
+provider "google" {
 
 provider "google" {
   project = var.project_id
