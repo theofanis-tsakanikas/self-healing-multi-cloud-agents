@@ -11,7 +11,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Google Cloud Login
+      - name: Google Cloud Auth
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
@@ -26,17 +26,17 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
-          docker build -t europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0450:${{ github.sha }} -f Dockerfile .
-          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0450:${{ github.sha }}
-          docker tag europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0450:${{ github.sha }} europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0450:latest
-          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0450:latest
+          docker build -t europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0505:${{ github.sha }} -f Dockerfile .
+          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0505:${{ github.sha }}
+          docker tag europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0505:${{ github.sha }} europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0505:latest
+          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0505:latest
 
       - name: Update Kubeconfig
         run: gcloud container clusters get-credentials multi-cloud-agent-gke --region europe-west3 --project multi-cloud-self-healing-agent
 
       - name: Set Image Tag in Job Manifest
         run: |
-          sed -i 's|image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0450:.*|image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0450:${{ github.sha }}|' k8s/job.yaml
+          sed -i 's|image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0505:.*|image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260606-0505:${{ github.sha }}|' k8s/job.yaml
 
       - name: Deploy Shared Services to Kubernetes
         run: |
