@@ -187,6 +187,13 @@ resource "databricks_sql_endpoint" "main" {
 
 # ---------------------------------------------------------------------------
 # Unity Catalog — metastore, catalog, schema
+#
+# 🔴 ACCOUNT-LEVEL CONSTRAINT: a Databricks account may hold exactly ONE metastore per
+# region. This bootstrap CREATES one (self-contained demo on a dedicated account). If the
+# account already has a metastore in var.region, `terraform apply` will conflict — in that
+# case reference the existing metastore via a `data "databricks_metastore"` and keep only the
+# `databricks_metastore_assignment` (drop this resource). Teardown removes it entirely
+# (force_destroy), so do NOT point a shared/production account at this bootstrap.
 # ---------------------------------------------------------------------------
 resource "databricks_metastore" "this" {
   provider      = databricks.accounts
@@ -208,12 +215,19 @@ resource "databricks_catalog" "main" {
   comment       = "Primary catalog for ${var.workspace_name}"
   force_destroy = true # ephemeral demo — drop the catalog (and its schemas/tables) on teardown
 
+  # Governed MANAGED storage: the Spark job uses saveAsTable (managed tables), so pin the
+  # catalog's managed location to a subprefix of our own external location. Without this,
+  # managed tables fall back to the metastore default (or fail when the metastore has none).
+  storage_root = "s3://${var.bucket_name}/managed"
+
   properties = {
     Project   = "multi-cloud-agent"
     ManagedBy = "terraform-bootstrap"
   }
 
-  depends_on = [databricks_metastore_assignment.this]
+  # The external location (and its credential) must register the bucket before the catalog
+  # can claim a managed root inside it.
+  depends_on = [databricks_metastore_assignment.this, databricks_external_location.s3]
 }
 
 resource "databricks_schema" "raw" {
