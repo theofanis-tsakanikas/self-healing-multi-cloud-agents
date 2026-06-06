@@ -31,7 +31,7 @@ def run():
         client = storage.Client()
         blobs = list(client.list_blobs(bucket, prefix=prefix, max_results=1))
         if blobs:
-            logging.info("Destination already populated. Skipping.")
+            logging.info("Partition already populated. Skipping.")
             return
 
     # ── 2. CREDENTIALS via cloud_get() ───────────────────────────────────────
@@ -54,7 +54,7 @@ def run():
 
             # Business rules implementation
             _before = len(chunk)
-            chunk['ad_spend'] = chunk['ad_spend'].apply(lambda x: float(x) if x.replace('.', '', 1).isdigit() else 0.0)
+            chunk = chunk[chunk['ad_spend'].astype(float) >= 0.0]
             rejected_by_reason['spend_integrity'] = rejected_by_reason.get('spend_integrity', 0) + (_before - len(chunk))
 
             _before = len(chunk)
@@ -62,12 +62,10 @@ def run():
             rejected_by_reason['temporal_validity'] = rejected_by_reason.get('temporal_validity', 0) + (_before - len(chunk))
 
             _before = len(chunk)
-            chunk = chunk[chunk['campaign_id'].notna() & (chunk['campaign_id'] != '')]
+            chunk = chunk.dropna(subset=['campaign_id'])
             rejected_by_reason['completeness_enforcement'] = rejected_by_reason.get('completeness_enforcement', 0) + (_before - len(chunk))
 
-            _before = len(chunk)
-            chunk['campaign_id'] = chunk['campaign_id'].apply(lambda x: x if x.startswith('CMP-') else 'UNASSIGNED_CAMPAIGN')
-            rejected_by_reason['campaign_standardization'] = rejected_by_reason.get('campaign_standardization', 0) + (_before - len(chunk))
+            chunk['campaign_id'] = chunk['campaign_id'].where(chunk['campaign_id'].str.match(r'CMP-\d{4}'), other='UNASSIGNED_CAMPAIGN')
 
             chunk['is_suspicious'] = (chunk['clicks'] > chunk['impressions']) | (chunk['clicks'] >= 1000000)
 
@@ -76,7 +74,7 @@ def run():
             for col in int_cols:
                 chunk[col] = chunk[col].astype('Int64')
 
-            # Write to parquet
+            # Write to Parquet
             chunk.to_parquet(f"{partition_uri}part_{i}.parquet", engine="pyarrow", compression="snappy", index=False, storage_options=dict())
             logging.info(f"Chunk {i}: {len(chunk)} rows processed")
             total_rows += len(chunk)
@@ -103,7 +101,6 @@ def run():
     project_id = os.getenv("PROJECT_ID", "global_marketing")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "gcp")
 
-    # Emit metrics
     registry = CollectorRegistry()
     Gauge('pipeline_rows_processed_total', 'Total rows written to storage after business rules', ['project_id', 'cloud_provider'], registry=registry).labels(project_id=project_id, cloud_provider=cloud_provider).set(total_rows)
     Gauge('pipeline_last_success_timestamp', 'Unix timestamp of last successful run', ['project_id', 'cloud_provider'], registry=registry).labels(project_id=project_id, cloud_provider=cloud_provider).set(time.time())
@@ -116,7 +113,6 @@ def run():
 
     push_to_gateway(pushgateway_url, job=project_id, registry=registry)
     logging.info(f"Metrics pushed: rows={total_rows}, rejected={rejected_rows}, duration={duration_seconds:.1f}s, cloud={cloud_provider}")
-
 
 if __name__ == "__main__":
     run()
