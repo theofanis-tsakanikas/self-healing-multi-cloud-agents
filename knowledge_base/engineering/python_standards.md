@@ -21,13 +21,13 @@ chunk.to_parquet(f"{partition_uri}part_{i}.parquet", storage_options=dict())
 - Import: `from utils.cloud_config import cloud_get` — place after standard library imports, before cloud SDK block.
 - Connection strings MUST use double-quoted outer f-strings to avoid `SyntaxError: f-string: unmatched '('`.
 - Every `cloud_get()` call and the `connection_string` assignment MUST be inside a cloud-specific guard (`if _CLOUD == "aws":` / `elif _CLOUD == "gcp":` / `elif _CLOUD == "azure":`). An unguarded `cloud_get("aws", ...)` hardcodes AWS credentials into a supposedly cloud-agnostic script — it will fail silently when `CLOUD_PROVIDER=gcp` or `CLOUD_PROVIDER=azure` because the wrong credential keys are resolved.
-- **A generated pipeline targets exactly ONE cloud — emit ONLY that cloud's branch.** The skeleton above shows all three clouds for reference, but a real script (e.g. `us_crm` → Azure) needs a SINGLE `if _CLOUD == "<that_cloud>":` block. The validator requires a guard only for the cloud whose `cloud_get()` actually appears, so a lone `if _CLOUD == "azure":` is correct and complete. **Do NOT add `elif` branches for clouds this pipeline does not use, and NEVER fill a branch with a placeholder comment** (`# Add AWS credentials logic here`): a comment-only `if`/`elif` body is a `SyntaxError` AND violates the no-placeholder rule. In fix mode this is fatal — `patch_project_file`'s syntax safety-net rejects the broken patch, the file is left unchanged, and the self-heal loop can never converge (it re-issues the same rejected patch until it escalates). When wrapping an unguarded block, add ONLY the single `if _CLOUD == "<cloud>":` guard around the existing lines. **The single-cloud collapse applies to the WHOLE script, consistently: (1) the cloud-SDK import collapses to ONE PLAIN module-level import — never dropped, never left inside `if/elif`; (2) BOTH the idempotency block AND the credentials block keep their single `if _CLOUD == "<cloud>":` guard — never flatten either to a bare `storage.Client()` / `cloud_get(...)` call. Dropping the import → F821; dropping every guard → the CLOUD-GUARD validator fails because no `if _CLOUD ==` remains in the file.**
+- **Emit the FULL three-cloud skeleton verbatim — keep ALL THREE branches (`if _CLOUD == "aws":` / `elif _CLOUD == "gcp":` / `elif _CLOUD == "azure":`), each with a REAL body, in the cloud-SDK import block, the idempotency block, AND the credentials block.** The script is cloud-agnostic: only the branch matching `CLOUD_PROVIDER` runs at runtime (conditional imports load only the active cloud's SDK), so carrying all three is correct and **always valid** — this is exactly the structure the validated AWS and Azure pipelines use. **Do NOT collapse to a single branch and do NOT drop the others.** Collapsing is where the model intermittently flattens away the `if _CLOUD ==` guard (→ CLOUD-GUARD failure) or drops the cloud-SDK import (→ F821 `Undefined name`). And **NEVER** leave a branch empty or comment-only (`# Add AWS credentials logic here`): a comment-only `if`/`elif` body is a `SyntaxError` that `patch_project_file`'s safety-net rejects, dead-looping the self-heal. Every branch gets the same real implementation shown in the skeleton.
 ```python
 # ❌ WRONG — unguarded, breaks on GCP/Azure:
 host = cloud_get("aws", "db_host", db_type="postgres")
 connection_string = f"postgresql+psycopg2://..."
 
-# ✅ CORRECT — each cloud block is self-contained:
+# ✅ CORRECT — the FULL skeleton, every branch a real body (only the active cloud runs):
 if _CLOUD == "aws":
     host = cloud_get("aws", "db_host", db_type="postgres")
     connection_string = f"postgresql+psycopg2://..."
@@ -38,19 +38,10 @@ elif _CLOUD == "azure":
     host = cloud_get("azure", "db_host", db_type="postgres")
     connection_string = f"postgresql+psycopg2://..."   # us_crm source = Azure Postgres
 
-# ✅ ALSO CORRECT — single-cloud pipeline (us_crm) needs ONLY its own branch:
-if _CLOUD == "azure":
-    host = cloud_get("azure", "db_host", db_type="postgres")
-    connection_string = f"postgresql+psycopg2://..."
-
-# ❌ FATAL — empty elif stubs for unused clouds are a SyntaxError; in fix mode the
-# patch is rejected by the syntax safety-net and the self-heal loop never converges:
-if _CLOUD == "azure":
-    host = cloud_get("azure", "db_host", db_type="postgres")
-elif _CLOUD == "aws":
-    # Add AWS credentials logic here     ← comment-only body → SyntaxError
+# ❌ FATAL — an empty / comment-only branch body is a SyntaxError that dead-loops the heal.
+# Give EVERY branch the real implementation above — never a placeholder comment:
 elif _CLOUD == "gcp":
-    # Add GCP credentials logic here
+    # Add GCP credentials logic here     ← never do this
 ```
 
 ### Storage
@@ -175,7 +166,7 @@ for col in int_cols:
 - Omitting this step causes a type mismatch: Trino reads the column as `double` instead of `INTEGER`/`BIGINT`, silently breaking downstream aggregations.
 
 ### Cloud SDK
-- The cloud storage SDK is imported ONCE as a plain module-level import (GCP `from google.cloud import storage`, AWS `import boto3`, Azure `from azure.storage.blob import BlobServiceClient`) and CALLED (`storage.Client()` / `boto3.client(...)` / `BlobServiceClient(...)`) inside the single `if _CLOUD == "<cloud>":` guard — the import is never dropped, the call is never left unguarded.
+- The cloud storage SDK is imported in the FULL conditional import block (all three `if _CLOUD == ...` branches, kept verbatim) and CALLED (`boto3.client(...)` / `storage.Client()` / `BlobServiceClient(...)`) inside the matching branch of the idempotency block — every branch present, the import never dropped, the call never left unguarded.
 
 ### Metrics
 - Emit **exactly five** Gauges to Pushgateway:
@@ -204,23 +195,16 @@ from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
 from utils.cloud_config import cloud_get  # SSM → bootstrap_outputs → env fallback
 
-# Cloud-specific storage SDK — import ONLY the one matching CLOUD_PROVIDER.
-# Never import all three; unused cloud SDKs are not installed in the image.
-#
-# ⚠️ GENERATED SINGLE-CLOUD SCRIPT: collapse this if/elif into ONE PLAIN
-# module-level import for the target cloud — NOT inside if/elif, and NEVER drop it:
-#     AWS:   import boto3
-#     GCP:   from google.cloud import storage
-#     Azure: from azure.storage.blob import BlobServiceClient
-# Keep `_CLOUD = os.getenv(...)` (the idempotency/credentials guards still need it),
-# but the IMPORT itself stays a plain top-level statement. A dropped/guarded import
-# is the F821 'Undefined name' failure (e.g. `storage.Client()` with no import) — and
-# being module-level it survives even when you collapse the run() guards.
+# Cloud-specific storage SDK — emit this FULL if/elif block VERBATIM (all three clouds).
+# The imports are conditional, so on a single-cloud image only the matching branch runs
+# and only that SDK is imported — the unused ones never execute, so it is safe that they
+# are not installed. NEVER drop or collapse this block: a missing import is the F821
+# 'Undefined name' failure (e.g. `storage.Client()` with no import).
 _CLOUD = os.getenv("CLOUD_PROVIDER", "aws")
 if _CLOUD == "aws":
     import boto3
 elif _CLOUD == "gcp":
-    from google.cloud import storage   # use as storage.Client() — no alias
+    from google.cloud import storage   # used as storage.Client()
 elif _CLOUD == "azure":
     from azure.storage.blob import BlobServiceClient
 
