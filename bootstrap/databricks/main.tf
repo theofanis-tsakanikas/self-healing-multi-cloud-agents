@@ -132,10 +132,14 @@ resource "databricks_mws_workspaces" "this" {
 # Jobs cluster — single-node, auto-terminates after 20 minutes of inactivity
 # ---------------------------------------------------------------------------
 resource "databricks_cluster" "jobs" {
-  provider                = databricks.workspace
-  cluster_name            = "${var.workspace_name}-jobs-cluster"
-  spark_version           = data.databricks_spark_version.latest_lts.id
-  node_type_id            = data.databricks_node_type.smallest.id
+  provider     = databricks.workspace
+  cluster_name = "${var.workspace_name}-jobs-cluster"
+  # Hardcoded (NOT data sources): the databricks_spark_version / databricks_node_type data
+  # sources query the workspace API, but the workspace provider's host = workspace_url is only
+  # known AFTER the workspace is created in this same apply → "unsupported protocol scheme".
+  # These pinned values come from configs/infra/databricks.yaml (LTS runtime + AWS node).
+  spark_version           = "14.3.x-scala2.12"
+  node_type_id            = "m5.xlarge"
   autotermination_minutes = 20
 
   # Single-node cluster — no workers needed for pipeline jobs
@@ -150,16 +154,6 @@ resource "databricks_cluster" "jobs" {
     Project   = "multi-cloud-agent"
     ManagedBy = "terraform-bootstrap"
   }
-}
-
-data "databricks_spark_version" "latest_lts" {
-  provider          = databricks.workspace
-  long_term_support = true
-}
-
-data "databricks_node_type" "smallest" {
-  provider   = databricks.workspace
-  local_disk = false
 }
 
 # ---------------------------------------------------------------------------
