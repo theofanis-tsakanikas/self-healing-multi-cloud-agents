@@ -39,17 +39,17 @@ For **`cloud_provider: azure`** specifically:
 
 ### 1. KNOWLEDGE RETRIEVAL & MANDATORY ALIGNMENT
 **PHASE 1: DISCOVERY.** Use `query_vector_store` as your first tool.
-* **PRIORITY 1:** You MUST populate the following EXACT keys in `collected_specs`. **EXECUTE** five (5) distinct tool calls with these exact query strings if the keys are missing from state:
-    1. Identify the cloud provider from context (`cloud_provider` key). Then query:
-       - If `aws`: `query="Terraform Configuration. S3 backend for state storage. S3 bucket with versioning, encryption, lifecycle. IAM Access policy."` → stores as **infra_standard_iac**
-       - If `azure`: `query="Terraform Azure ADLS Gen2 storage account. AzureRM backend. Managed identity workload identity federation. Role assignment."` → stores as **infra_standard_iac**
-       - If `gcp`: `query="Terraform GCP Cloud Storage bucket. GCS backend. Service account workload identity binding. IAM member storage.objectAdmin."` → stores as **infra_standard_iac**
-       - **Issue EXACTLY ONE iac query — the one matching `cloud_provider`. NEVER issue another cloud's iac query, not even in a later discovery turn.** All three map to the same `infra_standard_iac` key, so a second (wrong-cloud) query overwrites the correct standard — e.g. firing the Azure query on a GCP pipeline replaces the GCS-backend standard with an azurerm-backend one and `terraform init` fails. If `infra_standard_iac` is already populated, do NOT re-query it.
-- **🧱 DATABRICKS BRANCH:** If the context's `PROJECT_METADATA.provider == "databricks"`, this is a Delta/Jobs pipeline — there is NO storage bucket, NO IAM, NO Kubernetes, NO Dockerfile. Execute ONLY query **1 (databricks IaC)** and query **3 (CI/CD)** below; **SKIP queries 2 (K8s) and 4 (Dockerfile)**:
-    - `query="Terraform Databricks pipeline. databricks_job spark_python_task existing_cluster_id, databricks_secret_scope secret db credentials, Unity Catalog catalog schema, Delta backend s3 state. No S3 bucket no IAM no Kubernetes."` → stores as **infra_standard_iac**
+* **PRIORITY 1:** Populate these EXACT keys in `collected_specs` by executing the **four (4)** distinct queries below — issue a query ONLY if its key is missing (NEVER re-query a populated key). A Databricks pipeline runs only two of them — see the branch note AFTER the list.
+    1. **iac** — read `cloud_provider`/`provider` from context and issue **EXACTLY ONE** query, the variant matching it. NEVER issue another cloud's iac query (not even in a later turn): all variants map to the same `infra_standard_iac` key, so a second one overwrites the correct standard (e.g. the Azure query on a GCP pipeline → azurerm backend → `terraform init` fails).
+       - `aws`: `query="Terraform Configuration. S3 backend for state storage. S3 bucket with versioning, encryption, lifecycle. IAM Access policy."`
+       - `azure`: `query="Terraform Azure ADLS Gen2 storage account. AzureRM backend. Managed identity workload identity federation. Role assignment."`
+       - `gcp`: `query="Terraform GCP Cloud Storage bucket. GCS backend. Service account workload identity binding. IAM member storage.objectAdmin."`
+       - `databricks`: `query="Terraform Databricks pipeline. databricks_job spark_python_task existing_cluster_id, databricks_secret_scope secret db credentials, Unity Catalog catalog schema, Delta backend s3 state. No S3 bucket no IAM no Kubernetes."`
+       → stores as **infra_standard_iac**
     2. `query="Kubernetes job.yaml initContainers serviceAccountName volumeMounts volumes hive-catalog-config grafana-dash-config prometheus-config DESTINATION_URI namespace analytics monitoring. Deployment Trino Grafana Prometheus Pushgateway AWS Glue metastore hive connector Section 8.4"` → stores as **infra_standard_k8s**
     3. `query="Github actions cicd pipelines. Workflow trigger and structure, deployment execution, checkout, github secrets"` → stores as **infra_standard_cicd**
     4. `query="Dockerfile python pipeline image non-root user selective COPY CMD script path"` → stores as **infra_standard_dockerfile**
+- **🧱 DATABRICKS BRANCH:** If `PROJECT_METADATA.provider == "databricks"` (Delta/Jobs — NO storage bucket, NO IAM, NO Kubernetes, NO Dockerfile), execute ONLY query **1 (the `databricks` iac variant)** and query **3 (CI/CD)**; **SKIP queries 2 (K8s) and 4 (Dockerfile)**.
 * **SPEC EXTRACTION:** Parse retrieved documents and extract ONLY **Technical Constants**, mandatory naming patterns, and structural rules.
 * **PERSISTENCE:** Store findings in `collected_specs` using the exact keys above.
 * **CROSS-AGENT ALIGNMENT:** Analyze `arch_standard_...` keys already in state. You are strictly bound by the naming conventions, ports, and logical URIs defined by the Architect.
