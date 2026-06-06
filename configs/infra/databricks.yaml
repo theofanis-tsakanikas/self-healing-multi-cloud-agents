@@ -15,7 +15,7 @@ databricks_tier: premium   # standard | premium (Unity Catalog requires premium)
 
 # Compute — Jobs cluster (batch pipelines)
 jobs_cluster:
-  node_type: m5.xlarge         # AWS EC2 instance (4 vCPU, 16 GB RAM) — host_cloud=aws
+  node_type: m5d.xlarge        # AWS EC2 (4 vCPU, 16 GB) w/ local NVMe — m5d not m5: avoids "EBS volume required"
   num_workers: 2
   autoscale_min: 1
   autoscale_max: 4

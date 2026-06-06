@@ -180,8 +180,10 @@ resource "databricks_cluster" "jobs" {
   # sources query the workspace API, but the workspace provider's host = workspace_url is only
   # known AFTER the workspace is created in this same apply → "unsupported protocol scheme".
   # These pinned values come from configs/infra/databricks.yaml (LTS runtime + AWS node).
+  # m5d (not m5): the "d" variant has local NVMe storage, so no EBS volume is required —
+  # an EBS-only type (m5.xlarge) fails "At least one EBS volume must be attached".
   spark_version           = "14.3.x-scala2.12"
-  node_type_id            = "m5.xlarge"
+  node_type_id            = "m5d.xlarge"
   autotermination_minutes = 20
 
   # Single-node cluster — no workers needed for pipeline jobs
@@ -280,25 +282,37 @@ resource "databricks_schema" "raw" {
 
 # ---------------------------------------------------------------------------
 # IAM role for Unity Catalog storage credential (S3 access)
+#
+# Unity Catalog needs a SELF-ASSUMING role: the trust must list BOTH the Databricks UC master
+# role AND this role's own ARN, with external_id = the Databricks ACCOUNT id (not the metastore
+# id). A hand-written trust that omits the self-assume or uses the wrong external_id fails the
+# external-location validation with "403 Forbidden ... does not have READ permissions". The
+# official data sources generate the exact trust + S3/STS policy Databricks expects. The self-ARN
+# is built from account id + role name (a literal), so there is no resource self-reference cycle.
 # ---------------------------------------------------------------------------
-data "aws_iam_policy_document" "unity_catalog_assume" {
-  statement {
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "AWS"
-      identifiers = ["arn:aws:iam::414351767826:root"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "sts:ExternalId"
-      values   = [databricks_metastore.this.id]
-    }
-  }
+data "aws_caller_identity" "current" {}
+
+locals {
+  uc_role_name = "${var.workspace_name}-unity-catalog-role"
+}
+
+data "databricks_aws_unity_catalog_assume_role_policy" "this" {
+  provider       = databricks.accounts
+  aws_account_id = data.aws_caller_identity.current.account_id
+  role_name      = local.uc_role_name
+  external_id    = var.account_id
+}
+
+data "databricks_aws_unity_catalog_policy" "this" {
+  provider       = databricks.accounts
+  aws_account_id = data.aws_caller_identity.current.account_id
+  bucket_name    = var.bucket_name
+  role_name      = local.uc_role_name
 }
 
 resource "aws_iam_role" "unity_catalog" {
-  name               = "${var.workspace_name}-unity-catalog-role"
-  assume_role_policy = data.aws_iam_policy_document.unity_catalog_assume.json
+  name               = local.uc_role_name
+  assume_role_policy = data.databricks_aws_unity_catalog_assume_role_policy.this.json
 
   tags = {
     Project   = "multi-cloud-agent"
@@ -306,25 +320,20 @@ resource "aws_iam_role" "unity_catalog" {
   }
 }
 
-data "aws_iam_policy_document" "unity_catalog_s3" {
-  statement {
-    sid    = "UnityCatalogS3"
-    effect = "Allow"
-    actions = [
-      "s3:GetObject", "s3:PutObject", "s3:DeleteObject",
-      "s3:ListBucket", "s3:GetBucketLocation",
-    ]
-    resources = [
-      aws_s3_bucket.dbfs_root.arn,
-      "${aws_s3_bucket.dbfs_root.arn}/*",
-    ]
-  }
-}
-
 resource "aws_iam_role_policy" "unity_catalog" {
   name   = "unity-catalog-s3-policy"
   role   = aws_iam_role.unity_catalog.id
-  policy = data.aws_iam_policy_document.unity_catalog_s3.json
+  policy = data.databricks_aws_unity_catalog_policy.this.json
+}
+
+# IAM eventual consistency — the storage-credential / external-location validation assumes this
+# role the instant it is created. Same 30s settle as the cross-account role.
+resource "time_sleep" "wait_for_uc_iam" {
+  depends_on      = [aws_iam_role.unity_catalog, aws_iam_role_policy.unity_catalog]
+  create_duration = "30s"
+  triggers = {
+    role_arn = aws_iam_role.unity_catalog.arn
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -340,7 +349,7 @@ resource "databricks_storage_credential" "s3" {
 
   comment = "Storage credential for S3 bucket ${var.bucket_name}"
 
-  depends_on = [databricks_metastore_assignment.this]
+  depends_on = [databricks_metastore_assignment.this, time_sleep.wait_for_uc_iam]
 }
 
 resource "databricks_external_location" "s3" {
