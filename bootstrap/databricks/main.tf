@@ -39,6 +39,22 @@ resource "aws_s3_bucket_public_access_block" "dbfs_root" {
   restrict_public_buckets = true
 }
 
+# DBFS-root bucket policy — REQUIRED for the MWS storage-configuration validation. Databricks
+# validates List/Put/PutWithBucketOwnerFullControl/Delete on the bucket; without this policy the
+# workspace create fails "Failed storage configuration validation checks ... Access Denied". The
+# official data source generates exactly the grant Databricks needs (principal 414351767826).
+# Grants a specific AWS account (not public) → allowed despite block_public_policy.
+data "databricks_aws_bucket_policy" "dbfs_root" {
+  provider = databricks.accounts
+  bucket   = aws_s3_bucket.dbfs_root.bucket
+}
+
+resource "aws_s3_bucket_policy" "dbfs_root" {
+  bucket     = aws_s3_bucket.dbfs_root.id
+  policy     = data.databricks_aws_bucket_policy.dbfs_root.json
+  depends_on = [aws_s3_bucket_public_access_block.dbfs_root]
+}
+
 # ---------------------------------------------------------------------------
 # IAM cross-account role — allows Databricks control plane to manage AWS
 # ---------------------------------------------------------------------------
@@ -99,12 +115,25 @@ resource "aws_iam_role_policy" "cross_account" {
   policy = data.aws_iam_policy_document.cross_account_policy.json
 }
 
-# IAM is eventually consistent — Databricks validates the cross-account role the instant
-# databricks_mws_credentials is created, but the just-created role/policy may not have
-# propagated yet → "Failed credential validation checks". Give IAM a moment to settle.
+# IAM/S3 are eventually consistent — Databricks validates the cross-account role AND the bucket
+# policy the instant the MWS resources are created, but the just-created role/policy/bucket-policy
+# may not have propagated yet → "Failed credential/storage validation checks". Gate the MWS
+# resources on this delay so both have settled. (mws_credentials and mws_workspaces both run after.)
 resource "time_sleep" "wait_for_iam" {
-  depends_on      = [aws_iam_role.cross_account, aws_iam_role_policy.cross_account]
+  depends_on = [
+    aws_iam_role.cross_account,
+    aws_iam_role_policy.cross_account,
+    aws_s3_bucket_policy.dbfs_root,
+  ]
   create_duration = "30s"
+
+  # Re-arm the wait whenever the role or bucket policy is (re)created — so a re-run that adds
+  # the bucket policy to an already-applied state still waits 30s before the MWS validation,
+  # instead of relying on the prior (already-elapsed) sleep.
+  triggers = {
+    role_arn      = aws_iam_role.cross_account.arn
+    bucket_policy = aws_s3_bucket_policy.dbfs_root.id
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -133,6 +162,10 @@ resource "databricks_mws_workspaces" "this" {
 
   credentials_id           = databricks_mws_credentials.this.credentials_id
   storage_configuration_id = databricks_mws_storage_configurations.this.storage_configuration_id
+
+  # Wait for IAM + bucket-policy propagation even when mws_credentials is already in state
+  # (a re-run): the storage validation runs here, so this resource must gate on the delay.
+  depends_on = [time_sleep.wait_for_iam]
 
   token {}
 }
