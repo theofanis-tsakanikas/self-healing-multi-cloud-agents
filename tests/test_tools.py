@@ -120,3 +120,24 @@ class TestConfigMapVerbatimEmbed:
         monkeypatch.chdir(tmp_path)
         manifest = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: analytics\n"
         assert _embed_source_files_into_configmap(manifest) == manifest
+
+    def test_placeholder_tokens_replaced_by_verbatim_source(self, tmp_path, monkeypatch):
+        # The LLM emits short __EMBED_*__ tokens (so it never re-types/truncates the big
+        # blobs); the tool fills them verbatim from disk.
+        from agents.tools import _embed_source_files_into_configmap
+        (tmp_path / "dashboards").mkdir()
+        (tmp_path / "sql").mkdir()
+        (tmp_path / "dashboards" / "monitoring_specs.json").write_text('{"uid": "x", "panels": []}')
+        (tmp_path / "sql" / "setup_trino.sql").write_text("CREATE TABLE x (a INT);\n")
+        monkeypatch.chdir(tmp_path)
+        cm = (
+            "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: trino-sql-config\n"
+            "data:\n  setup_trino.sql: |\n    __EMBED_SETUP_TRINO_SQL__\n"
+            "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: grafana-dash-config\n"
+            "data:\n  monitoring_specs.json: |\n    __EMBED_MONITORING_SPECS_JSON__\n"
+        )
+        out = _embed_source_files_into_configmap(cm)
+        assert "__EMBED_" not in out
+        docs = list(yaml.safe_load_all(out))
+        json.loads(docs[1]["data"]["monitoring_specs.json"])  # real JSON now
+        assert "CREATE TABLE x" in docs[0]["data"]["setup_trino.sql"]

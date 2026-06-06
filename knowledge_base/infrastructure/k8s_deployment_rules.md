@@ -33,7 +33,7 @@ All projects must generate and apply the following files in the `/k8s` directory
 - **trino_deployment.yaml:** Deployment + ClusterIP Service (name: `trino`) in the `analytics` namespace. **2 objects.**
 - **grafana_deployment.yaml:** Deployment + LoadBalancer Service in the `monitoring` namespace. **2 objects.**
 - **prometheus_deployment.yaml:** Prometheus Deployment + Service + Pushgateway Deployment + Service — all in `monitoring`. **4 objects.**
-- **configmaps.yaml:** Five ConfigMaps in a single file separated by `---`. Each must be in the namespace of the pod that mounts it: `trino-sql-config` in `analytics` (SQL scripts), `hive-catalog-config` in `analytics` (Trino Hive/Glue catalog configuration), `grafana-dash-config` in `monitoring` (dashboard JSON), `grafana-datasource-config` in `monitoring` (Prometheus datasource), `prometheus-config` in `monitoring` (scrape config). Content must be the ACTUAL file content from the generated artifacts — never placeholders.
+- **configmaps.yaml:** Five ConfigMaps in a single file separated by `---`. Each must be in the namespace of the pod that mounts it: `trino-sql-config` in `analytics` (SQL scripts), `hive-catalog-config` in `analytics` (Trino Hive/Glue catalog configuration), `grafana-dash-config` in `monitoring` (dashboard JSON), `grafana-datasource-config` in `monitoring` (Prometheus datasource), `prometheus-config` in `monitoring` (scrape config). Write `hive.properties`, `prometheus.yml`, `datasource.yaml` and `dashboard-provider.yaml` in full. For the two LARGE artifacts — `trino-sql-config`'s `setup_trino.sql` and `grafana-dash-config`'s `monitoring_specs.json` — output ONLY the one-line tokens `__EMBED_SETUP_TRINO_SQL__` and `__EMBED_MONITORING_SPECS_JSON__` as the block-scalar value; the deploy tool injects the real, validated file verbatim. NEVER re-type those two — re-typing the ~150-line dashboard JSON blows the output budget and truncates the later ConfigMaps.
 - **job.yaml:** The main execution unit for the data pipeline. Namespace: `analytics`. Uses `initContainers` + `containers` — two distinct sections.
 
 ---
@@ -133,7 +133,7 @@ metadata:
     project_id: <project_id>
 data:
   setup_trino.sql: |
-    <ACTUAL CONTENT OF sql/setup_trino.sql>
+    __EMBED_SETUP_TRINO_SQL__
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -172,7 +172,7 @@ data:
       options:
         path: /etc/grafana/provisioning/dashboards
   monitoring_specs.json: |
-    <ACTUAL CONTENT OF dashboards/monitoring_specs.json>
+    __EMBED_MONITORING_SPECS_JSON__
 ---
 apiVersion: v1
 kind: ConfigMap

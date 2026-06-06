@@ -468,11 +468,21 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         sql_content = read_file(sql_path) if os.path.exists(sql_path) else None
         json_content = read_file(json_path) if os.path.exists(json_path) else None
         if sql_content or json_content:
-            system_prompt += "\n\n## ARCHITECT ARTIFACTS (embed verbatim in configmaps.yaml — no placeholders)\n"
-            if sql_content:
-                system_prompt += f"\n### sql/setup_trino.sql\n```sql\n{sql_content}\n```\n"
-            if json_content:
-                system_prompt += f"\n### dashboards/monitoring_specs.json\n```json\n{json_content}\n```\n"
+            # The Trino DDL + Grafana dashboard JSON are injected VERBATIM from disk by
+            # generate_k8s_manifest. The LLM must NOT re-type them: re-typing a ~150-line JSON
+            # blows the output budget and TRUNCATES the later ConfigMaps (and can corrupt the
+            # JSON). It outputs a short placeholder token instead; the tool fills in the real file.
+            system_prompt += (
+                "\n\n## CONFIGMAP EMBEDS — OUTPUT THE PLACEHOLDER TOKEN, NOT THE CONTENT\n"
+                "In configmaps.yaml, for these two block-scalar values output ONLY the exact "
+                "one-line token shown — do NOT paste the file content (the deploy tool injects "
+                "the real, validated file verbatim, so you never re-type/truncate/corrupt them):\n"
+                "  trino-sql-config → data.setup_trino.sql: |\n    __EMBED_SETUP_TRINO_SQL__\n"
+                "  grafana-dash-config → data.monitoring_specs.json: |\n    __EMBED_MONITORING_SPECS_JSON__\n"
+                "Write the OTHER ConfigMap values (hive.properties, prometheus.yml, "
+                "datasource.yaml, dashboard-provider.yaml) IN FULL as usual. Keeping the two big "
+                "blobs as tokens keeps the file short so all FIVE ConfigMaps fit without truncation.\n"
+            )
 
     messages = [{"role": "system", "content": system_prompt}] + safe_recent_messages(state["messages"], limit=5)
     

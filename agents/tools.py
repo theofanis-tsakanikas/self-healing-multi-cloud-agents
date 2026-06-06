@@ -847,11 +847,16 @@ def validate_generated_code(filename: str) -> str:
                         "'pushgateway.monitoring.svc.cluster.local:9091'. "
                         "The pipeline pushes metrics to Pushgateway — Prometheus scrapes Pushgateway, not Trino."
                     )
-                # Placeholder content means the LLM didn't embed the actual SQL/JSON.
-                if any(phrase in raw.lower() for phrase in ["-- sql setup", "sql setup commands", "placeholder"]):
+                # An un-replaced embed token means generate_k8s_manifest could not inject the real
+                # artifact (the architect's sql/setup_trino.sql or dashboards/monitoring_specs.json
+                # was missing on disk when configmaps.yaml was generated). Normally the tool fills
+                # `__EMBED_*__` verbatim from disk before this validation ever runs.
+                if any(t in raw for t in ["__EMBED_SETUP_TRINO_SQL__", "__EMBED_MONITORING_SPECS_JSON__"]) \
+                        or any(p in raw.lower() for p in ["-- sql setup", "sql setup commands", "actual content of"]):
                     errors.append(
-                        "K8S configmaps.yaml [project policy]: placeholder content detected — "
-                        "embed the actual content of sql/setup_trino.sql and dashboards/monitoring_specs.json verbatim."
+                        "K8S configmaps.yaml [project policy]: an embed placeholder was not filled in — "
+                        "the source artifact (sql/setup_trino.sql or dashboards/monitoring_specs.json) "
+                        "must exist before configmaps.yaml is generated so the tool injects it verbatim."
                     )
                 # hive-catalog-config key must be hive.properties — not catalog.properties or hive.yaml.
                 if "hive-catalog-config" in raw and "hive.properties" not in raw:
