@@ -30,6 +30,20 @@ from agents.constants import (
 
 logger = logging.getLogger("INFRA")
 
+# The iac query is fully determined by the pipeline's cloud, so resolve it in Python and
+# inject ONLY the matching one — the prompt no longer lists the other clouds' iac queries,
+# so the LLM physically cannot fire a wrong-cloud iac query (it never sees those strings).
+# (Same pattern as the ConfigMap embed / cloud-SDK import: resolve the deterministic bit
+# here, don't leave it to LLM variance.) Strings must stay identical to the Smart-Mapping
+# keywords below so the cloud-match guard still classifies them.
+_IAC_QUERIES = {
+    "aws": "Terraform Configuration. S3 backend for state storage. S3 bucket with versioning, encryption, lifecycle. IAM Access policy.",
+    "azure": "Terraform Azure ADLS Gen2 storage account. AzureRM backend. Managed identity workload identity federation. Role assignment.",
+    "gcp": "Terraform GCP Cloud Storage bucket. GCS backend. Service account workload identity binding. IAM member storage.objectAdmin.",
+    "databricks": "Terraform Databricks pipeline. databricks_job spark_python_task existing_cluster_id, databricks_secret_scope secret db credentials, Unity Catalog catalog schema, Delta backend s3 state. No S3 bucket no IAM no Kubernetes.",
+}
+
+
 def files_exist_in_state(target_files: list, written_files: list) -> bool:
     """
     Checks if target_files are present in written_files.
@@ -424,6 +438,18 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         phase_text = orchestration_phase_instruction or "CURRENT OPERATIONAL PHASE: IMPLEMENTATION"
 
     system_prompt += f"\n\n{phase_text}"
+
+    # Pre-resolved iac query (query 1) — inject ONLY this pipeline's cloud variant so the LLM
+    # cannot fire a wrong-cloud iac query (it never sees the other strings). Only while the
+    # iac standard is still missing, so a populated key is never re-queried.
+    if not has_all_standards and "infra_standard_iac" not in collected_specs:
+        _iac_key = "databricks" if is_databricks else cloud_provider
+        _iac_query = _IAC_QUERIES.get(_iac_key, _IAC_QUERIES["aws"])
+        system_prompt += (
+            "\n\n## 🔴 IAC QUERY (this IS query 1 — issue it VERBATIM; never any other "
+            f'cloud\'s iac query):\n  query_vector_store(query="{_iac_query}")\n'
+            f"Pre-resolved for this pipeline's cloud ({_iac_key}); it is the ONLY iac query that exists here.\n"
+        )
 
     # Inject only the standards relevant to the current sub-phase.
     # safe_recent_messages(limit=5) trims discovery ToolMessages out of context by the

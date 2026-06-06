@@ -40,16 +40,11 @@ For **`cloud_provider: azure`** specifically:
 ### 1. KNOWLEDGE RETRIEVAL & MANDATORY ALIGNMENT
 **PHASE 1: DISCOVERY.** Use `query_vector_store` as your first tool.
 * **PRIORITY 1:** Populate these EXACT keys in `collected_specs` by executing the **four (4)** distinct queries below — issue a query ONLY if its key is missing (NEVER re-query a populated key). A Databricks pipeline runs only two of them — see the branch note AFTER the list.
-    1. **iac** — read `cloud_provider`/`provider` from context and issue **EXACTLY ONE** query, the variant matching it. NEVER issue another cloud's iac query (not even in a later turn): all variants map to the same `infra_standard_iac` key, so a second one overwrites the correct standard (e.g. the Azure query on a GCP pipeline → azurerm backend → `terraform init` fails).
-       - `aws`: `query="Terraform Configuration. S3 backend for state storage. S3 bucket with versioning, encryption, lifecycle. IAM Access policy."`
-       - `azure`: `query="Terraform Azure ADLS Gen2 storage account. AzureRM backend. Managed identity workload identity federation. Role assignment."`
-       - `gcp`: `query="Terraform GCP Cloud Storage bucket. GCS backend. Service account workload identity binding. IAM member storage.objectAdmin."`
-       - `databricks`: `query="Terraform Databricks pipeline. databricks_job spark_python_task existing_cluster_id, databricks_secret_scope secret db credentials, Unity Catalog catalog schema, Delta backend s3 state. No S3 bucket no IAM no Kubernetes."`
-       → stores as **infra_standard_iac**
+    1. **iac** — issue the EXACT query string given in the **🔴 IAC QUERY** block injected in the context (it is pre-resolved in Python for THIS pipeline's cloud). Issue it verbatim; there is no other cloud's iac query to choose from — never construct one. → stores as **infra_standard_iac**
     2. `query="Kubernetes job.yaml initContainers serviceAccountName volumeMounts volumes hive-catalog-config grafana-dash-config prometheus-config DESTINATION_URI namespace analytics monitoring. Deployment Trino Grafana Prometheus Pushgateway AWS Glue metastore hive connector Section 8.4"` → stores as **infra_standard_k8s**
     3. `query="Github actions cicd pipelines. Workflow trigger and structure, deployment execution, checkout, github secrets"` → stores as **infra_standard_cicd**
     4. `query="Dockerfile python pipeline image non-root user selective COPY CMD script path"` → stores as **infra_standard_dockerfile**
-- **🧱 DATABRICKS BRANCH:** If `PROJECT_METADATA.provider == "databricks"` (Delta/Jobs — NO storage bucket, NO IAM, NO Kubernetes, NO Dockerfile), execute ONLY query **1 (the `databricks` iac variant)** and query **3 (CI/CD)**; **SKIP queries 2 (K8s) and 4 (Dockerfile)**.
+- **🧱 DATABRICKS BRANCH:** If `PROJECT_METADATA.provider == "databricks"` (Delta/Jobs — NO storage bucket, NO IAM, NO Kubernetes, NO Dockerfile), execute ONLY query **1 (the injected iac query — already pre-resolved to the Databricks variant)** and query **3 (CI/CD)**; **SKIP queries 2 (K8s) and 4 (Dockerfile)**.
 * **SPEC EXTRACTION:** Parse retrieved documents and extract ONLY **Technical Constants**, mandatory naming patterns, and structural rules.
 * **PERSISTENCE:** Store findings in `collected_specs` using the exact keys above.
 * **CROSS-AGENT ALIGNMENT:** Analyze `arch_standard_...` keys already in state. You are strictly bound by the naming conventions, ports, and logical URIs defined by the Architect.
