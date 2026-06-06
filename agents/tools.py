@@ -285,6 +285,18 @@ def validate_generated_code(filename: str) -> str:
                 "COMPLIANCE VIOLATION. See python_standards.md Business Rules section."
             )
 
+        # .astype(float) raises ValueError on the FIRST non-numeric value and crashes the whole
+        # pipeline; a numeric business-rule column must be coerced so dirty values are rejected,
+        # not fatal. (.astype('Int64') for the final integer cast is a different, allowed call.)
+        if re.search(r"\.astype\(\s*['\"]?float", py_content):
+            errors.append(
+                "BUSINESS RULES: `.astype(float)` raises ValueError ('could not convert string to "
+                "float') on the first dirty/non-numeric value and crashes the entire pipeline. Use "
+                "`pd.to_numeric(chunk[col], errors='coerce')` instead — dirty values become NaN and "
+                "the numeric comparison drops them as a normal rejected row. See python_standards.md "
+                "Business Rules section."
+            )
+
         # Cloud guard: cloud_get() for a specific cloud must be inside the matching
         # if _CLOUD == "..." block. An unguarded call hardcodes a provider and breaks
         # the script on all other clouds — a fundamental cloud-agnostic violation.

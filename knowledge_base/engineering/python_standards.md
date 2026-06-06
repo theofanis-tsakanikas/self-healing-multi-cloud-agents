@@ -94,11 +94,14 @@ The config expresses rules in business language. The architect resolves them to 
 | `DEFAULT_VALUE` | `chunk[col] = chunk[col].where(condition, other=default)` |
 | `FLAG_AS_SUSPICIOUS` | accumulate with `\|`: `chunk['is_suspicious'] = flag_rule1 \| flag_rule2` |
 
+**Numeric comparison columns — coerce, NEVER `.astype(float)`:** any column compared numerically (`> 0`, `>= 0`, `<`, range checks) may carry dirty/non-numeric values from the source (e.g. `'not_a_number'`, empty strings). Coerce it with `pd.to_numeric(chunk[col], errors='coerce')` (assign it back) **before** the comparison — dirty values become `NaN`, which the comparison then drops as a normal rejected row, and the surviving column is real numeric for the typed parquet write. **NEVER use `chunk[col].astype(float)`**: it raises `ValueError: could not convert string to float` on the FIRST bad value and crashes the ENTIRE pipeline instead of rejecting that one row. (`.astype('Int64')` for the final integer cast is unrelated and still required — see Storage.)
+
 **Worked example** — EU Sales pipeline (6 rules → 5 matched columns). **CRITICAL: each row-removing rule MUST take a FRESH `_before = len(chunk)` immediately before ITS OWN filter.** A single shared `_before` captured once at the top is the most common bug — it makes every rule report the *cumulative* drop so far (`_before - len(chunk)`), so the deltas double-count and `sum(by_reason)` explodes far above the real total. The fresh-per-rule reading is what guarantees the invariant `sum(rejected_by_reason.values()) == rejected_rows`.
 ```python
 # monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
+chunk['unit_price'] = pd.to_numeric(chunk['unit_price'], errors='coerce')  # dirty/non-numeric → NaN
 _before = len(chunk)
-chunk = chunk[chunk['unit_price'] > 0.0]
+chunk = chunk[chunk['unit_price'] > 0.0]    # NaN (coerced dirty) and <=0 dropped → counted as rejected
 rejected_by_reason['monetary_integrity'] = \
     rejected_by_reason.get('monetary_integrity', 0) + (_before - len(chunk))
 

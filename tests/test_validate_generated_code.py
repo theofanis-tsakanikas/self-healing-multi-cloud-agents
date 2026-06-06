@@ -64,6 +64,21 @@ class TestPythonCloudGuardAndRules:
         out = _validate(tmp_path, "p.py", "chunk['is_suspicious'] = False\n")
         assert "BUSINESS RULES" in out
 
+    def test_astype_float_in_business_rule_flagged(self, tmp_path):
+        out = _validate(tmp_path, "p.py",
+                        "chunk = chunk[chunk['ad_spend'].astype(float) >= 0.0]\n")
+        assert "BUSINESS RULES" in out and "to_numeric" in out
+
+    def test_to_numeric_coerce_is_clean(self, tmp_path):
+        out = _validate(tmp_path, "p.py",
+                        "chunk['ad_spend'] = pd.to_numeric(chunk['ad_spend'], errors='coerce')\n"
+                        "chunk = chunk[chunk['ad_spend'] >= 0.0]\n")
+        assert "could not convert" not in out
+
+    def test_int64_cast_not_flagged_as_float(self, tmp_path):
+        out = _validate(tmp_path, "p.py", "chunk[col] = chunk[col].astype('Int64')\n")
+        assert "astype(float)" not in out
+
 
 # ── JSON: Grafana dashboard (incl. the $project_id template-var rule) ────────────
 _GOOD_DASHBOARD = """
