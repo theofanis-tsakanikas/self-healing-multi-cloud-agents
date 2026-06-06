@@ -11,37 +11,46 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Google Cloud Login
+      - name: Google Cloud Login            # 🔴 MANDATORY — every `gcloud` command below fails without it
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
 
-      - name: Configure Docker
+      - name: Toolchain Setup              # 🔴 MANDATORY — installs gcloud CLI + GKE auth plugin
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: GCP Artifact Registry Login    # 🔴 MANDATORY — `docker push` is unauthorized without it
         run: gcloud auth configure-docker europe-west3-docker.pkg.dev --quiet
 
       - name: Build and Push Docker Image
         run: |
-          docker build -t europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260605-0744:${{ github.sha }} -f Dockerfile .
-          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260605-0744:${{ github.sha }}
-          docker tag europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260605-0744:${{ github.sha }} europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260605-0744:latest
-          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260605-0744:latest
+          docker build -t europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-${{ github.sha }} -f Dockerfile .
+          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-${{ github.sha }}
+          docker tag europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-${{ github.sha }} europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp:latest
+          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp:latest
 
       - name: Update Kubeconfig
         run: gcloud container clusters get-credentials multi-cloud-agent-gke --region europe-west3 --project multi-cloud-self-healing-agent
 
       - name: Set Image Tag in Job Manifest
         run: |
-          sed -i 's|image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260605-0744:.*|image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260605-0744:${{ github.sha }}|' k8s/job.yaml
+          sed -i 's|image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp:.*|image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp:${{ github.sha }}|' k8s/job.yaml
 
-      - name: Deploy Shared Services to Kubernetes
+      - name: Deploy Shared Services to Kubernetes   # 🔴 MUST run BEFORE the secret — 00_namespaces.yaml creates the `analytics` namespace
         run: |
           kubectl apply -f k8s/00_namespaces.yaml
           kubectl apply -f k8s/configmaps.yaml
+          kubectl apply -f k8s/prometheus_deployment.yaml   # 🔴 MANDATORY — Prometheus + Pushgateway; without it metrics push fails → Grafana "No data"
           kubectl apply -f k8s/trino_deployment.yaml
           kubectl apply -f k8s/grafana_deployment.yaml
-          kubectl apply -f k8s/prometheus_deployment.yaml
+          kubectl rollout restart deployment/trino -n analytics      # 🔴 reload ConfigMaps (the sed'd ABFS key) on re-deploy
+          kubectl rollout restart deployment/grafana -n monitoring
+          kubectl rollout status deployment/trino -n analytics --timeout=120s
+          kubectl rollout status deployment/grafana -n monitoring --timeout=120s
 
-      - name: Create DB Credentials Secret
+      - name: Create DB Credentials Secret      # HOST/PORT/USER/NAME = vars.* (NOT secrets.*); password = secret. MUST come AFTER the namespace exists (above) or `kubectl` fails with `namespaces "analytics" not found`.
         run: |
           kubectl create secret generic pipe-mkt-global-to-gcp-db-credentials -n analytics \
             --from-literal=MYSQL_DB_HOST=${{ vars.MYSQL_DB_HOST }} \
