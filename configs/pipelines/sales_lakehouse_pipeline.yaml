@@ -26,7 +26,10 @@ cloud_provider: "aws"
 aws_setup:
   bucket_name: "multi-cloud-agent-lakehouse"   # workspace DBFS root + Unity Catalog managed storage
   region: "eu-central-1"
-  state_bucket: "multi-cloud-agent-tf-state-bucket"
+  # Pipeline terraform state → the long-lived bootstrap-state bucket (distinct key). The old
+  # multi-cloud-agent-tf-state-bucket was created by the AWS bootstrap (torn down); the
+  # bootstrap-state bucket already exists and the agent user has read/write to it — self-contained.
+  state_bucket: "multi-cloud-agent-bootstrap-state"
   state_key: "terraform/sales-lakehouse/terraform.tfstate"
   lock_table: "terraform-state-lock"
 

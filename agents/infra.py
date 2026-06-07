@@ -454,6 +454,11 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             f'cloud\'s iac query):\n  query_vector_store(query="{_iac_query}")\n'
             f"Pre-resolved for this pipeline's cloud ({_iac_key}); it is the ONLY iac query that exists here.\n"
         )
+        if is_databricks:
+            system_prompt += (
+                "🧱 DATABRICKS: issue EXACTLY TWO queries — this iac query + the CI/CD query. "
+                "Do NOT issue the K8s or Dockerfile queries (Databricks has neither).\n"
+            )
 
     # Inject only the standards relevant to the current sub-phase.
     # safe_recent_messages(limit=5) trims discovery ToolMessages out of context by the
