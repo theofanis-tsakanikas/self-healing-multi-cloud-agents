@@ -1,0 +1,44 @@
+name: Deploy Pipeline
+on:
+  push:
+    paths: ['scripts/**', 'sql/**', 'terraform/**']
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST:  ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - uses: databricks/setup-cli@main          # the unified `databricks` CLI
+
+      - name: Upload Spark script to DBFS
+        run: |
+          databricks fs mkdirs "dbfs:/pipelines/pipe_sales_lakehouse" || true
+          databricks fs cp scripts/pipe_sales_lakehouse.py "dbfs:/pipelines/pipe_sales_lakehouse/pipe_sales_lakehouse.py" --overwrite
+
+      - name: Trigger job run and wait
+        working-directory: terraform
+        run: |
+          terraform init -input=false
+          JOB_ID=$(terraform output -raw job_id)
+          RUN_ID=$(databricks jobs run-now "$JOB_ID" -o json | jq -r '.run_id')
+          echo "Triggered run $RUN_ID for job $JOB_ID"
+          for i in $(seq 1 80); do
+            RUN=$(databricks jobs get-run "$RUN_ID" -o json)
+            STATE=$(echo "$RUN" | jq -r '.state.life_cycle_state')
+            RESULT=$(echo "$RUN" | jq -r '.state.result_state // empty')
+            echo "run $RUN_ID: $STATE $RESULT ($i/80)"
+            if [ "$STATE" = "TERMINATED" ]; then
+              [ "$RESULT" = "SUCCESS" ] && { echo "Job succeeded"; exit 0; }
+              echo "Job failed: $RESULT"; echo "$RUN" | jq '.tasks[].state'; exit 1
+            fi
+            [ "$STATE" = "INTERNAL_ERROR" ] && { echo "Internal error"; exit 1; }
+            sleep 15
+          done
+          echo "Timeout waiting for run"; exit 1
+
+      - run: echo "Deployment Complete"

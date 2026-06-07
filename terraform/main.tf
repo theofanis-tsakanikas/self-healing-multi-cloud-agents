@@ -1,47 +1,48 @@
-data "google_service_account" "pipeline" {
-  account_id = var.service_account_id
-  project    = var.project_id
+resource "databricks_secret_scope" "pipeline" {
+  name = "pipe_sales_lakehouse"
 }
 
-resource "google_storage_bucket" "data" {
-  name                        = var.bucket_name
-  location                    = var.region
-  storage_class               = "STANDARD"
-  uniform_bucket_level_access = true
-  public_access_prevention    = "enforced"
+data "aws_ssm_parameter" "db_host"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_host" }
+data "aws_ssm_parameter" "db_name"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_name" }
+data "aws_ssm_parameter" "db_user"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_user" }
+data "aws_ssm_parameter" "db_password" { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_password" }
 
-  versioning {
-    enabled = true
-  }
+resource "databricks_secret" "db_password" {
+  key          = "db_password"
+  string_value = data.aws_ssm_parameter.db_password.value
+  scope        = databricks_secret_scope.pipeline.name
+}
 
-  lifecycle_rule {
-    action {
-      type          = "SetStorageClass"
-      storage_class = "NEARLINE"
+data "databricks_cluster" "jobs" {
+  cluster_name = "multi-cloud-agent-workspace-jobs-cluster"
+}
+
+resource "databricks_job" "pipeline" {
+  name = "pipe_sales_lakehouse"
+
+  task {
+    task_key            = "etl"
+    existing_cluster_id = data.databricks_cluster.jobs.id
+
+    library {
+      maven { coordinates = "org.postgresql:postgresql:42.7.3" }
     }
-    condition {
-      age = 90
+
+    spark_python_task {
+      python_file = "dbfs:/pipelines/pipe_sales_lakehouse/pipe_sales_lakehouse.py"
+      parameters = [
+        "--catalog", var.catalog,
+        "--schema", var.schema,
+        "--secret-scope", databricks_secret_scope.pipeline.name,
+        "--db-host", data.aws_ssm_parameter.db_host.value,
+        "--db-name", data.aws_ssm_parameter.db_name.value,
+        "--db-user", data.aws_ssm_parameter.db_user.value,
+      ]
     }
   }
 
-  labels = {
-    project_id = var.project_id
-    managed_by = "terraform"
+  schedule {
+    quartz_cron_expression = "0 0 6 * * ?"
+    timezone_id            = "UTC"
   }
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-resource "google_storage_bucket_iam_member" "pipeline" {
-  bucket = google_storage_bucket.data.name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${data.google_service_account.pipeline.email}"
-}
-
-resource "google_storage_bucket_object" "processed_dir" {
-  name    = "processed/"
-  bucket  = google_storage_bucket.data.name
-  content = " "
 }

@@ -1,15 +1,19 @@
 terraform {
-  required_version = ">= 1.6"
-
   required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
+    databricks = { source = "databricks/databricks", version = "~> 1.0" }
+    aws        = { source = "hashicorp/aws", version = "~> 5.0" }   # to read the DB creds from SSM
   }
+  backend "s3" {
+    bucket = "multi-cloud-agent-bootstrap-state"
+    key    = "terraform/sales-lakehouse/terraform.tfstate"
+    region = "eu-central-1"
+  }
+}
 
-  backend "gcs" {
-    bucket = "multi-cloud-agent-tfstate"
-    prefix = "gcp/global-marketing-insights/terraform.tfstate"
-  }
+provider "databricks" {
+  auth_type = "pat"
+}
+
+provider "aws" {
+  region = "eu-central-1"
 }
