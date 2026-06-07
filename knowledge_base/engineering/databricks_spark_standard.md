@@ -73,7 +73,9 @@ def run():
     # and the pgjdbc default (sslmode=prefer) HANGS on the SSL negotiation from the Databricks
     # cluster — the read task never completes (TCP connects, then stalls forever). require = clean
     # encrypted connection, no cert verification. (MySQL source → use "?useSSL=true&requireSSL=true".)
-    jdbc_url = f"jdbc:postgresql://{db_host}:5432/{db_name}?sslmode=require"
+    # connectTimeout/socketTimeout bound the connection so a stall fails fast (a clear error) instead
+    # of hanging the run indefinitely.
+    jdbc_url = f"jdbc:postgresql://{db_host}:5432/{db_name}?sslmode=require&connectTimeout=15&socketTimeout=120"
 
     # ── 3. IDEMPOTENCY — skip if this run_date already landed ─────────────────
     if spark.catalog.tableExists(table):

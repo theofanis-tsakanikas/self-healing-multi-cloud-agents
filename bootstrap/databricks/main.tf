@@ -182,7 +182,10 @@ resource "databricks_cluster" "jobs" {
   # These pinned values come from configs/infra/databricks.yaml (LTS runtime + AWS node).
   # m5d (not m5): the "d" variant has local NVMe storage, so no EBS volume is required —
   # an EBS-only type (m5.xlarge) fails "At least one EBS volume must be attached".
-  spark_version           = "14.3.x-scala2.12"
+  # DBR 18.2 (Spark 4.1, Java 17): the older 14.3 LTS (Java 8) HANGS on the RDS Postgres SSL
+  # handshake during the JDBC read (verified: the read succeeds on an 18.2 cluster but stalls on
+  # 14.3, same driver + sslmode=require + network). 18.2's newer JVM negotiates SSL cleanly.
+  spark_version           = "18.2.x-scala2.13"
   node_type_id            = "m5d.xlarge"
   autotermination_minutes = 20
 
