@@ -57,6 +57,10 @@ def run():
     args, _ = parser.parse_known_args()
 
     catalog, schema = args.catalog, args.schema
+    # <table_name> is the BARE table name from DELTA_DESTINATION.unity_catalog.table
+    # (e.g. "pipe_sales_lakehouse") — NOT the fully-qualified name.
+    #   ✅ table = f"{catalog}.{schema}.pipe_sales_lakehouse"
+    #   ❌ table = f"{catalog}.{schema}.multi_cloud_agent_workspace.raw.pipe_sales_lakehouse"  (5-part — fails)
     table = f"{catalog}.{schema}.<table_name>"
     audit_table = f"{catalog}.{schema}.<table_name>_audit"
     run_date = datetime.date.today().isoformat()
@@ -166,9 +170,14 @@ CREATE TABLE IF NOT EXISTS multi_cloud_agent_workspace.raw.<table_name>_audit (
 ) USING DELTA;
 ```
 - Use `USING DELTA` — never `external_location` / `PARTITIONED_BY = ARRAY[...]` / `FORMAT = 'PARQUET'` (that is Trino-Hive syntax and does not apply to Unity Catalog).
-- 3-part names `catalog.schema.table` everywhere.
+- 3-part names `catalog.schema.table` — but the Spark script BUILDS that name from the
+  job-param `{catalog}.{schema}` + the BARE table (`f"{catalog}.{schema}.{table}"`). Never paste
+  an already-qualified `catalog.schema.table` into the `<table_name>` slot.
 
 ## Hard rules
 - No `to_parquet`, no `cloud_get()`, no `os.getenv("POSTGRES_DB_*"/"MYSQL_DB_*")`, no `create_engine`,
   no `push_to_gateway`, no Trino/Grafana code.
+- **No `requirements.txt`** — the Databricks cluster runtime provides pyspark + delta, and the
+  source JDBC driver is attached as a Maven library by the Terraform. The ONLY artifacts are the
+  Spark script + the Unity Catalog DDL. (If one is emitted anyway it must contain only `pyspark`.)
 - The audit-table write is **MANDATORY** — a run that writes data but no audit row is non-compliant.

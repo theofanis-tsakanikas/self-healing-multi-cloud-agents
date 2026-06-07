@@ -475,18 +475,23 @@ def validate_generated_code(filename: str) -> str:
     elif base == "requirements.txt":
         with open(filename, encoding="utf-8") as f:
             lines = [l.strip() for l in f if l.strip() and not l.strip().startswith("#")]
-        mandatory = ["pandas", "sqlalchemy", "pyarrow", "trino", "prometheus-client"]
-        missing = [p for p in mandatory if not any(p in l.lower() for l in lines)]
-        if missing:
-            errors.append(f"REQUIREMENTS: missing mandatory packages: {missing}")
-        # Cloud-specific filesystem driver for to_parquet() — omitting causes silent S3/GCS/ADLS failures.
         content_lower = " ".join(lines).lower()
-        if "boto3" in content_lower and "s3fs" not in content_lower:
-            errors.append("REQUIREMENTS: boto3 present but s3fs missing — add 's3fs' to requirements.txt (repo root, not scripts/).")
-        if "google-cloud-storage" in content_lower and "gcsfs" not in content_lower:
-            errors.append("REQUIREMENTS: google-cloud-storage present but gcsfs missing — add 'gcsfs' to requirements.txt (repo root, not scripts/).")
-        if "azure-storage-blob" in content_lower and "adlfs" not in content_lower:
-            errors.append("REQUIREMENTS: azure-storage-blob present but adlfs missing — add 'adlfs' to requirements.txt (repo root, not scripts/).")
+        # Databricks pipelines run on the cluster runtime (pyspark + delta built in) with the
+        # source JDBC driver attached as a Maven library — the pandas/Trino/Prometheus stack and
+        # the cloud filesystem drivers do NOT apply (requirements.txt isn't even a required
+        # artifact there). A `pyspark` line is the databricks signature → skip the K8s checks.
+        if "pyspark" not in content_lower:
+            mandatory = ["pandas", "sqlalchemy", "pyarrow", "trino", "prometheus-client"]
+            missing = [p for p in mandatory if not any(p in l.lower() for l in lines)]
+            if missing:
+                errors.append(f"REQUIREMENTS: missing mandatory packages: {missing}")
+            # Cloud-specific filesystem driver for to_parquet() — omitting causes silent S3/GCS/ADLS failures.
+            if "boto3" in content_lower and "s3fs" not in content_lower:
+                errors.append("REQUIREMENTS: boto3 present but s3fs missing — add 's3fs' to requirements.txt (repo root, not scripts/).")
+            if "google-cloud-storage" in content_lower and "gcsfs" not in content_lower:
+                errors.append("REQUIREMENTS: google-cloud-storage present but gcsfs missing — add 'gcsfs' to requirements.txt (repo root, not scripts/).")
+            if "azure-storage-blob" in content_lower and "adlfs" not in content_lower:
+                errors.append("REQUIREMENTS: azure-storage-blob present but adlfs missing — add 'adlfs' to requirements.txt (repo root, not scripts/).")
 
     # ── Terraform ────────────────────────────────────────────────────────────
     elif ext == ".tf":

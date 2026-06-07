@@ -125,11 +125,15 @@ def build_databricks_architect_context(pipeline_conf: dict, db_conf: dict, rules
         "DELTA_DESTINATION": {
             "format": "delta",
             "delta_uri": delta_uri,
-            "unity_catalog": {"catalog": catalog, "schema": schema, "table": fq_table},
+            # `table`/`audit_table` are the BARE names. The Spark script builds the full name with
+            # f"{catalog}.{schema}.{table}" — do NOT put a pre-qualified catalog.schema.table here
+            # (that yields a 5-part name). fq_table is provided separately only for the DDL.
+            "unity_catalog": {"catalog": catalog, "schema": schema, "table": table_name},
+            "fq_table": fq_table,
             "partition_by": infra_conf.get("delta_storage", {}).get("partition_by", "run_date"),
         },
         "OBSERVABILITY": {
-            "audit_table": f"{fq_table}_audit",
+            "audit_table": f"{table_name}_audit",
             "metrics": ["run_timestamp", "rows_processed", "rows_rejected", "duration_seconds", "rejected_by_reason"],
             "note": "Databricks has no Prometheus/Grafana — the Spark job MUST append one row to "
                     "the Delta audit table per run. This is the Databricks-native equivalent of the gauges.",
