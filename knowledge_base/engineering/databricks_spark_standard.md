@@ -40,6 +40,12 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 logging.basicConfig(level=logging.INFO)
+# MANDATORY: silence py4j. basicConfig(level=INFO) sets the ROOT logger to INFO, which makes the
+# py4j logger emit one line PER Python↔JVM call ("Received command c on object id p0"). Across the
+# thousands of calls a Spark job makes, that log flood becomes the driver bottleneck — a 100-row
+# job crawls for 10+ minutes. WARNING keeps our own INFO logs but mutes the py4j chatter.
+logging.getLogger("py4j").setLevel(logging.WARNING)
+logging.getLogger("py4j.clientserver").setLevel(logging.WARNING)
 
 
 def run():
@@ -93,6 +99,8 @@ def run():
         .option("password", db_password)
         .option("driver", "org.postgresql.Driver")
         .load()
+        .cache()  # the business-rule counts below re-scan df repeatedly — cache so the JDBC read
+                  # against Postgres runs ONCE, not once per count()/write (N round-trips → 1).
     )
 
     # ── 5. BUSINESS RULES (translate ALL quality_standards) ───────────────────
