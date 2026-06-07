@@ -31,7 +31,7 @@ def run():
     # ── 2. CREDENTIALS ────────────────────────────────────────────────────────
     db_host, db_name, db_user = args.db_host, args.db_name, args.db_user
     db_password = dbutils.secrets.get(args.secret_scope, "db_password")  # noqa: F821 (dbutils injected by Databricks)
-    jdbc_url = f"jdbc:postgresql://{db_host}:5432/{db_name}"
+    jdbc_url = f"jdbc:postgresql://{db_host}:5432/{db_name}?sslmode=require"
 
     # ── 3. IDEMPOTENCY ────────────────────────────────────────────────────────
     if spark.catalog.tableExists(table):
@@ -56,7 +56,7 @@ def run():
 
     # monetary_integrity
     _before = df.count()
-    df = df.filter(F.col("unit_price").cast("double") > 0.0)
+    df = df.filter(F.col("unit_price") > 0.0)
     rejected_by_reason["monetary_integrity"] = _before - df.count()
 
     # temporal_validity
@@ -70,7 +70,7 @@ def run():
     rejected_by_reason["completeness_enforcement"] = _before - df.count()
 
     # currency_standardization
-    df = df.withColumn("currency", F.when(F.col("currency").isin(['EUR', 'GBP']), F.col("currency")).otherwise("EUR"))
+    df = df.withColumn("currency", F.when(F.col("currency").isin(["EUR", "GBP"]), F.col("currency")).otherwise("EUR"))
 
     # volume_sanity_check
     df = df.withColumn("is_suspicious", F.when(F.col("quantity") >= 1000, True).otherwise(False))
