@@ -1141,6 +1141,24 @@ def _ensure_cloud_sdk_import(content: str) -> str:
     return "\n".join(lines)
 
 
+# Single-line f-string literals (f"..." / f'...'), incl. escaped chars. Covers every f-string
+# our generated pipeline scripts emit (none span multiple lines or escape literal braces).
+_FSTRING_RE = re.compile(r'f"(?:[^"\\]|\\.)*"' + r"|f'(?:[^'\\]|\\.)*'")
+
+
+def _fix_fstring_double_braces(content: str) -> str:
+    """Deterministic F541 guard. LLMs intermittently double the braces inside f-strings
+    (f"{{x}}" instead of f"{x}"), which ruff flags as F541 ("f-string without any
+    placeholders"). The naive fix (drop the `f`) then SILENTLY breaks interpolation — e.g. a
+    Delta `replaceWhere` predicate becomes the literal "run_date = '{run_date}'" and the
+    idempotent write matches nothing. Our scripts never escape a literal brace in an f-string,
+    so un-doubling braces INSIDE f-string literals only is safe (non-f-string `{{ }}` such as
+    set/dict literals are untouched)."""
+    return _FSTRING_RE.sub(
+        lambda m: m.group(0).replace("{{", "{").replace("}}", "}"), content
+    )
+
+
 @tool
 def write_project_file(filename: str, content: str):
     """
@@ -1172,9 +1190,12 @@ def write_project_file(filename: str, content: str):
         filepath = os.path.join(target_dir, base_name)
         final_dir = target_dir
 
-    # Deterministic F821 guard: guarantee the cloud-SDK import a pipeline script needs.
+    # Deterministic guards for intermittent LLM slips in generated .py:
+    #  - F821: guarantee the cloud-SDK import the script's SDK call needs.
+    #  - F541: un-double f-string braces (f"{{x}}" → f"{x}") before they reach ruff.
     if filepath.endswith(".py"):
         content = _ensure_cloud_sdk_import(content)
+        content = _fix_fstring_double_braces(content)
 
     # Create the directory and write the file
     try:
