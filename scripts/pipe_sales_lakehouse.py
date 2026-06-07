@@ -7,6 +7,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("py4j").setLevel(logging.WARNING)
+logging.getLogger("py4j.clientserver").setLevel(logging.WARNING)
 
 def run():
     logging.info("Databricks pipeline starting: pipe_sales_lakehouse")
@@ -28,12 +30,12 @@ def run():
     run_date = datetime.date.today().isoformat()
     start_time = time.time()
 
-    # ── 2. CREDENTIALS ────────────────────────────────────────────────────────
+    # ── 2. CREDENTIALS ───────────────────────────────────────────────────────
     db_host, db_name, db_user = args.db_host, args.db_name, args.db_user
-    db_password = dbutils.secrets.get(args.secret_scope, "db_password")  # noqa: F821 (dbutils injected by Databricks)
+    db_password = dbutils.secrets.get(args.secret_scope, "db_password")  # noqa: F821
     jdbc_url = f"jdbc:postgresql://{db_host}:5432/{db_name}?sslmode=require&connectTimeout=15&socketTimeout=120"
 
-    # ── 3. IDEMPOTENCY ────────────────────────────────────────────────────────
+    # ── 3. IDEMPOTENCY ───────────────────────────────────────────────────────
     if spark.catalog.tableExists(table):
         already = spark.table(table).where(F.col("run_date") == run_date).limit(1).count()
         if already:
@@ -49,9 +51,10 @@ def run():
         .option("password", db_password)
         .option("driver", "org.postgresql.Driver")
         .load()
+        .cache()
     )
 
-    # ── 5. BUSINESS RULES ─────────────────────────────────────────────────────
+    # ── 5. BUSINESS RULES ────────────────────────────────────────────────────
     rejected_by_reason = {}
 
     # monetary_integrity
@@ -70,7 +73,7 @@ def run():
     rejected_by_reason["completeness_enforcement"] = _before - df.count()
 
     # currency_standardization
-    df = df.withColumn("currency", F.when(F.col("currency").isin(['EUR', 'GBP']), F.col("currency")).otherwise("EUR"))
+    df = df.withColumn("currency", F.when(F.col("currency").isin(["EUR", "GBP"]), F.col("currency")).otherwise("EUR"))
 
     # volume_sanity_check
     df = df.withColumn("is_suspicious", F.when(F.col("quantity") >= 1000, True).otherwise(False))
@@ -80,13 +83,13 @@ def run():
 
     rows_rejected = sum(rejected_by_reason.values())
 
-    # ── 6. WRITE to Delta (Unity Catalog, partitioned by run_date) ────────────
+    # ── 6. WRITE to Delta ────────────────────────────────────────────────────
     out = df.withColumn("run_date", F.lit(run_date))
     rows_processed = out.count()
     (
         out.write.format("delta")
         .mode("overwrite")
-        .option("replaceWhere", f"run_date = '{run_date}'")  # idempotent per-partition overwrite
+        .option("replaceWhere", f"run_date = '{run_date}'")
         .partitionBy("run_date")
         .saveAsTable(table)
     )
@@ -96,20 +99,18 @@ def run():
 
     # ── 7. AUDIT TABLE ───────────────────────────────────────────────────────
     audit_row = [(
-        datetime.datetime.now(datetime.timezone.utc),  # run_timestamp
-        run_date,                                  # run_date
-        int(rows_processed),                       # rows_processed
-        int(rows_rejected),                        # rows_rejected
-        float(duration_seconds),                   # duration_seconds
-        {k: int(v) for k, v in rejected_by_reason.items()},  # rejected_by_reason map
+        datetime.datetime.now(datetime.timezone.utc),
+        run_date,
+        int(rows_processed),
+        int(rows_rejected),
+        float(duration_seconds),
+        {k: int(v) for k, v in rejected_by_reason.items()},
     )]
-    audit_cols = ["run_timestamp", "run_date", "rows_processed",
-                  "rows_rejected", "duration_seconds", "rejected_by_reason"]
+    audit_cols = ["run_timestamp", "run_date", "rows_processed", "rows_rejected", "duration_seconds", "rejected_by_reason"]
     spark.createDataFrame(audit_row, audit_cols) \
         .write.format("delta").mode("append").saveAsTable(audit_table)
     logging.info(
-        f"Audit row written: rows_processed={rows_processed}, rows_rejected={rows_rejected}, "
-        f"duration={duration_seconds:.1f}s, by_reason={rejected_by_reason}"
+        f"Audit row written: rows_processed={rows_processed}, rows_rejected={rows_rejected}, duration={duration_seconds:.1f}s, by_reason={rejected_by_reason}"
     )
 
 
