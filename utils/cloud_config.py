@@ -101,14 +101,17 @@ _LEGACY_KEY_MAP: dict[str, str] = {
 }
 
 # SSM parameter name candidates for each generic key, tried in order.
-# Allows reading params that were written under the old naming convention
-# (rds_host, rds_username …) without migrating them.
+# Allows reading params written under other naming conventions without migrating them:
+#   - rds_*          : the AWS eu_sales bootstrap (legacy names).
+#   - lakehouse_db_* : the Databricks bootstrap's self-contained source RDS (distinct names so
+#                      they don't collide with eu_sales in the shared /aws/ namespace). Listed
+#                      LAST so eu_sales (rds_*) still wins when both happen to be present.
 _SSM_KEY_CANDIDATES: dict[str, list[str]] = {
-    "db_host":     ["db_host",     "rds_host"],
-    "db_port":     ["db_port",     "rds_port"],
-    "db_user":     ["db_user",     "rds_username"],
-    "db_password": ["db_password", "rds_password"],
-    "db_name":     ["db_name",     "rds_db_name"],
+    "db_host":     ["db_host",     "rds_host",     "lakehouse_db_host"],
+    "db_port":     ["db_port",     "rds_port",     "lakehouse_db_port"],
+    "db_user":     ["db_user",     "rds_username", "lakehouse_db_user"],
+    "db_password": ["db_password", "rds_password", "lakehouse_db_password"],
+    "db_name":     ["db_name",     "rds_db_name",  "lakehouse_db_name"],
 }
 
 
