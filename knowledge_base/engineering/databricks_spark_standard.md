@@ -15,7 +15,8 @@ pandas/parquet/Trino/Prometheus model — do NOT use `to_parquet`, `cloud_get()`
 
 ## Credentials — host/user/db are job parameters, PASSWORD is a secret scope
 The non-sensitive connection info (`--db-host`, `--db-name`, `--db-user`) arrives as **job
-parameters** (the `databricks_job` passes them; values come from CI `TF_VAR_db_*`). Only the
+parameters** (the `databricks_job` passes them; the pipeline Terraform reads the values from
+**SSM** via `data "aws_ssm_parameter"`). Only the
 **password** is sensitive → read it from the Databricks **secret scope** (provisioned by the
 pipeline Terraform) with `dbutils.secrets.get(scope, "db_password")`. NEVER use `cloud_get()`,
 and NEVER use `os.getenv()` with `POSTGRES_DB_*` / `MYSQL_DB_*` names. (The Terraform stores

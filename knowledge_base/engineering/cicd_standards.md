@@ -333,9 +333,10 @@ A Databricks deploy is **not** docker/kubectl. NO docker build, NO `kubectl`, NO
 image tag. The artifacts are a PySpark script (`scripts/<pipeline_id>.py`) + Unity Catalog DDL
 (`sql/setup_unity_catalog.sql`). **Terraform (the secret scope + `databricks_job`) is applied by
 the agent's `execute_terraform`, exactly like the other clouds — NOT in this workflow.** This
-deploy workflow does only: upload the script to DBFS → trigger the job → wait. Auth for both
-the CLI and the agent's terraform provider is `DATABRICKS_HOST` + `DATABRICKS_TOKEN`. The job
-id is read from the terraform output the agent already created.
+deploy workflow does only: upload the script to DBFS → trigger the job → wait. CLI auth is
+`DATABRICKS_HOST` + `DATABRICKS_TOKEN`; the agent's terraform additionally uses AWS credentials
+(host_cloud = aws) to read the source DB connection from SSM and for the S3 state backend. The
+job id is read from the terraform output the agent already created.
 
 ```yaml
 name: Deploy Pipeline
@@ -388,9 +389,11 @@ jobs:
 - `DATABRICKS_HOST`/`DATABRICKS_TOKEN` are repo **Secrets** (workspace URL + a PAT) — used by
   both this workflow's CLI and the agent's terraform provider.
 - The secret scope + job are created by the **agent's `execute_terraform`** (run via
-  `run_agent.yml`), which supplies `db_host`/`db_name`/`db_user` from the pipeline config
-  (terraform.tfvars) and `TF_VAR_db_password` from the `POSTGRES_DB_PASSWORD` repo Secret. Only
-  the password is sensitive.
+  `run_agent.yml`). The terraform reads the source DB connection (host/name/user/password) from
+  **SSM** via `data "aws_ssm_parameter"` (`/multi-cloud-self-healing-agent/aws/lakehouse_db_*`,
+  published by the Databricks bootstrap) — there are **NO** `db_*` terraform variables, **NO**
+  `terraform.tfvars` DB entries, and **NO** `POSTGRES_DB_PASSWORD` secret. Only the AWS creds
+  (which the agent already has) are needed to read SSM.
 - The Unity Catalog tables are created by the Spark job's `saveAsTable` on first run; the
   `sql/setup_unity_catalog.sql` artifact is the explicit-schema reference (apply it via the SQL
   Warehouse only if you want the schema pre-created).

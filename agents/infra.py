@@ -221,10 +221,12 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             orchestration_phase_instruction = (
                 "CURRENT OPERATIONAL PHASE: DATABRICKS CI/CD. Generate the GitHub Actions "
                 "workflow following the Databricks module in the CI/CD standard (§3.5) VERBATIM: "
-                "actions/checkout + setup-terraform + databricks/setup-cli, then terraform apply "
-                "(secret scope + databricks_job, with TF_VAR_db_host/name/user/password), upload "
-                "the Spark script to DBFS (databricks fs cp), and `databricks jobs run-now` the "
-                "job + poll the run to SUCCESS. Auth = DATABRICKS_HOST + DATABRICKS_TOKEN. "
+                "actions/checkout + setup-terraform + databricks/setup-cli, upload the Spark "
+                "script to DBFS (databricks fs cp), then `databricks jobs run-now` the job + poll "
+                "the run to SUCCESS. The secret scope + databricks_job terraform is applied by the "
+                "agent's execute_terraform (NOT this workflow); it reads the source DB connection "
+                "from SSM (data aws_ssm_parameter), so there are NO TF_VAR_db_* and NO db_* "
+                "terraform variables. Auth = DATABRICKS_HOST + DATABRICKS_TOKEN. "
                 "NO docker build, NO kubectl, NO Dockerfile/K8s — Databricks manages its compute."
             )
             logger.info("🧱 Databricks GATE: CI/CD phase.")
