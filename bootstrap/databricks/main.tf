@@ -193,17 +193,16 @@ resource "databricks_cluster" "jobs" {
   data_security_mode = "SINGLE_USER"
   single_user_name   = var.databricks_client_id
 
-  # Single-node cluster — no workers needed for pipeline jobs
+  # Single-node cluster. With an access mode (SINGLE_USER) the legacy
+  # spark.databricks.cluster.profile=singleNode / spark.master conf is REJECTED ("not allowed
+  # when choosing an access mode"). The modern single-node marker is custom_tags
+  # ResourceClass=SingleNode + num_workers=0 — Databricks sets the local master itself.
   num_workers = 0
 
-  spark_conf = {
-    "spark.databricks.cluster.profile" = "singleNode"
-    "spark.master"                     = "local[*]"
-  }
-
   custom_tags = {
-    Project   = "multi-cloud-agent"
-    ManagedBy = "terraform-bootstrap"
+    ResourceClass = "SingleNode"
+    Project       = "multi-cloud-agent"
+    ManagedBy     = "terraform-bootstrap"
   }
 }
 
