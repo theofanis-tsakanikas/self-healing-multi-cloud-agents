@@ -69,7 +69,11 @@ def run():
     # ── 2. CREDENTIALS — host/name/user from job params; PASSWORD from the secret scope ──
     db_host, db_name, db_user = args.db_host, args.db_name, args.db_user
     db_password = dbutils.secrets.get(args.secret_scope, "db_password")  # noqa: F821 (dbutils injected by Databricks)
-    jdbc_url = f"jdbc:postgresql://{db_host}:5432/{db_name}"
+    # ?sslmode=require is MANDATORY for RDS Postgres: the instance enforces SSL (rds.force_ssl),
+    # and the pgjdbc default (sslmode=prefer) HANGS on the SSL negotiation from the Databricks
+    # cluster — the read task never completes (TCP connects, then stalls forever). require = clean
+    # encrypted connection, no cert verification. (MySQL source → use "?useSSL=true&requireSSL=true".)
+    jdbc_url = f"jdbc:postgresql://{db_host}:5432/{db_name}?sslmode=require"
 
     # ── 3. IDEMPOTENCY — skip if this run_date already landed ─────────────────
     if spark.catalog.tableExists(table):
