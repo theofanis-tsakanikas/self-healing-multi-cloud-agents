@@ -136,10 +136,12 @@ jobs:
 
       # ── Databricks — provider auth for the infra agent's pipeline-level Terraform
       # (databricks_job + secret scope) and the databricks-cli deploy workflow.
-      DATABRICKS_HOST:  ${{ secrets.DATABRICKS_HOST }}
-      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
-      # SP application id — the pipeline job runs as this SP (run_as), matching the SINGLE_USER
-      # jobs cluster, so Unity Catalog is enabled at runtime.
+      DATABRICKS_HOST:          ${{ secrets.DATABRICKS_HOST }}
+      # The pipeline terraform authenticates as the SERVICE PRINCIPAL (oauth-m2m) so the job runs
+      # as the SP on its SINGLE_USER cluster (Unity Catalog access). No PAT needed.
+      DATABRICKS_CLIENT_ID:     ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      # Same SP app id as a TF_VAR for the job's run_as { service_principal_name }.
       TF_VAR_databricks_client_id: ${{ secrets.DATABRICKS_CLIENT_ID }}
       # The Databricks pipeline terraform reads the source DB connection from SSM
       # (data "aws_ssm_parameter") using the AWS creds above — no TF_VAR_db_*.

@@ -334,10 +334,10 @@ image tag. The artifacts are a PySpark script (`scripts/<pipeline_id>.py`) + Uni
 (`sql/setup_unity_catalog.sql`). **Terraform (the secret scope + `databricks_job`) is applied by
 the agent's `execute_terraform`, exactly like the other clouds — NOT in this workflow.** This
 deploy workflow does only: upload the script to DBFS → trigger the job → wait. Auth:
-`DATABRICKS_HOST` + `DATABRICKS_TOKEN` for the CLI, **plus AWS credentials** so `terraform init`
-can reach the **S3 state backend** — the job id is read from `terraform output` against the state
-the agent's apply already wrote. (The agent's own terraform — secret scope + job — also uses AWS
-creds for SSM, but that runs in the agent, not here.) Without the AWS creds, `terraform init`
+`DATABRICKS_HOST` + `DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET` (the **service principal**,
+oauth-m2m) for the CLI — the same identity the job runs as — **plus AWS credentials** so
+`terraform init` can reach the **S3 state backend** (the job id is read from `terraform output`
+against the state the agent's apply already wrote). Without the AWS creds, `terraform init`
 fails ("Failed to get existing workspaces / NoCredentialProviders").
 
 ```yaml
@@ -349,8 +349,11 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      DATABRICKS_HOST:  ${{ secrets.DATABRICKS_HOST }}
-      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      DATABRICKS_HOST:          ${{ secrets.DATABRICKS_HOST }}
+      # The databricks CLI authenticates as the SERVICE PRINCIPAL (oauth-m2m) — the same identity
+      # the job runs as. No PAT needed.
+      DATABRICKS_CLIENT_ID:     ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
       # AWS creds so `terraform init` can read the S3-backed state (job_id from `terraform output`).
       AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -392,8 +395,9 @@ jobs:
 ```
 
 **Notes:**
-- `DATABRICKS_HOST`/`DATABRICKS_TOKEN` are repo **Secrets** (workspace URL + a PAT) — used by
-  both this workflow's CLI and the agent's terraform provider.
+- `DATABRICKS_HOST` + `DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET` are repo **Secrets**
+  (workspace URL + the service principal) — used by both this workflow's CLI and the agent's
+  terraform provider (oauth-m2m). The pipeline runs entirely as the SP; **no user PAT is needed**.
 - The secret scope + job are created by the **agent's `execute_terraform`** (run via
   `run_agent.yml`). The terraform reads the source DB connection (host/name/user/password) from
   **SSM** via `data "aws_ssm_parameter"` (`/multi-cloud-self-healing-agent/aws/lakehouse_db_*`,

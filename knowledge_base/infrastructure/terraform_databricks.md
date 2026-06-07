@@ -16,9 +16,9 @@ Exactly five files in `/terraform`:
 |---|---|
 | `providers.tf` | `databricks` provider + remote backend on the host cloud (S3 for host_cloud=aws) |
 | `main.tf` | `databricks_secret_scope` + `databricks_secret` (source DB creds) and `databricks_job` running the Spark task on the existing cluster |
-| `variables.tf` | `catalog`, `schema`, and `databricks_client_id` (the SP for `run_as`, from `TF_VAR_databricks_client_id`). NO `db_*` (the connection is read from SSM via `data "aws_ssm_parameter"`), and NO `existing_cluster_id` (resolved by the `databricks_cluster` data source by name). |
+| `variables.tf` | `catalog`, `schema`, and `databricks_client_id` (the SP app id for `run_as`, from `TF_VAR_databricks_client_id`). NO `db_*` (read from SSM via `data "aws_ssm_parameter"`), and NO `existing_cluster_id` (resolved by the `databricks_cluster` data source by name). |
 | `outputs.tf` | `job_id`, `job_url` |
-| `terraform.tfvars` | `catalog` + `schema` ONLY. Do **NOT** put `databricks_client_id` here — it is supplied via `TF_VAR_databricks_client_id` (env); a value in `terraform.tfvars` would override that env var. |
+| `terraform.tfvars` | `catalog` + `schema` only. Do **NOT** put `databricks_client_id` here — it comes from `TF_VAR_databricks_client_id` (env); a tfvars value would override that env var. |
 
 ### Provider + backend (`providers.tf`)
 ```hcl
@@ -34,11 +34,13 @@ terraform {
     region = "<region>"
   }
 }
-# Databricks auth: DATABRICKS_HOST + DATABRICKS_TOKEN env vars (never hardcode). auth_type is
-# pinned to "pat" so the provider ignores the ARM_*/GOOGLE_CREDENTIALS env the agent run also sets
-# (otherwise: "more than one authorization method configured: azure and google and oauth").
+# Databricks auth: the SERVICE PRINCIPAL via OAuth (DATABRICKS_HOST + DATABRICKS_CLIENT_ID +
+# DATABRICKS_CLIENT_SECRET env). The pipeline runs as the SP so the job it creates runs as the SP
+# (default run_as = creator) on the SP's SINGLE_USER jobs cluster — no servicePrincipal.user role
+# binding is needed (a user PAT cannot bind the SP into run_as). auth_type is pinned to oauth-m2m
+# so the provider ignores the ARM_*/GOOGLE_CREDENTIALS env the agent run also sets.
 provider "databricks" {
-  auth_type = "pat"
+  auth_type = "oauth-m2m"
 }
 # AWS auth: the runner's AWS creds (same as the S3 backend) — used ONLY to read SSM.
 provider "aws" {
@@ -77,9 +79,10 @@ data "databricks_cluster" "jobs" {
 resource "databricks_job" "pipeline" {
   name = "<pipeline_id>"
 
-  # Run as the service principal the bootstrap assigned the SINGLE_USER jobs cluster to. The job
-  # is created via the user PAT but MUST run as that SP, else it can't use the SP's single-user
-  # cluster (and Unity Catalog access is the SP's). var.databricks_client_id = DATABRICKS_CLIENT_ID.
+  # Run as the service principal — the SINGLE_USER the bootstrap assigned the jobs cluster to, so
+  # the job has the SP's Unity Catalog access. The pipeline provider authenticates AS this SP
+  # (oauth-m2m), so it can bind the SP into run_as (a user PAT cannot — "must have
+  # servicePrincipal.user role on the SP"). var.databricks_client_id = the SP application id.
   run_as {
     service_principal_name = var.databricks_client_id
   }
