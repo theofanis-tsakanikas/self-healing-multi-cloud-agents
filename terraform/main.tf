@@ -20,6 +20,10 @@ data "databricks_cluster" "jobs" {
 resource "databricks_job" "pipeline" {
   name = "pipe_sales_lakehouse"
 
+  run_as {
+    service_principal_name = var.databricks_client_id
+  }
+
   task {
     task_key            = "etl"
     existing_cluster_id = data.databricks_cluster.jobs.id

@@ -70,7 +70,7 @@ def run():
     rejected_by_reason["completeness_enforcement"] = _before - df.count()
 
     # currency_standardization
-    df = df.withColumn("currency", F.when(F.col("currency").isin(["EUR", "GBP"]), F.col("currency")).otherwise("EUR"))
+    df = df.withColumn("currency", F.when(F.col("currency").isin(['EUR', 'GBP']), F.col("currency")).otherwise("EUR"))
 
     # volume_sanity_check
     df = df.withColumn("is_suspicious", F.when(F.col("quantity") >= 1000, True).otherwise(False))

@@ -11,7 +11,7 @@ terraform {
 }
 
 provider "databricks" {
-  auth_type = "pat"
+  auth_type = "oauth-m2m"
 }
 
 provider "aws" {
