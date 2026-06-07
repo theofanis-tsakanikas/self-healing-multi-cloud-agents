@@ -333,10 +333,12 @@ A Databricks deploy is **not** docker/kubectl. NO docker build, NO `kubectl`, NO
 image tag. The artifacts are a PySpark script (`scripts/<pipeline_id>.py`) + Unity Catalog DDL
 (`sql/setup_unity_catalog.sql`). **Terraform (the secret scope + `databricks_job`) is applied by
 the agent's `execute_terraform`, exactly like the other clouds — NOT in this workflow.** This
-deploy workflow does only: upload the script to DBFS → trigger the job → wait. CLI auth is
-`DATABRICKS_HOST` + `DATABRICKS_TOKEN`; the agent's terraform additionally uses AWS credentials
-(host_cloud = aws) to read the source DB connection from SSM and for the S3 state backend. The
-job id is read from the terraform output the agent already created.
+deploy workflow does only: upload the script to DBFS → trigger the job → wait. Auth:
+`DATABRICKS_HOST` + `DATABRICKS_TOKEN` for the CLI, **plus AWS credentials** so `terraform init`
+can reach the **S3 state backend** — the job id is read from `terraform output` against the state
+the agent's apply already wrote. (The agent's own terraform — secret scope + job — also uses AWS
+creds for SSM, but that runs in the agent, not here.) Without the AWS creds, `terraform init`
+fails ("Failed to get existing workspaces / NoCredentialProviders").
 
 ```yaml
 name: Deploy Pipeline
@@ -349,6 +351,10 @@ jobs:
     env:
       DATABRICKS_HOST:  ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      # AWS creds so `terraform init` can read the S3-backed state (job_id from `terraform output`).
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION:    ${{ vars.AWS_DEFAULT_REGION }}
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
