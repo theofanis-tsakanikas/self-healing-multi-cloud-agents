@@ -32,6 +32,12 @@ variable "account_id" {
   sensitive   = true
 }
 
+variable "databricks_client_id" {
+  description = "Service principal application ID (= DATABRICKS_CLIENT_ID). The jobs cluster is a SINGLE_USER cluster assigned to it, and the pipeline job runs as it (Unity Catalog access)."
+  type        = string
+  sensitive   = true
+}
+
 variable "metastore_name" {
   description = "Name of the Unity Catalog metastore to create or attach."
   type        = string

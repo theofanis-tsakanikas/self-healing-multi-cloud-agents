@@ -16,9 +16,9 @@ Exactly five files in `/terraform`:
 |---|---|
 | `providers.tf` | `databricks` provider + remote backend on the host cloud (S3 for host_cloud=aws) |
 | `main.tf` | `databricks_secret_scope` + `databricks_secret` (source DB creds) and `databricks_job` running the Spark task on the existing cluster |
-| `variables.tf` | `catalog`, `schema` only. NO `db_*` (the connection is read from SSM via `data "aws_ssm_parameter"`), and NO `existing_cluster_id` (resolved by the `databricks_cluster` data source by name). |
+| `variables.tf` | `catalog`, `schema`, and `databricks_client_id` (the SP for `run_as`, from `TF_VAR_databricks_client_id`). NO `db_*` (the connection is read from SSM via `data "aws_ssm_parameter"`), and NO `existing_cluster_id` (resolved by the `databricks_cluster` data source by name). |
 | `outputs.tf` | `job_id`, `job_url` |
-| `terraform.tfvars` | Concrete values from the infra context |
+| `terraform.tfvars` | `catalog` + `schema` ONLY. Do **NOT** put `databricks_client_id` here — it is supplied via `TF_VAR_databricks_client_id` (env); a value in `terraform.tfvars` would override that env var. |
 
 ### Provider + backend (`providers.tf`)
 ```hcl
@@ -76,6 +76,13 @@ data "databricks_cluster" "jobs" {
 
 resource "databricks_job" "pipeline" {
   name = "<pipeline_id>"
+
+  # Run as the service principal the bootstrap assigned the SINGLE_USER jobs cluster to. The job
+  # is created via the user PAT but MUST run as that SP, else it can't use the SP's single-user
+  # cluster (and Unity Catalog access is the SP's). var.databricks_client_id = DATABRICKS_CLIENT_ID.
+  run_as {
+    service_principal_name = var.databricks_client_id
+  }
 
   task {
     task_key            = "etl"

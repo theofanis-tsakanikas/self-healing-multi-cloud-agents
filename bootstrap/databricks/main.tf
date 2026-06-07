@@ -186,6 +186,13 @@ resource "databricks_cluster" "jobs" {
   node_type_id            = "m5d.xlarge"
   autotermination_minutes = 20
 
+  # Unity Catalog requires a UC-capable access mode. SINGLE_USER (assigned to the pipeline's
+  # service principal) is the right fit for a single-node jobs cluster — full Spark + libraries
+  # (the JDBC Maven driver works, unlike shared mode). Without this: "UC_NOT_ENABLED ... Unity
+  # Catalog is not enabled on this cluster". The pipeline job runs as this same SP (run_as).
+  data_security_mode = "SINGLE_USER"
+  single_user_name   = var.databricks_client_id
+
   # Single-node cluster — no workers needed for pipeline jobs
   num_workers = 0
 

@@ -138,6 +138,9 @@ jobs:
       # (databricks_job + secret scope) and the databricks-cli deploy workflow.
       DATABRICKS_HOST:  ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      # SP application id — the pipeline job runs as this SP (run_as), matching the SINGLE_USER
+      # jobs cluster, so Unity Catalog is enabled at runtime.
+      TF_VAR_databricks_client_id: ${{ secrets.DATABRICKS_CLIENT_ID }}
       # The Databricks pipeline terraform reads the source DB connection from SSM
       # (data "aws_ssm_parameter") using the AWS creds above — no TF_VAR_db_*.
 
@@ -253,6 +256,8 @@ jobs:
           # Required bootstrap variables (no defaults).
           TF_VAR_account_id:  ${{ secrets.DATABRICKS_ACCOUNT_ID }}
           TF_VAR_bucket_name: ${{ vars.DATABRICKS_DBFS_BUCKET }}
+          # SP application id — the jobs cluster (SINGLE_USER) is assigned to it for Unity Catalog.
+          TF_VAR_databricks_client_id: ${{ secrets.DATABRICKS_CLIENT_ID }}
           # The source RDS password is auto-generated and published to SSM — no TF_VAR.
         run: |
           terraform init
