@@ -239,6 +239,12 @@ p, li { color: #cbd5e1 !important; }
     padding-top: 0.5rem !important;
 }
 
+/* Hide Streamlit's own "Deploy" button (framework chrome — it publishes the APP to Streamlit
+   Cloud, unrelated to our pipeline deploy; off-brand for a demo). The ⋮ menu (Rerun/Settings)
+   stays for development. */
+[data-testid="stDeployButton"],
+.stDeployButton { display: none !important; }
+
 /* ── SELECTBOX — trigger ─────────────────────────────────── */
 .stSelectbox [data-baseweb="select"] > div {
     background: rgba(10, 18, 40, 0.85) !important;
