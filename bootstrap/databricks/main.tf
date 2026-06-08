@@ -300,6 +300,27 @@ resource "databricks_schema" "raw" {
 }
 
 # ---------------------------------------------------------------------------
+# Catalog read grant — REQUIRED for humans to view the Lakeview observability dashboard.
+# Unity Catalog access is EXPLICIT: even an account/workspace admin needs a grant (or to be a
+# metastore admin) to USE a catalog. The catalog is created/owned by the service principal (this
+# provider runs as the SP), so a human opening the dashboard runs its queries as themselves and
+# hits "[INSUFFICIENT_PERMISSIONS] User does not have USE CATALOG". Granting the built-in
+# "account users" group USE_CATALOG + USE_SCHEMA + SELECT (cascades to every schema/table) lets
+# any account user query the Delta tables, so the dashboard widgets render. Read-only — no MODIFY.
+# ---------------------------------------------------------------------------
+resource "databricks_grants" "catalog_read" {
+  provider = databricks.workspace
+  catalog  = databricks_catalog.main.name
+
+  grant {
+    principal  = "account users"
+    privileges = ["USE_CATALOG", "USE_SCHEMA", "SELECT"]
+  }
+
+  depends_on = [databricks_schema.raw]
+}
+
+# ---------------------------------------------------------------------------
 # IAM role for Unity Catalog storage credential (S3 access)
 #
 # Unity Catalog needs a SELF-ASSUMING role: the trust must list BOTH the Databricks UC master
