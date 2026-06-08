@@ -1266,11 +1266,21 @@ with tab_nl:
                 with st.spinner("Extracting intent from your description…"):
                     from utils.nlp_parser import _extract_intent
                     _intent = _extract_intent(_desc.strip())
-                st.session_state.nl_description     = _desc.strip()
-                st.session_state.nl_intent          = _intent
-                st.session_state.nl_rules_initialized = False
-                st.session_state.nl_step            = 1
-                st.rerun()
+                # Relevance gate — reject off-topic input instead of advancing into the wizard
+                # with a fabricated config. (Mirrors nlp_parser.check_pipeline_request.)
+                if not _intent.get("is_pipeline_request", True):
+                    st.error(
+                        "🚫 " + (_intent.get("rejection_reason")
+                                 or "This doesn't look like a data-pipeline request. Describe a "
+                                    "source table and a cloud destination (e.g. \"Postgres orders "
+                                    "table to GCP daily\").")
+                    )
+                else:
+                    st.session_state.nl_description     = _desc.strip()
+                    st.session_state.nl_intent          = _intent
+                    st.session_state.nl_rules_initialized = False
+                    st.session_state.nl_step            = 1
+                    st.rerun()
 
     # ════════════════════════════════════════════════════════════════════════
     # STEP 1 — Field Clarification
@@ -1677,6 +1687,15 @@ with tab_nl:
             f'</table></div>',
             unsafe_allow_html=True,
         )
+
+        # ── Cost preview (shown BEFORE the explicit deploy) ───────────────
+        st.markdown(
+            '<p style="color:#475569;font-size:0.7rem;text-transform:uppercase;'
+            'letter-spacing:0.09em;margin:0.4rem 0 0.3rem;">'
+            f'Estimated monthly cost &nbsp;·&nbsp; your pick: {_cloud_label}</p>',
+            unsafe_allow_html=True,
+        )
+        _render_cost_charts()
 
         # ── Edit buttons ──────────────────────────────────────────────────
         st.markdown(
