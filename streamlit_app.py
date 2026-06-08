@@ -974,7 +974,9 @@ def _get_active_rules(key_prefix: str) -> dict | None:
 # COST CHARTS HELPER
 # ---------------------------------------------------------------------------
 
-def _render_cost_charts(size_gb: int = 50):
+def _render_cost_charts(size_gb: int = 50, key: str = "cost"):
+    # `key` namespaces the breakdown-selector widget — this function renders in >1 tab and all
+    # tabs execute every run, so a shared widget key would raise DuplicateWidgetID.
     from utils.cost_estimator import compare_clouds
     estimates = compare_clouds(storage_gb=size_gb)
 
@@ -1018,11 +1020,28 @@ def _render_cost_charts(size_gb: int = 50):
         unsafe_allow_html=True,
     )
 
-    with st.expander(f"Cost breakdown — {_labels[cheapest['cloud']]} (cheapest)", expanded=False):
-        bd_df = pd.DataFrame(
-            list(cheapest["items"].items()), columns=["Service", "$/month"]
+    # Cost breakdown — pick ANY cloud (defaults to the cheapest).
+    _bd_order  = sorted(estimates, key=lambda e: e["total"])           # cheapest first
+    _bd_labels = [_labels[e["cloud"]] for e in _bd_order]
+    with st.expander("Cost breakdown — pick a cloud", expanded=False):
+        _pick = st.radio(
+            "Breakdown cloud", _bd_labels, index=0, horizontal=True,
+            label_visibility="collapsed", key=f"{key}_breakdown_pick",
         )
-        st.bar_chart(bd_df.set_index("Service"), color="#4ade80", height=180)
+        _sel = _bd_order[_bd_labels.index(_pick)]
+        _bd_df = pd.DataFrame(
+            [{"Service": k, "$/month": round(v, 2)} for k, v in _sel["items"].items()]
+        )
+        st.dataframe(
+            _bd_df, use_container_width=True, hide_index=True,
+            column_config={"$/month": st.column_config.NumberColumn("$/month", format="$%.2f")},
+        )
+        st.markdown(
+            f'<p style="color:#94a3b8;font-size:0.85rem;margin-top:0.3rem;">'
+            f'Total: <b style="color:{_colors[_sel["cloud"]]};">${_sel["total"]:.0f}/mo</b>'
+            f'{" ✓ cheapest" if _sel["cloud"] == cheapest["cloud"] else ""}</p>',
+            unsafe_allow_html=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1248,7 +1267,7 @@ with tab_upload:
 
             # ── Cost chart preview ─────────────────────────────
             st.markdown("##### 💰 Estimated monthly cost based on your data volume")
-            _render_cost_charts(size_gb=max(round(ds["size_gb_day"] * 30), 1))
+            _render_cost_charts(size_gb=max(round(ds["size_gb_day"] * 30), 1), key="upload")
 
     else:
         st.markdown(
@@ -1773,7 +1792,7 @@ with tab_nl:
             f'Estimated monthly cost &nbsp;·&nbsp; your pick: {_cloud_label}</p>',
             unsafe_allow_html=True,
         )
-        _render_cost_charts()
+        _render_cost_charts(key="nl")
 
         # ── Edit buttons ──────────────────────────────────────────────────
         st.markdown(
