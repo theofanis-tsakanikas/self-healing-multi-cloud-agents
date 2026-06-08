@@ -395,6 +395,9 @@ resource "databricks_storage_credential" "s3" {
 
   comment = "Storage credential for S3 bucket ${var.bucket_name}"
 
+  # Teardown: delete even if dependents (the external location) still reference it.
+  force_destroy = true
+
   depends_on = [databricks_metastore_assignment.this, time_sleep.wait_for_uc_iam]
 }
 
@@ -407,6 +410,12 @@ resource "databricks_external_location" "s3" {
   url             = "s3://${var.bucket_name}/managed"
   credential_name = databricks_storage_credential.s3.name
   comment         = "External location for the Unity Catalog managed storage (s3://${var.bucket_name}/managed)"
+
+  # Teardown: the Spark job's runtime managed tables live under this location's managed path, and
+  # dropping the schema doesn't clear the location's dependent-table view → plain delete fails
+  # "location has N dependent managed tables". force_destroy deletes it anyway; the underlying S3
+  # data is still purged because the dbfs_root bucket itself is force_destroy=true.
+  force_destroy = true
 
   depends_on = [databricks_storage_credential.s3]
 }
