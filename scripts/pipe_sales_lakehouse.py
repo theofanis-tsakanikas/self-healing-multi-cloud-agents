@@ -83,7 +83,7 @@ def run():
 
     rows_rejected = sum(rejected_by_reason.values())
 
-    # ── 6. WRITE to Delta ────────────────────────────────────────────────────
+    # ── 6. WRITE to Delta ─────────────────────────────────────────────────────
     out = df.withColumn("run_date", F.lit(run_date))
     rows_processed = out.count()
     (
@@ -97,7 +97,7 @@ def run():
     duration_seconds = time.time() - start_time
     logging.info(f"Wrote {rows_processed} rows to {table} (rejected={rows_rejected}).")
 
-    # ── 7. AUDIT TABLE ───────────────────────────────────────────────────────
+    # ── 7. AUDIT TABLE ────────────────────────────────────────────────────────
     audit_row = [(
         datetime.datetime.now(datetime.timezone.utc),
         run_date,
