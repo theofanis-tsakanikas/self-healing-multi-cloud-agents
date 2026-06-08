@@ -298,6 +298,10 @@ jobs:
       AWS_DEFAULT_REGION:    eu-central-1
       TF_VAR_account_id:     ${{ secrets.DATABRICKS_ACCOUNT_ID }}
       TF_VAR_bucket_name:    ${{ vars.DATABRICKS_DBFS_BUCKET }}
+      # Required (no default) by BOTH the pipeline terraform (job run_as) and the bootstrap
+      # (cluster single_user_name). Without it `terraform apply`/`destroy` aborts "No value for
+      # required variable databricks_client_id" → the workspace is never destroyed → cost lingers.
+      TF_VAR_databricks_client_id: ${{ secrets.DATABRICKS_CLIENT_ID }}
       # The source RDS password is auto-generated (state) — no TF_VAR needed for destroy.
 
     steps:
