@@ -1156,9 +1156,9 @@ def _render_execution_plan(cloud: str, pipeline_id: str):
 # INPUT SECTION
 # ---------------------------------------------------------------------------
 
-tab_upload, tab_nl, tab_existing, tab_trino, tab_obs = st.tabs([
-    "📁 Upload Dataset",
+tab_nl, tab_upload, tab_existing, tab_trino, tab_obs = st.tabs([
     "💬 Natural Language",
+    "📁 Upload Dataset",
     "📂 Existing Pipeline",
     "🔮 Trino Federation",
     "📊 Observability",
