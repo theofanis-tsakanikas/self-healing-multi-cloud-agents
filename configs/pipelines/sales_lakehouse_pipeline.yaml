@@ -39,15 +39,19 @@ databricks_target:
   schema: "raw"
   table_name: "pipe_sales_lakehouse"
 
-# 7. ARTIFACT PATHS — Databricks needs ONLY a Spark job + Unity Catalog DDL.
-#    NO Trino SQL, NO Grafana JSON, NO requirements.txt, NO K8s/Dockerfile.
+# 7. ARTIFACT PATHS — Databricks needs a Spark job + Unity Catalog DDL + a Lakeview
+#    observability dashboard JSON. NO Trino SQL, NO Grafana JSON, NO requirements.txt,
+#    NO K8s/Dockerfile (Lakeview replaces Grafana/Prometheus; there is no K8s here).
 project_structure:
   python_dir: scripts
   python_script_path: scripts/pipe_sales_lakehouse.py
   sql_dir: sql
   unity_catalog_sql_path: sql/setup_unity_catalog.sql
+  dashboards_dir: dashboards
+  dashboard_path: dashboards/pipe_sales_lakehouse_lakeview.json
 
 # Databricks artifact set — overrides DEFAULT_REQUIRED_ARTIFACTS (which is K8s/Trino-centric).
 required_artifacts:
   - scripts/pipe_sales_lakehouse.py
   - sql/setup_unity_catalog.sql
+  - dashboards/pipe_sales_lakehouse_lakeview.json

@@ -15,9 +15,9 @@ Exactly five files in `/terraform`:
 | File | Responsibility |
 |---|---|
 | `providers.tf` | `databricks` provider + remote backend on the host cloud (S3 for host_cloud=aws) |
-| `main.tf` | `databricks_secret_scope` + `databricks_secret` (source DB creds) and `databricks_job` running the Spark task on the existing cluster |
+| `main.tf` | `databricks_secret_scope` + `databricks_secret` (source DB creds), `databricks_job` running the Spark task on the existing cluster, and `databricks_dashboard` (the Lakeview observability dashboard on the bootstrap SQL warehouse) |
 | `variables.tf` | `catalog`, `schema`, and `databricks_client_id` (the SP app id for `run_as`, from `TF_VAR_databricks_client_id`). NO `db_*` (read from SSM via `data "aws_ssm_parameter"`), and NO `existing_cluster_id` (resolved by the `databricks_cluster` data source by name). |
-| `outputs.tf` | `job_id`, `job_url` |
+| `outputs.tf` | `job_id`, `job_url`, `dashboard_id` |
 | `terraform.tfvars` | `catalog` + `schema` only. Do **NOT** put `databricks_client_id` here — it comes from `TF_VAR_databricks_client_id` (env); a tfvars value would override that env var. |
 
 ### Provider + backend (`providers.tf`)
@@ -116,18 +116,43 @@ resource "databricks_job" "pipeline" {
     timezone_id            = "UTC"
   }
 }
+
+# Observability — Lakeview (AI/BI) dashboard. The Databricks-native equivalent of the other
+# clouds' Grafana dashboard: it reads the Delta `_audit` table (one row per run) on the bootstrap
+# SERVERLESS SQL warehouse and renders records processed/rejected, rejection rate, run duration,
+# and rejections by reason. The dashboard JSON is an architect-generated artifact
+# (`dashboards/<pipeline_id>_lakeview.json`, skeleton in `databricks_spark_standard.md`); terraform
+# reads it via `file_path` at apply time — `execute_terraform` runs in `<repo>/terraform`, so
+# `../dashboards/` resolves to the repo's dashboards dir where the architect wrote the file.
+data "databricks_sql_warehouse" "obs" {
+  name = "<workspace_name>-warehouse"   # bootstrap names it "${workspace_name}-warehouse"
+}
+
+resource "databricks_dashboard" "observability" {
+  display_name      = "<pipeline_id> — Observability"
+  parent_path       = "/Shared"
+  warehouse_id      = data.databricks_sql_warehouse.obs.id
+  file_path         = "${path.module}/../dashboards/<pipeline_id>_lakeview.json"
+  embed_credentials = false
+}
 ```
 
 ### Outputs (`outputs.tf`)
 ```hcl
-output "job_id"  { value = databricks_job.pipeline.id }
-output "job_url" { value = databricks_job.pipeline.url }
+output "job_id"       { value = databricks_job.pipeline.id }
+output "job_url"      { value = databricks_job.pipeline.url }
+output "dashboard_id" { value = databricks_dashboard.observability.id }
 ```
 
 ## Hard rules
 - **NO** `aws_s3_bucket`, `aws_iam_policy`, `glue`, `azurerm_*`, `google_storage_*`, or any
   Kubernetes/Helm resource in the pipeline Terraform — those belong to the other clouds or to
   the Databricks bootstrap.
-- The jobs cluster is **referenced by `existing_cluster_id`**, never created here.
+- The jobs cluster is **referenced by `existing_cluster_id`**, never created here. The SQL
+  warehouse is **referenced by name** (`data "databricks_sql_warehouse"`), never created here.
 - DB credentials go through `databricks_secret`, never plaintext.
 - Unity Catalog `catalog`/`schema` come from the infra context — never invented.
+- The `databricks_dashboard` reads the architect-generated `../dashboards/<pipeline_id>_lakeview.json`
+  via `file_path` — that file MUST exist at apply time. Use `file_path` (not a giant inline
+  `serialized_dashboard` string). Still **exactly five** `.tf` files — the dashboard JSON lives in
+  `/dashboards`, not `/terraform`.

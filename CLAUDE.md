@@ -2,23 +2,23 @@
 
 ## Project Identity
 
-Production-grade AI orchestration system that autonomously designs, deploys, and self-heals data pipelines across AWS, Azure, and GCP using a LangGraph multi-agent architecture: **Supervisor → Architect → Infra → Medic**.
+Production-grade AI orchestration system that autonomously designs, deploys, and self-heals data pipelines across AWS, Azure, GCP, and Databricks using a LangGraph multi-agent architecture: **Supervisor → Architect → Infra → Medic**.
 
 ---
 
 ## Non-Negotiable Principles
 
-- **Cloud Agnostic:** AWS, GCP, Azure are equals. No cloud is the default. Cloud is always read from `cloud_provider` in config — never assumed.
+- **Cloud Agnostic:** AWS, GCP, Azure are equals (object-storage + Kubernetes model). No cloud is the default. Cloud is always read from `cloud_provider` in config — never assumed. **Databricks** is a 4th provider with a *distinct execution model* — Spark + Delta + Unity Catalog instead of pandas/parquet/Trino/K8s — selected the same way (`provider: databricks`) but driven by its own standards (`databricks_spark_standard.md`, `terraform_databricks.md`). When a rule says "all clouds", check whether it means the three object-storage clouds or genuinely includes Databricks.
 - **No Shortcuts:** Production solution always. No TODOs, no placeholders, no "simplified for now".
 - **Standards First:** When the LLM generates wrong output, fix the **standard or prompt** — not the generated file. Hardcoded one-off fixes are never the answer.
-- **Deterministic generation guarantees:** when a correct output is *mechanically determined* (not a judgement call) yet the LLM still drops it intermittently despite the prompt, resolve it in **Python at generation time** — a guarantee, not a one-off patch. Established cases: `write_project_file` auto-injects the cloud-SDK import the script's SDK call requires (F821); `generate_k8s_manifest` fills `__EMBED_SETUP_TRINO_SQL__` / `__EMBED_MONITORING_SPECS_JSON__` verbatim from disk (truncation/transcription); `infra.py` pre-resolves the single per-cloud iac query (no wrong-cloud query). This is distinct from "patching the output" — it injects what is provably required, every time.
+- **Deterministic generation guarantees:** when a correct output is *mechanically determined* (not a judgement call) yet the LLM still drops it intermittently despite the prompt, resolve it in **Python at generation time** — a guarantee, not a one-off patch. Established cases: `write_project_file` auto-injects the cloud-SDK import the script's SDK call requires (F821); `write_project_file` un-doubles f-string braces the model double-braced (`{{…}}` → `{…}`) in a Databricks Spark script (F541 + a corrupted `replaceWhere`); `generate_k8s_manifest` fills `__EMBED_SETUP_TRINO_SQL__` / `__EMBED_MONITORING_SPECS_JSON__` verbatim from disk (truncation/transcription); `infra.py` pre-resolves the single per-cloud iac query (no wrong-cloud query). This is distinct from "patching the output" — it injects what is provably required, every time.
 - **Radical Honesty:** If an approach is wrong, say so. Don't execute bad instructions blindly.
 
 ---
 
 ## Credential Access — Absolute Rule
 
-`cloud_get()` is the **only** permitted way to read DB credentials in generated pipeline scripts.
+`cloud_get()` is the **only** permitted way to read DB credentials in generated **object-storage** pipeline scripts (AWS/GCP/Azure).
 
 ```python
 from utils.cloud_config import cloud_get
@@ -27,9 +27,12 @@ host = cloud_get(cloud, "db_host", db_type="postgres")  # aws | gcp | azure
 
 `os.getenv()` for `POSTGRES_DB_*` / `MYSQL_DB_*` is a **policy violation** — caught by `validate_generated_code`. The architect.md prompt explicitly forbids it. Resolution differs per cloud: **AWS** is 3-tier (SSM → `.bootstrap_outputs.json` → env); **GCP/Azure** read env vars directly (no SSM).
 
+**Databricks is the exception — NOT `cloud_get()`:** a Databricks Spark script reads the source DB **password** via `dbutils.secrets.get(scope, "db_password")` (host/name/user arrive as **job parameters**). Using `cloud_get()` (or `os.getenv` for the DB) in a Databricks script is wrong — see `databricks_spark_standard.md`.
+
 **Per-cloud runtime resolution:**
 - **AWS:** SSM via IRSA. The pipeline pod's IAM role MUST carry `ssm:GetParameter*` on `arn:aws:ssm:*:*:parameter/multi-cloud-self-healing-agent/*` — in BOTH `bootstrap/aws/iam.tf` (existing IRSA role) and `knowledge_base/infrastructure/terraform_aws_s3.md` (infra-agent-generated policy). Missing it → `cloud_get()` returns `None` → `host name "None"` error. K8s db-credentials secret is created **empty**. SSM params use legacy names (`rds_host`…) resolved via `_SSM_KEY_CANDIDATES`.
 - **GCP / Azure:** No SSM — `cloud_get()` reads env vars, so the K8s secret IS populated (`MYSQL_DB_*` / `CRM_DB_*`) from GitHub vars/secrets.
+- **Databricks:** No `cloud_get()`. The **pipeline Terraform** reads the source DB connection from **SSM** (`/multi-cloud-self-healing-agent/aws/lakehouse_db_*`, host_cloud=aws) — the **password** flows into a Databricks **secret scope** (read by `dbutils.secrets.get`), host/name/user become job parameters. Distinct `lakehouse_db_*` keys avoid colliding with eu_sales `rds_*` in the shared `/aws/` namespace.
 
 ---
 
@@ -111,6 +114,8 @@ This is **not a monorepo**. All paths are relative to the repo root:
 
 **AWS account ID:** `aws_account_id` comes from `CLOUD_SETUP.aws_account_id` in context — used for the IRSA role ARN in `00_namespaces.yaml`. Never derive it from the ECR URL or write a `<...>` placeholder. (ECR URL itself: see "ECR URL source" above.)
 
+**Databricks pipeline artifacts (NOT the K8s model above):** when `provider: databricks` the artifacts are the Spark script (`scripts/<pipeline>.py`), the Unity Catalog DDL (`sql/setup_unity_catalog.sql`), the **Lakeview dashboard JSON** (`dashboards/<pipeline>_lakeview.json`), and the 5 pipeline Terraform files — **no `requirements.txt`, no `Dockerfile`, no `k8s/`, no Grafana/Prometheus** (the cluster runtime provides pyspark+delta; the source JDBC driver is a Maven `library` on the job). The script does Spark JDBC read → Delta `saveAsTable` (Unity Catalog), and writes a `_audit` Delta table (one row per run) in place of the Prometheus gauges. **Observability = a Databricks Lakeview (AI/BI) dashboard** (the native equivalent of the other clouds' Grafana): the architect generates `dashboards/<pipeline>_lakeview.json` from the skeleton in `databricks_spark_standard.md` (datasets querying the `_audit` table → counters + line + bar widgets, `queryLines` not `query`, no `$`-template var), and the pipeline Terraform provisions it with `databricks_dashboard` (reads the JSON via `file_path`, on the bootstrap serverless SQL warehouse resolved by `data "databricks_sql_warehouse"`). The dashboard JSON is a `required_artifacts` entry (enforced by `_resolve_artifacts`) and is pushed under `dashboards/`. Full skeletons in `databricks_spark_standard.md` + `terraform_databricks.md`. Key script invariants: the **bare** `<table_name>` built into `f"{catalog}.{schema}.{table}"` (never a pre-qualified 5-part name); `?sslmode=require` + connect/socket timeouts on the JDBC URL (RDS forces SSL, pgjdbc's default `prefer` hangs); the `py4j` logger silenced to WARNING (root `INFO` floods one line per JVM call → driver bottleneck); `.cache()` on the JDBC read (the business-rule counts re-scan it).
+
 ---
 
 ## CI/CD — GitHub Actions
@@ -126,6 +131,8 @@ This is **not a monorepo**. All paths are relative to the repo root:
 **The generated pipeline workflow does NOT use the `gh` CLI** — no `GH_TOKEN` env block in the job. Git auth in the deploy workflow is handled by the cloud (AWS/GCP/Azure) credentials.
 
 **GCP image tag — `:latest`, no tag-rewrite sed:** the GCP `job.yaml` references `<ecr_repository_url>:latest` (the build pushes both `:${{ github.sha }}` and `:latest`). There is **NO "Set Image Tag" `sed` step** for GCP: the model intermittently appends a `-<timestamp>` to the AR image name, which makes a tag-rewrite `sed` no-op, leaving the literal `${{ github.sha }}` to reach the cluster as `InvalidImageName`. `:latest` needs no rewrite. **Never put `${{ … }}` in any k8s manifest** (Kubernetes never evaluates it) — `validate_generated_code` flags it for GCP. (AWS/Azure keep their anchored `…:.*` → `…:${{ github.sha }}` sed — they don't add a timestamp.)
+
+**Databricks `sales_lakehouse` (validated e2e 2026-06-08):** Before running `pipeline: sales_lakehouse`, the databricks bootstrap (`bootstrap/databricks/`) MUST have applied (workspace + Unity Catalog + **1-worker jobs cluster** + serverless SQL warehouse + its own source RDS + SSM). There is **no Docker build, no K8s** — the deploy workflow uploads the script to DBFS, runs the pipeline Terraform (secret scope + `databricks_job`), then `jobs run-now` to verify. The pipeline + deploy authenticate **AS the service principal** (`oauth-m2m` via `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET`), so the SP self-binds into the job's `run_as` (a user PAT can't — needs servicePrincipal.user role) and the job inherits the SP's UC access; `auth_type` is pinned to `oauth-m2m` so the databricks provider ignores the agent env's `ARM_*`/`GOOGLE_CREDENTIALS` ("more than one authorization method configured"). The deploy ALSO needs AWS creds (terraform init's S3 backend + reading the `lakehouse_db_*` SSM params). DB creds come from **SSM, not a GitHub secret**. Required repo **Secrets**: `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET` (+ `TF_VAR_databricks_client_id`), `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
 
 ---
 
@@ -177,9 +184,9 @@ Never commit `.env` files or credential JSON.
 
 ## Before Any Change — Checklist
 
-- Is this cloud-agnostic? Works equally on AWS, GCP, Azure?
+- Is this cloud-agnostic? Works equally on AWS, GCP, Azure? (Databricks is a separate execution model — does the change belong to the object-storage clouds, to Databricks, or to both?)
 - Am I fixing the standard/prompt (root cause) or patching the output (symptom)?
-- Am I using `cloud_get()` for credentials?
+- Am I using `cloud_get()` for credentials? (Databricks: `dbutils.secrets.get` instead — never `cloud_get()`.)
 - Does the fix need a code example? → standard. Is it a one-line prohibition? → prompt. See "Prompt vs. Standard" section.
 
 **Never edit generated artifacts to get a quick result.** Files under `scripts/`, `k8s/`, `sql/`, `dashboards/`, `terraform/`, `.github/workflows/<pipeline>_pipeline.yml`, `Dockerfile`, `requirements.txt` are OUTPUTS — fix the standard/prompt and let the next agent run regenerate them. The only exception is repo-infrastructure the agent does not generate (e.g. `run_agent.yml`, `bootstrap/`).
@@ -201,3 +208,5 @@ AWS CLI + kubectl run locally against the cluster using credentials from `.env` 
 **Azure verification:** `az aks get-credentials -g multi-cloud-agent-rg -n multi-cloud-agent-aks`, then ADLS `az storage fs file list -f <container> --account-name <acct> --path processed`, Trino `kubectl exec deploy/trino -- trino --execute "SELECT count(*) FROM hive.<schema>.<table>"`.
 
 **GCP verification (validated e2e 2026-06-04→06 — `global_marketing` baseline):** auth with `gcloud container clusters get-credentials multi-cloud-agent-gke --region europe-west3` (needs `gke-gcloud-auth-plugin` locally — install via `gcloud components install`, or query **Cloud Logging** instead: `gcloud logging read 'resource.labels.container_name="pipeline"'`). **GCS:** `gcloud storage ls gs://<bucket>/processed/` → `run_date=YYYY-MM-DD/part_0.parquet`. **Trino:** `kubectl exec deploy/trino -- trino --execute "SELECT count(*) FROM hive.<schema>.<table>"`. **Grafana:** the LoadBalancer external IP from `gcloud compute forwarding-rules list` (port 3000), login admin/admin. Required repo **Secrets**: `GCP_SA_KEY_JSON`, `MYSQL_DB_PASSWORD`; **Variables**: `GCP_PROJECT_ID`, `MYSQL_DB_HOST/PORT/USER/NAME`. GCP-specific deploy invariants: the **job.yaml image uses `:latest`** (the build pushes it; **NO image-tag sed** — see CI), the **`processed/` directory is pre-created** by the pipeline terraform (`google_storage_bucket_object`, else Trino `CREATE TABLE` fails "External location must be a directory"), and the terraform **backend prefix = `CLOUD_SETUP.state_prefix` verbatim** (a self-derived prefix splits state → `409 bucket already exists`).
+
+**Databricks verification (validated e2e 2026-06-08 — `sales_lakehouse` baseline):** local Databricks CLI with `DATABRICKS_HOST` / `DATABRICKS_TOKEN` sourced from `.env`; the source RDS must be `available` first (`aws rds start-db-instance --db-instance-identifier sales-lakehouse-raw-data`). **Run state:** `databricks jobs list-runs --job-id <id>` → `result=SUCCESS`. **Data write (from the script's own logs):** `databricks jobs get-run-output <task_run_id>` → grep `Wrote N rows` + `Audit row written` (the baseline: 100 seeded chaos rows → 68 written / 32 rejected, `monetary_integrity`+`temporal_validity`). **Delta / Unity Catalog:** table `multi_cloud_agent_workspace.raw.pipe_sales_lakehouse` + its `_audit` table. **Dashboard (the Grafana equivalent):** a Lakeview dashboard "`<pipeline> — Observability`" under **/Shared** (workspace → Dashboards) — 5 metrics off the `_audit` table (records processed/rejected, rejection rate, run duration, rejections-by-reason bar) on the serverless SQL warehouse; `terraform output -raw dashboard_id`. **Spark UI diagnostic:** a stage stuck at `0/1` with duration **"Unknown" = ZERO executors** — the cluster was a broken single-node (`num_workers=0` + UC SINGLE_USER with no `spark.master=local[*]`); the fix is `num_workers=1` in `bootstrap/databricks/main.tf` (the read task never gets a slot otherwise). A *running-but-stuck* task instead points at the JDBC read (verify `?sslmode=require` + DBR runtime **18.2**, not 14.3 which hangs the SSL handshake). **Cost:** `aws rds stop-db-instance …` + `databricks clusters delete <id>` (config persists, auto-restarts next run); the serverless SQL warehouse auto-stops. **No `cleanup_k8s.yml`** applies (Databricks has no K8s).

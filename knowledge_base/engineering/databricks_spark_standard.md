@@ -188,10 +188,111 @@ CREATE TABLE IF NOT EXISTS multi_cloud_agent_workspace.raw.<table_name>_audit (
   job-param `{catalog}.{schema}` + the BARE table (`f"{catalog}.{schema}.{table}"`). Never paste
   an already-qualified `catalog.schema.table` into the `<table_name>` slot.
 
+## Observability — Lakeview dashboard (`dashboards/<pipeline_id>_lakeview.json`)
+The Databricks-native equivalent of the other clouds' Grafana dashboard. Instead of
+Prometheus/Pushgateway/Grafana (which don't exist here — there is no K8s), a **Databricks
+Lakeview (AI/BI) dashboard** reads the Delta **`_audit` table** on the bootstrap **serverless SQL
+warehouse** and renders the same metrics. The pipeline Terraform provisions it with
+`databricks_dashboard` reading this exact JSON via `file_path` (see `terraform_databricks.md`).
+
+This is a **mandatory third artifact** (alongside the script + the DDL). Emit it **verbatim**,
+substituting only `<catalog>` / `<schema>` / `<table_name>` with the values from
+`DELTA_DESTINATION.unity_catalog` (e.g. `multi_cloud_agent_workspace` / `raw` /
+`pipe_sales_lakehouse`) — the audit table is `<catalog>.<schema>.<table_name>_audit`. Do NOT
+rename the dataset/widget keys, do NOT switch `queryLines` to `query`, do NOT add a `$`-style
+template variable (Lakeview is not Grafana). The grid is 6 columns wide.
+
+```json
+{
+  "datasets": [
+    {
+      "name": "ds_summary",
+      "displayName": "Latest run",
+      "queryLines": ["SELECT rows_processed, rows_rejected, duration_seconds, run_date, CASE WHEN (rows_processed + rows_rejected) > 0 THEN round(100.0 * rows_rejected / (rows_processed + rows_rejected), 1) ELSE 0 END AS rejection_rate_pct FROM <catalog>.<schema>.<table_name>_audit ORDER BY run_timestamp DESC LIMIT 1"]
+    },
+    {
+      "name": "ds_trend",
+      "displayName": "Per-run volume",
+      "queryLines": ["SELECT run_date, 'processed' AS metric, rows_processed AS value FROM <catalog>.<schema>.<table_name>_audit UNION ALL SELECT run_date, 'rejected' AS metric, rows_rejected AS value FROM <catalog>.<schema>.<table_name>_audit"]
+    },
+    {
+      "name": "ds_reasons",
+      "displayName": "Rejections by reason (latest run)",
+      "queryLines": ["SELECT reason, cnt FROM <catalog>.<schema>.<table_name>_audit LATERAL VIEW explode(rejected_by_reason) t AS reason, cnt WHERE run_timestamp = (SELECT MAX(run_timestamp) FROM <catalog>.<schema>.<table_name>_audit)"]
+    }
+  ],
+  "pages": [
+    {
+      "name": "page_observability",
+      "displayName": "Observability",
+      "layout": [
+        {
+          "widget": {
+            "name": "w_processed",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_summary", "fields": [{"name": "sum_rows_processed", "expression": "SUM(`rows_processed`)"}], "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": {"fieldName": "sum_rows_processed", "displayName": "Records processed"}}, "frame": {"showTitle": true, "title": "Records Processed (latest run)"}}
+          },
+          "position": {"x": 0, "y": 0, "width": 2, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "w_rejected",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_summary", "fields": [{"name": "sum_rows_rejected", "expression": "SUM(`rows_rejected`)"}], "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": {"fieldName": "sum_rows_rejected", "displayName": "Records rejected"}}, "frame": {"showTitle": true, "title": "Records Rejected (latest run)"}}
+          },
+          "position": {"x": 2, "y": 0, "width": 2, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "w_rate",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_summary", "fields": [{"name": "max_rejection_rate_pct", "expression": "MAX(`rejection_rate_pct`)"}], "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": {"fieldName": "max_rejection_rate_pct", "displayName": "Rejection rate %"}}, "frame": {"showTitle": true, "title": "Rejection Rate % (latest run)"}}
+          },
+          "position": {"x": 4, "y": 0, "width": 2, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "w_duration",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_summary", "fields": [{"name": "max_duration_seconds", "expression": "MAX(`duration_seconds`)"}], "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": {"fieldName": "max_duration_seconds", "displayName": "Duration (s)"}}, "frame": {"showTitle": true, "title": "Run Duration s (latest run)"}}
+          },
+          "position": {"x": 0, "y": 3, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "w_lastrun",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_summary", "fields": [{"name": "max_run_date", "expression": "MAX(`run_date`)"}], "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": {"fieldName": "max_run_date", "displayName": "Last run date"}}, "frame": {"showTitle": true, "title": "Last Run Date"}}
+          },
+          "position": {"x": 3, "y": 3, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "w_trend",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_trend", "fields": [{"name": "run_date", "expression": "`run_date`"}, {"name": "metric", "expression": "`metric`"}, {"name": "sum_value", "expression": "SUM(`value`)"}], "disaggregated": false}}],
+            "spec": {"version": 3, "widgetType": "line", "encodings": {"x": {"fieldName": "run_date", "scale": {"type": "categorical"}, "displayName": "Run date"}, "y": {"fieldName": "sum_value", "scale": {"type": "quantitative"}, "displayName": "Records"}, "color": {"fieldName": "metric", "scale": {"type": "categorical"}, "displayName": "Metric"}}, "frame": {"showTitle": true, "title": "Records Processed vs Rejected over time"}}
+          },
+          "position": {"x": 0, "y": 6, "width": 6, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "w_reasons",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_reasons", "fields": [{"name": "reason", "expression": "`reason`"}, {"name": "sum_cnt", "expression": "SUM(`cnt`)"}], "disaggregated": false}}],
+            "spec": {"version": 3, "widgetType": "bar", "encodings": {"x": {"fieldName": "reason", "scale": {"type": "categorical"}, "displayName": "Reason"}, "y": {"fieldName": "sum_cnt", "scale": {"type": "quantitative"}, "displayName": "Rejected rows"}}, "frame": {"showTitle": true, "title": "Rejections by Reason (latest run)"}}
+          },
+          "position": {"x": 0, "y": 12, "width": 6, "height": 6}
+        }
+      ]
+    }
+  ]
+}
+```
+
 ## Hard rules
 - No `to_parquet`, no `cloud_get()`, no `os.getenv("POSTGRES_DB_*"/"MYSQL_DB_*")`, no `create_engine`,
   no `push_to_gateway`, no Trino/Grafana code.
 - **No `requirements.txt`** — the Databricks cluster runtime provides pyspark + delta, and the
-  source JDBC driver is attached as a Maven library by the Terraform. The ONLY artifacts are the
-  Spark script + the Unity Catalog DDL. (If one is emitted anyway it must contain only `pyspark`.)
+  source JDBC driver is attached as a Maven library by the Terraform. The artifacts are the Spark
+  script, the Unity Catalog DDL, and the Lakeview dashboard JSON (above) — nothing else. (If a
+  `requirements.txt` is emitted anyway it must contain only `pyspark`.)
 - The audit-table write is **MANDATORY** — a run that writes data but no audit row is non-compliant.
