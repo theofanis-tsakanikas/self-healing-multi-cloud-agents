@@ -1075,6 +1075,69 @@ def _render_cost_panel(selected_cloud: str | None = None):
 
 
 # ---------------------------------------------------------------------------
+# EXECUTION PLAN HELPER — illustrative "what will be created" (no run)
+# ---------------------------------------------------------------------------
+
+# The artifact SET is deterministic per cloud (the architect decides exact contents at run time,
+# but the structure is fixed). NL authoring covers the three object-storage clouds (Option A).
+_EXEC_PLAN_CLOUD = {
+    "aws":   {"store": "S3 bucket",          "fsdriver": "s3fs",
+              "iac": "S3 bucket + IAM role (IRSA) + Glue catalog access",
+              "registry": "ECR", "k8s": "EKS"},
+    "azure": {"store": "ADLS Gen2 container", "fsdriver": "adlfs",
+              "iac": "ADLS container + user-assigned managed identity + role assignment",
+              "registry": "ACR", "k8s": "AKS"},
+    "gcp":   {"store": "GCS bucket",          "fsdriver": "gcsfs",
+              "iac": "GCS bucket + processed/ prefix + Workload Identity SA",
+              "registry": "Artifact Registry", "k8s": "GKE Autopilot"},
+}
+
+
+def _render_execution_plan(cloud: str, pipeline_id: str):
+    """Illustrative pre-deploy plan: the deterministic deliverable set for `cloud`. No agent run."""
+    c = _EXEC_PLAN_CLOUD.get(cloud)
+    if not c:
+        return
+    groups = [
+        ("Pipeline code", [
+            f"scripts/{pipeline_id}.py — extract → business rules → parquet → {c['store']}",
+            f"requirements.txt — pandas, pyarrow, {c['fsdriver']}, sqlalchemy, trino, prometheus-client",
+        ]),
+        ("Catalog & observability", [
+            "sql/setup_trino.sql — Trino external table, run_date-partitioned",
+            "dashboards/monitoring_specs.json — Grafana dashboard (5 panels)",
+        ]),
+        ("Kubernetes", [
+            "k8s/ — namespaces · configmaps · trino · grafana · prometheus(+pushgateway) · job",
+            "Dockerfile — pipeline image",
+        ]),
+        ("Infrastructure (Terraform)", [
+            "terraform/ — providers · main · variables · outputs · tfvars",
+            f"provisions: {c['iac']}",
+        ]),
+        ("CI/CD", [
+            f".github/workflows/{pipeline_id}_pipeline.yml — build → {c['registry']} → deploy to {c['k8s']}",
+        ]),
+    ]
+    blocks = ""
+    for title, items in groups:
+        lis = "".join(f'<li style="margin:0.12rem 0;color:#94a3b8;">{it}</li>' for it in items)
+        blocks += (
+            f'<p style="margin:0.55rem 0 0.1rem;color:#7dd3fc;font-size:0.72rem;'
+            f'text-transform:uppercase;letter-spacing:0.06em;">{title}</p>'
+            f'<ul style="margin:0;padding-left:1.1rem;font-size:0.8rem;">{lis}</ul>'
+        )
+    st.markdown(
+        f'<div style="background:rgba(10,18,40,0.6);border:1px solid rgba(56,189,248,0.18);'
+        f'border-radius:12px;padding:0.85rem 1.1rem;margin:0.2rem 0 0.7rem;">{blocks}'
+        f'<p style="margin:0.55rem 0 0;color:#334155;font-size:0.7rem;">'
+        f'Illustrative — the agents generate the exact contents at deploy time. '
+        f'Self-healing (Medic) repairs any CI/CD failure automatically.</p></div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # INPUT SECTION
 # ---------------------------------------------------------------------------
 
@@ -1686,6 +1749,20 @@ with tab_nl:
             f'<td style="padding:0.3rem 0 0.1rem;">{_rules_body}</td></tr>'
             f'</table></div>',
             unsafe_allow_html=True,
+        )
+
+        # ── Execution plan — what will be created (illustrative, no run) ──
+        st.markdown(
+            '<p style="color:#475569;font-size:0.7rem;text-transform:uppercase;'
+            'letter-spacing:0.09em;margin:0.4rem 0 0.3rem;">'
+            'Execution plan — what will be created</p>',
+            unsafe_allow_html=True,
+        )
+        _exec_suffix = {"aws": "s3", "azure": "azure", "gcp": "gcp"}.get(
+            _ans.get("target_cloud", ""), "s3")
+        _render_execution_plan(
+            _ans.get("target_cloud", ""),
+            f"pipe_{_ans.get('pipeline_slug', 'pipeline')}_to_{_exec_suffix}",
         )
 
         # ── Cost preview (shown BEFORE the explicit deploy) ───────────────
