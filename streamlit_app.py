@@ -1033,14 +1033,14 @@ def _render_cost_panel(selected_cloud: str | None = None):
     from utils.cost_estimator import compare_clouds
     estimates = compare_clouds()
     cheapest  = estimates[0]["cloud"]
-    flags     = {"aws": "🟠 AWS", "azure": "🔵 Azure", "gcp": "🟢 GCP"}
-    colors    = {"aws": "#f97316",  "azure": "#38bdf8",  "gcp": "#4ade80"}
+    flags     = {"aws": "🟠 AWS", "azure": "🔵 Azure", "gcp": "🟢 GCP", "databricks": "⚡ Databricks"}
+    colors    = {"aws": "#f97316",  "azure": "#38bdf8",  "gcp": "#4ade80", "databricks": "#FF3621"}
 
     with st.expander("💰 Estimated monthly infrastructure cost", expanded=False):
-        cols = st.columns(3)
+        cols = st.columns(len(estimates))   # compare_clouds() returns 4 (incl. databricks)
         for i, est in enumerate(sorted(estimates, key=lambda x: x["cloud"])):
             c   = est["cloud"]
-            col = colors[c]
+            col = colors.get(c, "#38bdf8")
             is_cheapest  = c == cheapest
             is_selected  = c == selected_cloud
             border_color = "#4ade80" if is_cheapest else (col if is_selected else "rgba(56,189,248,0.18)")
@@ -1059,7 +1059,7 @@ def _render_cost_panel(selected_cloud: str | None = None):
                     f'<div style="background:rgba(10,18,40,0.7);border:1px solid {border_color};'
                     f'border-radius:12px;padding:0.85rem 1rem;">'
                     f'<p style="margin:0 0 0.1rem;font-size:0.72rem;color:#475569;'
-                    f'text-transform:uppercase;letter-spacing:0.08em;">{flags[c]}</p>'
+                    f'text-transform:uppercase;letter-spacing:0.08em;">{flags.get(c, c.upper())}</p>'
                     f'<p style="margin:0 0 0.6rem;font-size:1.5rem;font-weight:700;color:{col};">'
                     f'${est["total"]:.0f}<span style="font-size:0.8rem;color:#64748b;">/mo</span>'
                     f'<span style="font-size:0.72rem;color:#4ade80;margin-left:0.4rem;">{badge}</span></p>'
@@ -1069,7 +1069,8 @@ def _render_cost_panel(selected_cloud: str | None = None):
                 )
         st.markdown(
             '<p style="color:#334155;font-size:0.72rem;margin-top:0.6rem;">'
-            '* List prices · eu-central-1 / westeurope / europe-west3 · 1 worker node · 50 GB storage</p>',
+            '* List prices (~2026-06) · representative regions · fixed bootstrap footprint · '
+            '50 GB storage · Databricks is usage-billed (see cost_estimator disclaimer)</p>',
             unsafe_allow_html=True,
         )
 
