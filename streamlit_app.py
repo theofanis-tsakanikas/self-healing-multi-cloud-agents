@@ -734,15 +734,10 @@ with st.sidebar:
             f'<div class="sb-card"><p class="sb-title">Cloud Bootstrap</p>{cloud_rows}</div>',
             unsafe_allow_html=True,
         )
-    else:
-        st.markdown(
-            '<div class="sb-warn-card">'
-            '<p class="sb-warn-title">☁️ Bootstrap not exported</p>'
-            '<p class="sb-warn-body">Run after <code>terraform apply</code>:<br>'
-            '<code>python scripts/export_bootstrap_outputs.py</code></p>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+    # When bootstrap outputs are ABSENT, show nothing. They are an optional REAL-DEPLOY
+    # prerequisite, irrelevant to the preview/cost flow — surfacing their absence as a warning
+    # reads like a broken setup in a demo/interview. (The positive "ready" card above still shows
+    # once outputs exist; the requirement is documented in CLAUDE.md + the loader logs.)
 
     # ── Footer ───────────────────────────────────────────────
     st.markdown(
