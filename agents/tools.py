@@ -128,6 +128,13 @@ def _is_suspicious_xcheck(script_path: Path, sql_path: Path):
     return None
 
 
+def _is_databricks_run() -> bool:
+    """True when the active pipeline targets Databricks (PIPELINE_PLATFORM set by main.py from
+    target_infra_config.provider). The file tools get only (filename, content), not the infra
+    config, so this env var is how they know a requirements.txt isn't needed, etc."""
+    return os.getenv("PIPELINE_PLATFORM", "").lower() == "databricks"
+
+
 @tool
 def validate_generated_code(filename: str) -> str:
     """
@@ -150,6 +157,11 @@ def validate_generated_code(filename: str) -> str:
     """
     import py_compile
     import json as _json
+
+    # Databricks pipelines need no requirements.txt — write_project_file skips it (so it may not
+    # exist on disk), and it is not a required artifact. Never block a databricks run on it.
+    if os.path.basename(filename).lower() == "requirements.txt" and _is_databricks_run():
+        return f"CLEAN: '{filename}' is not required for Databricks pipelines (skipped)."
 
     if not os.path.exists(filename):
         return f"Error: file '{filename}' does not exist. Did write_project_file succeed?"
@@ -1296,7 +1308,7 @@ def write_project_file(filename: str, content: str):
         # any already on disk). Deterministic guarantee — see CLAUDE.md.
         _reqs = [ln.strip() for ln in content.splitlines()
                  if ln.strip() and not ln.strip().startswith("#")]
-        if _reqs == ["pyspark"]:
+        if _is_databricks_run() or _reqs == ["pyspark"]:
             try:
                 os.remove("requirements.txt")
             except OSError:

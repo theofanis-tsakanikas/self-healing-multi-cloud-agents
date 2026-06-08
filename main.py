@@ -54,6 +54,12 @@ def _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
     # (e.g. POSTGRES_DB_HOST instead of CRM_DB_HOST → host "None").
     os.environ["CLOUD_PROVIDER"] = pipe_conf.get("cloud_provider", "aws")
 
+    # PIPELINE_PLATFORM lets the file tools (write_project_file, validate_generated_code) — which
+    # receive only (filename, content), not the infra config — know this is a Databricks pipeline.
+    # Without it they cannot tell that requirements.txt isn't needed (the LLM emits it empty or
+    # pyspark-only) or that a .json is a Lakeview dashboard. "kubernetes" for the object-storage clouds.
+    os.environ["PIPELINE_PLATFORM"] = infra_conf.get("provider", "kubernetes").lower()
+
     initial_state = {
         "task": task,
         "messages": [],
