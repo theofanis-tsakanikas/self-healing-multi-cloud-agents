@@ -1197,6 +1197,88 @@ def _fix_fstring_double_braces(content: str) -> str:
     )
 
 
+# Deterministic Lakeview dashboard guarantee. The dashboard JSON is mechanically determined — a
+# fixed widget layout over the pipeline's Delta `_audit` table — yet the LLM intermittently
+# mangles the nested encodings (e.g. nesting `color`/`displayName` INSIDE `y.scale`), producing
+# invalid JSON. The audit table name IS reliably substituted by the LLM, so we extract it from
+# the (possibly broken) content and rebuild the WHOLE dashboard from the canonical structure
+# (the skeleton in databricks_spark_standard.md). Guarantees a structurally-valid Lakeview
+# dashboard every time. See CLAUDE.md "Deterministic generation guarantees".
+_LAKEVIEW_AUDIT_RE = re.compile(r"\b\w+\.\w+\.\w+_audit\b")
+
+
+def _canonical_lakeview_dashboard(audit: str) -> str:
+    def counter(name, fld, expr, value_dn, title, x, y, w, h):
+        return {
+            "widget": {
+                "name": name,
+                "queries": [{"name": "main_query", "query": {
+                    "datasetName": "ds_summary",
+                    "fields": [{"name": fld, "expression": expr}],
+                    "disaggregated": False}}],
+                "spec": {"version": 2, "widgetType": "counter",
+                         "encodings": {"value": {"fieldName": fld, "displayName": value_dn}},
+                         "frame": {"showTitle": True, "title": title}},
+            },
+            "position": {"x": x, "y": y, "width": w, "height": h},
+        }
+    dashboard = {
+        "datasets": [
+            {"name": "ds_summary", "displayName": "Latest run", "queryLines": [
+                "SELECT rows_processed, rows_rejected, duration_seconds, run_date, "
+                "CASE WHEN (rows_processed + rows_rejected) > 0 THEN round(100.0 * rows_rejected "
+                "/ (rows_processed + rows_rejected), 1) ELSE 0 END AS rejection_rate_pct "
+                f"FROM {audit} ORDER BY run_timestamp DESC LIMIT 1"]},
+            {"name": "ds_trend", "displayName": "Per-run volume", "queryLines": [
+                f"SELECT run_date, 'processed' AS metric, rows_processed AS value FROM {audit} "
+                f"UNION ALL SELECT run_date, 'rejected' AS metric, rows_rejected AS value FROM {audit}"]},
+            {"name": "ds_reasons", "displayName": "Rejections by reason (latest run)", "queryLines": [
+                f"SELECT reason, cnt FROM {audit} LATERAL VIEW explode(rejected_by_reason) t AS reason, cnt "
+                f"WHERE run_timestamp = (SELECT MAX(run_timestamp) FROM {audit})"]},
+        ],
+        "pages": [{
+            "name": "page_observability", "displayName": "Observability",
+            "layout": [
+                counter("w_processed", "sum_rows_processed", "SUM(`rows_processed`)",
+                        "Records processed", "Records Processed (latest run)", 0, 0, 2, 3),
+                counter("w_rejected", "sum_rows_rejected", "SUM(`rows_rejected`)",
+                        "Records rejected", "Records Rejected (latest run)", 2, 0, 2, 3),
+                counter("w_rate", "max_rejection_rate_pct", "MAX(`rejection_rate_pct`)",
+                        "Rejection rate %", "Rejection Rate % (latest run)", 4, 0, 2, 3),
+                counter("w_duration", "max_duration_seconds", "MAX(`duration_seconds`)",
+                        "Duration (s)", "Run Duration s (latest run)", 0, 3, 3, 3),
+                counter("w_lastrun", "max_run_date", "MAX(`run_date`)",
+                        "Last run date", "Last Run Date", 3, 3, 3, 3),
+                {"widget": {"name": "w_trend",
+                            "queries": [{"name": "main_query", "query": {
+                                "datasetName": "ds_trend",
+                                "fields": [{"name": "run_date", "expression": "`run_date`"},
+                                           {"name": "metric", "expression": "`metric`"},
+                                           {"name": "sum_value", "expression": "SUM(`value`)"}],
+                                "disaggregated": False}}],
+                            "spec": {"version": 3, "widgetType": "line", "encodings": {
+                                "x": {"fieldName": "run_date", "scale": {"type": "categorical"}, "displayName": "Run date"},
+                                "y": {"fieldName": "sum_value", "scale": {"type": "quantitative"}, "displayName": "Records"},
+                                "color": {"fieldName": "metric", "scale": {"type": "categorical"}, "displayName": "Metric"}},
+                                "frame": {"showTitle": True, "title": "Records Processed vs Rejected over time"}}},
+                 "position": {"x": 0, "y": 6, "width": 6, "height": 6}},
+                {"widget": {"name": "w_reasons",
+                            "queries": [{"name": "main_query", "query": {
+                                "datasetName": "ds_reasons",
+                                "fields": [{"name": "reason", "expression": "`reason`"},
+                                           {"name": "sum_cnt", "expression": "SUM(`cnt`)"}],
+                                "disaggregated": False}}],
+                            "spec": {"version": 3, "widgetType": "bar", "encodings": {
+                                "x": {"fieldName": "reason", "scale": {"type": "categorical"}, "displayName": "Reason"},
+                                "y": {"fieldName": "sum_cnt", "scale": {"type": "quantitative"}, "displayName": "Rejected rows"}},
+                                "frame": {"showTitle": True, "title": "Rejections by Reason (latest run)"}}},
+                 "position": {"x": 0, "y": 12, "width": 6, "height": 6}},
+            ],
+        }],
+    }
+    return json.dumps(dashboard, indent=2)
+
+
 @tool
 def write_project_file(filename: str, content: str):
     """
@@ -1207,6 +1289,20 @@ def write_project_file(filename: str, content: str):
     # requirements.txt ALWAYS lives at the repo root — normalise away any directory the
     # caller prepends (the LLM sometimes passes scripts/requirements.txt).
     if os.path.basename(filename).lower() == "requirements.txt":
+        # Databricks pipelines need NO requirements.txt — the cluster runtime provides pyspark +
+        # delta and the source JDBC driver is a Maven library. The LLM intermittently emits a
+        # pyspark-only requirements.txt anyway; a pyspark-only file is the databricks signature
+        # (a K8s requirements.txt always carries pandas/s3fs/sqlalchemy/…), so skip it (and remove
+        # any already on disk). Deterministic guarantee — see CLAUDE.md.
+        _reqs = [ln.strip() for ln in content.splitlines()
+                 if ln.strip() and not ln.strip().startswith("#")]
+        if _reqs == ["pyspark"]:
+            try:
+                os.remove("requirements.txt")
+            except OSError:
+                pass
+            return ("Skipped requirements.txt — Databricks pipelines need none "
+                    "(pyspark is provided by the cluster runtime).")
         filepath = "requirements.txt"
         final_dir = "."
     elif os.path.dirname(filename) != "":
@@ -1234,6 +1330,14 @@ def write_project_file(filename: str, content: str):
     if filepath.endswith(".py"):
         content = _ensure_cloud_sdk_import(content)
         content = _fix_fstring_double_braces(content)
+
+    # Deterministic Lakeview dashboard: rebuild from the canonical structure so the LLM's mangled
+    # nested encodings can't produce invalid JSON. The audit table name is reliably substituted by
+    # the LLM → extract it and regenerate the whole dashboard. (See CLAUDE.md.)
+    if filepath.endswith("_lakeview.json"):
+        _audit = _LAKEVIEW_AUDIT_RE.search(content)
+        if _audit:
+            content = _canonical_lakeview_dashboard(_audit.group(0))
 
     # Create the directory and write the file
     try:

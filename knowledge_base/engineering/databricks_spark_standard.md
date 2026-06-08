@@ -202,6 +202,11 @@ substituting only `<catalog>` / `<schema>` / `<table_name>` with the values from
 rename the dataset/widget keys, do NOT switch `queryLines` to `query`, do NOT add a `$`-style
 template variable (Lakeview is not Grafana). The grid is 6 columns wide.
 
+> Safety net: `write_project_file` deterministically **rebuilds** this dashboard from the canonical
+> structure, taking only the `_audit` table name from your output (the LLM tends to mangle the
+> nested widget encodings into invalid JSON). So getting `<catalog>.<schema>.<table_name>_audit`
+> right matters most — but still emit the full skeleton.
+
 ```json
 {
   "datasets": [
@@ -294,5 +299,6 @@ template variable (Lakeview is not Grafana). The grid is 6 columns wide.
 - **No `requirements.txt`** — the Databricks cluster runtime provides pyspark + delta, and the
   source JDBC driver is attached as a Maven library by the Terraform. The artifacts are the Spark
   script, the Unity Catalog DDL, and the Lakeview dashboard JSON (above) — nothing else. (If a
-  `requirements.txt` is emitted anyway it must contain only `pyspark`.)
+  `requirements.txt` is emitted anyway `write_project_file` drops it — a pyspark-only file is the
+  databricks signature.)
 - The audit-table write is **MANDATORY** — a run that writes data but no audit row is non-compliant.
