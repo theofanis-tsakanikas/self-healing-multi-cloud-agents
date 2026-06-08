@@ -171,7 +171,7 @@ resource "databricks_mws_workspaces" "this" {
 }
 
 # ---------------------------------------------------------------------------
-# Jobs cluster — single-node, auto-terminates after 20 minutes of inactivity
+# Jobs cluster — 1 worker (UC-capable), auto-terminates after 20 min of inactivity
 # ---------------------------------------------------------------------------
 resource "databricks_cluster" "jobs" {
   provider     = databricks.workspace
@@ -196,16 +196,19 @@ resource "databricks_cluster" "jobs" {
   data_security_mode = "SINGLE_USER"
   single_user_name   = var.databricks_client_id
 
-  # Single-node cluster. With an access mode (SINGLE_USER) the legacy
-  # spark.databricks.cluster.profile=singleNode / spark.master conf is REJECTED ("not allowed
-  # when choosing an access mode"). The modern single-node marker is custom_tags
-  # ResourceClass=SingleNode + num_workers=0 — Databricks sets the local master itself.
-  num_workers = 0
+  # One dedicated worker — NOT single-node. A single-node cluster (num_workers = 0) only runs
+  # tasks if spark.master=local[*] makes the driver act as the executor; but with a UC access
+  # mode (SINGLE_USER) the spark.databricks.cluster.profile=singleNode / spark.master conf is
+  # rejected ("not allowed when choosing an access mode"), and num_workers=0 WITHOUT it yields a
+  # cluster with ZERO executors — every Spark stage hangs forever at 0/1 tasks (the JDBC read
+  # never gets a task slot; observed as Stage 0 0/1, duration "Unknown"). A single worker gives a
+  # real executor (SINGLE_USER is fully UC-compatible WITH workers), so stages actually run. This
+  # is the smallest reliable UC jobs cluster — no single-node spark_conf ambiguity at all.
+  num_workers = 1
 
   custom_tags = {
-    ResourceClass = "SingleNode"
-    Project       = "multi-cloud-agent"
-    ManagedBy     = "terraform-bootstrap"
+    Project   = "multi-cloud-agent"
+    ManagedBy = "terraform-bootstrap"
   }
 }
 
