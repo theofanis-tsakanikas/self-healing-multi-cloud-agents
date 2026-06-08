@@ -1,0 +1,18 @@
+# Streamlit app config — Multi-Cloud Self-Healing Agent UI.
+#
+# The whole UI is designed dark (custom dark CSS + inline styles throughout streamlit_app.py),
+# so we FORCE the dark theme: light mode half-applies and looks broken. Forcing it here also
+# overrides the viewer's system/browser preference, so the demo always renders as intended.
+
+[theme]
+base                     = "dark"
+primaryColor             = "#38bdf8"   # cyan accent used across the app
+backgroundColor          = "#070e20"   # dark base of the app gradient
+secondaryBackgroundColor = "#0d1b35"
+textColor                = "#e2e8f0"
+
+[client]
+# "viewer" hides Streamlit's own "Deploy" button + developer menu items, but keeps Rerun/Settings
+# in the ⋮ menu — clean for a demo/interview without losing dev ergonomics. (Robust across
+# Streamlit versions, unlike CSS targeting the deploy button's testid, which changes per release.)
+toolbarMode = "viewer"
