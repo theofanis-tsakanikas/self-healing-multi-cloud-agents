@@ -219,18 +219,24 @@ p, li { color: #cbd5e1 !important; }
 .stTabs [data-baseweb="tab-list"] {
     background: rgba(10, 18, 40, 0.6) !important;
     border-radius: 12px !important;
-    padding: 4px !important;
+    padding: 6px !important;
     border: 1px solid rgba(56, 189, 248, 0.15) !important;
-    gap: 4px;
+    gap: 8px;                       /* more space between tabs */
+    margin-bottom: 1.2rem !important;  /* air between the tab bar and the content panel */
 }
 .stTabs [data-baseweb="tab"] {
     color: #64748b !important;
     border-radius: 9px !important;
     font-weight: 500;
+    padding: 0.55rem 1.1rem !important;  /* internal breathing room per tab */
 }
 .stTabs [aria-selected="true"] {
     background: rgba(56, 189, 248, 0.15) !important;
     color: #38bdf8 !important;
+}
+/* a touch of air at the top of the selected tab's content */
+.stTabs [data-baseweb="tab-panel"] {
+    padding-top: 0.5rem !important;
 }
 
 /* ── SELECTBOX — trigger ─────────────────────────────────── */
