@@ -356,11 +356,51 @@ def validate_generated_code(filename: str) -> str:
                         "disagree). See python_standards.md."
                     )
 
-    # ── JSON (Grafana dashboard) ──────────────────────────────────────────────
+    # ── JSON — Grafana dashboard (K8s clouds) OR Databricks Lakeview dashboard ──
     elif ext == ".json":
         try:
             with open(filename, encoding="utf-8") as f:
                 data = _json.load(f)
+        except _json.JSONDecodeError as e:
+            errors.append(f"JSON SYNTAX ERROR: {e}")
+            data = None
+
+        # A Databricks Lakeview (AI/BI) dashboard is a DIFFERENT schema from a Grafana
+        # monitoring_specs.json: it has `datasets` + `pages` (+ widgets), NOT Grafana's
+        # `uid`/`title`/`schemaVersion`/`panels`. The Grafana checks below must NOT fire on it,
+        # or every Databricks dashboard is wrongly rejected ("missing uid/title/panels").
+        _is_lakeview = isinstance(data, dict) and (
+            os.path.basename(filename).endswith("_lakeview.json")
+            or ("datasets" in data and "pages" in data and "panels" not in data)
+        )
+
+        if data is None:
+            pass  # JSON syntax error already recorded
+        elif _is_lakeview:
+            # Lakeview safety net: non-empty datasets + pages + widgets, and every widget query
+            # references a declared dataset (the analog of Grafana's "panels must be non-empty",
+            # without imposing Grafana's schema). Catches an empty/broken dashboard.
+            _datasets = data.get("datasets")
+            _pages = data.get("pages")
+            if not isinstance(_datasets, list) or len(_datasets) == 0:
+                errors.append("LAKEVIEW: 'datasets' must be a non-empty list.")
+            if not isinstance(_pages, list) or len(_pages) == 0:
+                errors.append("LAKEVIEW: 'pages' must be a non-empty list.")
+            _ds_names = {d.get("name") for d in (_datasets or []) if isinstance(d, dict)}
+            _widgets = [w for p in (_pages or []) if isinstance(p, dict)
+                        for w in (p.get("layout") or []) if isinstance(w, dict)]
+            if not _widgets:
+                errors.append("LAKEVIEW: at least one page must declare widgets in 'layout'.")
+            for _w in _widgets:
+                for _q in ((_w.get("widget") or {}).get("queries") or []):
+                    _dn = (_q.get("query") or {}).get("datasetName")
+                    if _dn and _dn not in _ds_names:
+                        errors.append(
+                            f"LAKEVIEW: widget query references datasetName '{_dn}' not declared "
+                            f"in 'datasets' {sorted(n for n in _ds_names if n)}."
+                        )
+        else:
+            # ── Grafana dashboard (dashboards/monitoring_specs.json) ──────────────
             missing = [k for k in ("uid", "title", "schemaVersion", "panels") if k not in data]
             if missing:
                 errors.append(f"GRAFANA: missing mandatory fields: {missing}")
@@ -400,8 +440,6 @@ def validate_generated_code(filename: str) -> str:
                     '(query: label_values(pipeline_rows_processed_total, project_id)) and filter '
                     'every panel by project_id=~"$project_id" so the dashboard matches any run.'
                 )
-        except _json.JSONDecodeError as e:
-            errors.append(f"JSON SYNTAX ERROR: {e}")
 
     # ── SQL (Trino DDL  —  or Databricks Unity Catalog Delta DDL) ─────────────
     elif ext == ".sql":
