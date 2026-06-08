@@ -1788,10 +1788,15 @@ with tab_nl:
                                      key="nl_wizard_analyze_btn",
                                      disabled=not _adv_desc.strip())
         if _analyze_btn and _adv_desc.strip():
-            with st.spinner("Analyzing requirements and costing all 3 clouds…"):
-                from utils.architecture_advisor import analyze
-                st.session_state.arch_report = analyze(_adv_desc)
-            st.session_state.pop("arch_selected_cloud", None)
+            from utils.nlp_parser import check_pipeline_request
+            _adv_ok, _adv_why = check_pipeline_request(_adv_desc.strip())
+            if not _adv_ok:
+                st.error("🚫 " + (_adv_why or "This doesn't look like a data-pipeline request."))
+            else:
+                with st.spinner("Analyzing requirements and costing all 3 clouds…"):
+                    from utils.architecture_advisor import analyze
+                    st.session_state.arch_report = analyze(_adv_desc)
+                st.session_state.pop("arch_selected_cloud", None)
 
         _adv_report = st.session_state.get("arch_report")
         if _adv_report:

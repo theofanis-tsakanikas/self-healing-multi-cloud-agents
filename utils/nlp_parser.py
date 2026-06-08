@@ -77,12 +77,25 @@ _REGION_MAP = {
     "north europe": "northeurope",
 }
 
+# Sentinel for live-bootstrap STATE-BACKEND values that MUST come from .bootstrap_outputs.json.
+# Using an obviously-fake placeholder (not a plausible-but-dead name) means a real NL-DEPLOY
+# without exported bootstrap outputs fails LOUDLY + clearly, instead of erroring deep in terraform
+# on a real-looking bucket that no longer exists. The build below overrides each of these from
+# bootstrap outputs when present, so they are sentinels ONLY when outputs are missing — and
+# _load_bootstrap_outputs already prints a warning telling the user to run
+# scripts/export_bootstrap_outputs.py. (Preview shows the sentinel honestly.)
+#
+# NOTE: real NL-DEPLOY requires the target cloud's bootstrap to be live AND its outputs exported;
+# the non-state defaults below (cluster names, registries) likewise assume the standard bootstrap
+# names. NL authoring is otherwise structurally correct for the three object-storage clouds.
+_REQUIRES_BOOTSTRAP = "REQUIRES_BOOTSTRAP_OUTPUTS"
+
 # Bootstrap-level defaults — must match the names provisioned by bootstrap/*/
 _CLOUD_DEFAULTS = {
     "aws": {
         "eks_cluster_name": "multi-cloud-agent-cluster",
-        "state_bucket": "multi-cloud-agent-tf-state-bucket",
-        "lock_table": "terraform-state-lock",
+        "state_bucket": _REQUIRES_BOOTSTRAP,   # from bootstrap outputs (else fail-loud)
+        "lock_table": _REQUIRES_BOOTSTRAP,     # from bootstrap outputs (else fail-loud)
         "default_region": "eu-central-1",
         "trino_catalog": "hive",
     },
@@ -90,7 +103,7 @@ _CLOUD_DEFAULTS = {
         "aks_cluster_name": "multi-cloud-agent-aks",
         "acr_login_server": "mcselfhealagentacr.azurecr.io",
         "resource_group_name": "multi-cloud-agent-rg",
-        "state_storage_account": "multicloudagenttfstate",
+        "state_storage_account": _REQUIRES_BOOTSTRAP,  # from bootstrap outputs (else fail-loud)
         "state_container": "tfstate",
         "subscription_id_env": "AZURE_SUBSCRIPTION_ID",
         "default_region": "westeurope",
@@ -98,7 +111,7 @@ _CLOUD_DEFAULTS = {
     },
     "gcp": {
         "gke_cluster_name": "multi-cloud-agent-gke",
-        "state_bucket": "multi-cloud-agent-tfstate",
+        "state_bucket": _REQUIRES_BOOTSTRAP,   # from bootstrap outputs (else fail-loud)
         "artifact_registry_region": "europe-west3",
         "artifact_registry_repo": "multi-cloud-agent-repo",
         "project_id_env": "GCP_PROJECT_ID",
