@@ -617,6 +617,8 @@ configuration from a natural language description.
 
 Return a JSON object with EXACTLY these fields (no extra keys):
 {
+  "is_pipeline_request": true,
+  "rejection_reason": "",
   "pipeline_slug": "short_name_no_spaces",
   "data_domain": "sales|crm|marketing|finance|hr|logistics|other",
   "source_db_type": "postgres|mysql|sqlite",
@@ -636,6 +638,11 @@ Return a JSON object with EXACTLY these fields (no extra keys):
 }
 
 Rules:
+- "is_pipeline_request": true ONLY if the text describes building / ingesting / moving /
+  transforming a DATA PIPELINE (a source table → a cloud destination). For anything else —
+  greetings, generic questions, jokes, unrelated requests — set it to false, put a one-sentence
+  "rejection_reason" explaining it is not a data-pipeline request, and leave the other fields as
+  best-effort or empty. NEVER invent a plausible pipeline for clearly off-topic input.
 - "to GCP" / "Google Cloud" / "BigQuery" → gcp
 - "to Azure" / "Microsoft" / "ADLS" → azure
 - "to AWS" / "Amazon" / "S3" / unspecified → aws
@@ -1003,6 +1010,23 @@ def _build_from_answers(
 # Public API
 # ---------------------------------------------------------------------------
 
+def check_pipeline_request(description: str) -> tuple[bool, str]:
+    """Relevance gate for UIs (Streamlit): returns (is_pipeline_request, reason).
+
+    True  → safe to proceed to build_pipeline_bundle_from_nl / the wizard.
+    False → show `reason` to the user and stop (don't build a bogus pipeline).
+
+    Lets a UI reject off-topic input GRACEFULLY instead of catching the ValueError that
+    build_pipeline_bundle_from_nl would raise on the same input.
+    """
+    try:
+        raw = _extract_intent(description)
+    except Exception:
+        return False, "Could not parse that description — please rephrase the pipeline request."
+    ok = bool(raw.get("is_pipeline_request", True))
+    return ok, ("" if ok else (raw.get("rejection_reason") or "Not a data-pipeline request."))
+
+
 def build_pipeline_bundle_from_nl(
     description: str,
     cloud_override: str | None = None,
@@ -1016,8 +1040,16 @@ def build_pipeline_bundle_from_nl(
 
     Returns:
         pipeline_conf, db_conf, rules_conf, infra_conf, pipeline_id, task
+
+    Raises:
+        ValueError: if the description is not a data-pipeline request (relevance gate).
     """
     raw = _extract_intent(description)
+    # Relevance gate — reject obvious non-pipeline input at the door instead of fabricating a
+    # plausible-but-meaningless config. (The confirm step + read_data_schema are the later nets.)
+    if not raw.get("is_pipeline_request", True):
+        reason = raw.get("rejection_reason") or "This does not look like a data-pipeline request."
+        raise ValueError(f"Not a pipeline request: {reason}")
     intent = _clarification_loop(raw)
     raw_rules = raw.get("business_rules", [])
     final_rules = _handle_business_rules(raw_rules, intent.data_domain)
