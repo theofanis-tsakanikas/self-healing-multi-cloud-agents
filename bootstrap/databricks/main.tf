@@ -293,6 +293,12 @@ resource "databricks_schema" "raw" {
   name         = "raw"
   comment      = "Raw ingestion layer"
 
+  # The Spark job creates the data + `_audit` tables at RUNTIME via saveAsTable — terraform does
+  # not manage them, so a plain destroy fails "Schema 'raw' is not empty. The schema has N
+  # table(s)". force_destroy drops the schema (and its runtime tables) regardless. Mirrors the
+  # catalog/metastore. (destroy.yml's Phase-2 targeted apply flips this in state before destroy.)
+  force_destroy = true
+
   properties = {
     Project   = "multi-cloud-agent"
     ManagedBy = "terraform-bootstrap"

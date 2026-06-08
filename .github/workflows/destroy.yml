@@ -324,8 +324,10 @@ jobs:
           echo "✅ Agent pipeline infra destroyed (or already absent)."
 
       # Phase 2: bootstrap (workspace + cluster + warehouse + Unity Catalog + S3 + IAM).
-      # The S3 DBFS root, the metastore and the catalog carry force_destroy in the .tf; a
-      # targeted apply flips those in state, then terraform destroy removes everything.
+      # The S3 DBFS root, the metastore, the catalog AND the `raw` schema carry force_destroy in
+      # the .tf; a targeted apply flips those in state, then terraform destroy removes everything.
+      # (The schema needs it because the Spark job creates its tables at runtime — without
+      # force_destroy in state, destroy fails "Schema 'raw' is not empty".)
       # (Bootstrap state lives in s3://multi-cloud-agent-bootstrap-state, kept.)
       - name: Destroy bootstrap infra (workspace + Unity Catalog + S3)
         working-directory: bootstrap/databricks
@@ -334,6 +336,7 @@ jobs:
           terraform apply -auto-approve -input=false \
             -target=aws_s3_bucket.dbfs_root \
             -target=databricks_metastore.this \
-            -target=databricks_catalog.main
+            -target=databricks_catalog.main \
+            -target=databricks_schema.raw
           terraform destroy -auto-approve -input=false
           echo "✅ Databricks teardown complete."
