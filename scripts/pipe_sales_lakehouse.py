@@ -59,7 +59,7 @@ def run():
 
     # monetary_integrity
     _before = df.count()
-    df = df.filter(F.col("unit_price").cast("double") > 0.0)
+    df = df.filter(F.col("unit_price") > 0.0)
     rejected_by_reason["monetary_integrity"] = _before - df.count()
 
     # temporal_validity
@@ -83,7 +83,7 @@ def run():
 
     rows_rejected = sum(rejected_by_reason.values())
 
-    # ── 6. WRITE to Delta ─────────────────────────────────────────────────────
+    # ── 6. WRITE to Delta ────────────────────────────────────────────────────
     out = df.withColumn("run_date", F.lit(run_date))
     rows_processed = out.count()
     (
@@ -106,11 +106,13 @@ def run():
         float(duration_seconds),
         {k: int(v) for k, v in rejected_by_reason.items()},
     )]
-    audit_cols = ["run_timestamp", "run_date", "rows_processed", "rows_rejected", "duration_seconds", "rejected_by_reason"]
+    audit_cols = ["run_timestamp", "run_date", "rows_processed",
+                  "rows_rejected", "duration_seconds", "rejected_by_reason"]
     spark.createDataFrame(audit_row, audit_cols) \
         .write.format("delta").mode("append").saveAsTable(audit_table)
     logging.info(
-        f"Audit row written: rows_processed={rows_processed}, rows_rejected={rows_rejected}, duration={duration_seconds:.1f}s, by_reason={rejected_by_reason}"
+        f"Audit row written: rows_processed={rows_processed}, rows_rejected={rows_rejected}, "
+        f"duration={duration_seconds:.1f}s, by_reason={rejected_by_reason}"
     )
 
 
