@@ -130,6 +130,11 @@ _SCHEMA_MAP = {
     "logistics": "logistics",
 }
 
+# cloud → the static infra config FILE name under configs/infra/. NOT a uniform "<cloud>_bucket":
+# azure's file is azure_blob.yaml (aws's is aws_s3.yaml). A wrong name makes the generated bundle's
+# target_infra_config point at a non-existent file → load_pipeline_bundle fails for a NL pipeline.
+_INFRA_CONFIG_NAME = {"aws": "aws_s3", "azure": "azure_blob", "gcp": "gcp_bucket"}
+
 # Infra conf templates — mimic the existing infra YAML files
 _INFRA_CONF = {
     "aws": {
@@ -917,7 +922,7 @@ def _build_from_answers(
         "project_folder_name": "multi-cloud-self-healing-agent",
         "source_config": f"configs/databases/{db_type}_{slug}.yaml",
         "business_rules_config": f"configs/business_rules/{slug}_logic.yaml",
-        "target_infra_config": f"configs/infra/{'aws_s3' if cloud == 'aws' else cloud + '_bucket'}.yaml",
+        "target_infra_config": f"configs/infra/{_INFRA_CONFIG_NAME[cloud]}.yaml",
         "project_structure": {
             "python_dir": "scripts",
             "sql_dir": "sql",
@@ -1140,7 +1145,7 @@ def build_pipeline_bundle_from_nl(
         "project_folder_name": "multi-cloud-self-healing-agent",
         "source_config": f"configs/databases/{db_type}_{slug}.yaml",
         "business_rules_config": f"configs/business_rules/{slug}_logic.yaml",
-        "target_infra_config": f"configs/infra/{'aws_s3' if cloud == 'aws' else cloud + '_bucket'}.yaml",
+        "target_infra_config": f"configs/infra/{_INFRA_CONFIG_NAME[cloud]}.yaml",
         "project_structure": {
             "python_dir": "scripts",
             "sql_dir": "sql",
