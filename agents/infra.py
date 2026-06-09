@@ -24,6 +24,7 @@ from agents.constants import (
     DEFAULT_REQUIRED_DATABRICKS_TF_FILES,
     DEFAULT_REQUIRED_K8S_MANIFESTS,
     INFRA_PROMPT_FILE,
+    K8S_PINNED_IMAGES,
     PROMPTS_DIR,
     TEMPERATURE,
 )
@@ -312,6 +313,9 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                         if ecr_repository_url else
                         "\nECR Repository URL: not yet available — extract it from the execute_terraform output in conversation history."
                     )
+                # Single source of truth for the pinned versions: agents/constants.py
+                # K8S_PINNED_IMAGES (the same dict the validator enforces). Never re-literal here.
+                _pinned_images = " | ".join(K8S_PINNED_IMAGES.values())
                 orchestration_phase_instruction = (
                     f"CURRENT OPERATIONAL PHASE: IMPLEMENTATION — ORCHESTRATION. "
                     f"Generate ONLY these missing files: {missing_orchestration}. "
@@ -320,7 +324,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                     "\n\nMANDATORY K8S POLICY (enforced by auto-validation):"
                     "\n• job.yaml: spec.backoffLimit=0 | envFrom secretRef '{project_id}-db-credentials' | env: PROJECT_ID, CLOUD_PROVIDER, TRINO_HOST, PUSHGATEWAY_URL"
                     "\n• configmaps.yaml: ALL 5 ConfigMaps in ONE file separated by ---: trino-sql-config (analytics), hive-catalog-config (analytics), grafana-dash-config (monitoring), grafana-datasource-config (monitoring), prometheus-config (monitoring, scrape: pushgateway.monitoring.svc.cluster.local:9091)"
-                    "\n• Pinned images: trinodb/trino:403 | grafana/grafana:10.4.2 | prom/prometheus:v2.51.0 | prom/pushgateway:v1.8.0"
+                    f"\n• Pinned images: {_pinned_images}"
                 ).format(project_id=project_id or "pipeline")
 
                 # When healing_context is present the agent must patch existing files,
