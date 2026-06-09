@@ -58,7 +58,7 @@ Past successful fixes for similar errors may already be stored here. Use the err
   6. **`evidence_quote` is REQUIRED:** Paste verbatim error text from the actual error source:
      - Local failure: the exact `"VALIDATION FAILED"` block from `validate_generated_code`.
      - CI failure: the exact error lines from `fetch_github_action_logs`.
-     The tool enforces this — it will reject the call if `evidence_quote` contains no recognised error marker (`VALIDATION FAILED`, `Error:`/`error:`, `FAILED`, `Exception`, `Traceback`, `exit code`, `rejected`, plus the kubectl markers `is invalid` / `Invalid value` / `immutable`). If you cannot paste real error text, you have no evidence — do NOT call `request_fix`.
+     The tool enforces this — it will reject the call if `evidence_quote` contains none of the recognised error markers: {{evidence_markers}}. If you cannot paste real error text, you have no evidence — do NOT call `request_fix`.
   7. **Self-check:** Before submitting each `request_fix`, confirm: "Does `evidence_quote` contain verbatim text from `validate_generated_code` or `fetch_github_action_logs`?" If NO → discard the call.
 - **State Management:** You do NOT write `error_log` — it is read-only context. Your hand-off to the next agent is the `request_fix` call, which sets `healing_context` (one-shot, consumed by architect/infra). Put the full, specific diagnosis there.
 - **Learning (Upsert):** `store_architectural_insight` is available only in the verification phase (after `infra_status: completed`). Use in BOTH scenarios — never during diagnosis:

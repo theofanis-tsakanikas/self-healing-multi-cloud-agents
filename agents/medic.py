@@ -14,7 +14,8 @@ from agents.tools import (
     fetch_github_action_logs,
     request_fix,
     query_vector_store,
-    store_architectural_insight
+    store_architectural_insight,
+    _EVIDENCE_MARKERS,
 )
 from agents.constants import TEMPERATURE, PROMPTS_DIR, MEDIC_PROMPT_FILE
 from utils.file_utils import read_file
@@ -164,7 +165,15 @@ def medic_node(state: AgentState):
     try:
         prompt_path = os.path.join(PROMPTS_DIR, MEDIC_PROMPT_FILE)
         raw_template = read_file(prompt_path)
-        system_prompt = format_prompt(raw_template, project_id=project_id, target_infra=target_infra)
+        # Single source of truth for the evidence markers: tools._EVIDENCE_MARKERS (the exact list
+        # request_fix enforces). Injected here so the prompt can never drift from the tool again.
+        _evidence_markers = ", ".join(f"`{m}`" for m in _EVIDENCE_MARKERS)
+        system_prompt = format_prompt(
+            raw_template,
+            project_id=project_id,
+            target_infra=target_infra,
+            evidence_markers=_evidence_markers,
+        )
         
         # Adding instructions for the new infra_status flag
         system_prompt += (
