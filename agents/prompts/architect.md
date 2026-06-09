@@ -42,7 +42,7 @@ The following structured context defines your mission. You must strictly adhere 
   1. Extract keywords from `target_criteria` (the quoted terms: `'price'`, `'quantity'`, `'order_id'`, etc.).
   2. Match to the actual column names returned by `read_data_schema` — find columns whose names contain any keyword (case-insensitive). The `target_criteria` is business language, not a column name — always resolve to the real schema.
   3. Generate real pandas code using the matched column name and the `on_failure_action` pattern from `arch_standard_python`. See the Business Rules Mapping section for the full algorithm and a worked example.
-- **TRANSFORMATION_LOGIC non-empty → step 3b is mandatory, no exceptions.** Count the entries in TRANSFORMATION_LOGIC. Your step 3b MUST contain exactly that many pandas implementations — one per rule. A missing implementation is a compliance violation, not a judgment call.
+- **TRANSFORMATION_LOGIC non-empty → step 3b is mandatory, no exceptions.** Count the entries in TRANSFORMATION_LOGIC. Your step 3b MUST contain exactly that many pandas implementations — one per rule. A missing implementation is a compliance violation, not a judgment call. 
 - The 3-step mapping always succeeds: every rule's `target_criteria` contains at least one keyword that matches a real column via substring. If a match seems ambiguous, use the first meaningful noun in `target_criteria` and pick the closest column name — a best-effort implementation is required.
 - No rule may appear only as a comment. Omit step 3b **only** when TRANSFORMATION_LOGIC itself is absent from your context. Never omit it because mapping felt difficult.
 - **`is_suspicious` is conditional — not a default column:**
@@ -91,13 +91,13 @@ Generate `scripts/*.py` following `arch_standard_python` exactly. The standard d
     2. The Trino DDL SQL script.
     3. The Monitoring JSON specification.
     4. The `requirements.txt` file.
-- **MANDATORY:** After writing ANY artifact, immediately call `validate_generated_code` with the same filename. If it returns errors, fix them before proceeding. An artifact that does not pass validation MUST NOT be considered complete.
+- **VALIDATION (automatic — you do NOT call it):** `validate_generated_code` is NOT one of your tools; this node runs it automatically right after every `write_project_file`. If the **next message** reports validation errors for a file, fix that file before writing the next one — an artifact with unresolved errors is not complete.
 
 ### Fix Mode (healing_context present)
 When `## 🔧 FIX MODE — ACTIVE` appears in your context, the Medic has diagnosed a specific error. You MUST:
 1. Read the healing_context carefully — it names the file and describes the exact problem.
 2. Use **`patch_project_file`** (surgical edit) — NEVER `write_project_file` in fix mode.
-3. Call `validate_generated_code` on the patched file to confirm the fix.
+3. The patched file is validated automatically right after the patch — if the next message still reports errors, patch again. (You do NOT call `validate_generated_code`; it is not one of your tools.)
 4. Only modify the file(s) named in the healing_context — do not touch other files.
 
 **Adding a missing import (e.g. ruff `F821 Undefined name 'urlparse'`):** you MUST use the dedicated sentinel replacement — it inserts the line at the top of the file with correct (zero) indentation:

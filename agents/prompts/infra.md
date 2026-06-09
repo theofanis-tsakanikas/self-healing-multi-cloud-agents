@@ -63,8 +63,8 @@ For **`cloud_provider: azure`** specifically:
 
 ### 3. CONTAINERIZATION & ORCHESTRATION
 - **Dockerfile:** Build a `python:3.11-slim` image following the dockerfile standard. **`ENV PYTHONPATH=/app` is mandatory** — without it `from utils.cloud_config import cloud_get` fails at runtime because Python adds `scripts/` not `/app` to sys.path.
-    - **MANDATORY:** After generating the Dockerfile, immediately call `validate_generated_code` on it. Fix any errors before proceeding.
-- **K8s Manifest Stack:** Generate in `/k8s`. **After each manifest, immediately call `validate_generated_code` on it — do not proceed to the next file if validation fails.**
+    - **Validation is automatic:** the Dockerfile is validated by this node right after `generate_dockerfile` — you do NOT call `validate_generated_code` (it is not one of your tools). If the next message reports errors, fix it before proceeding.
+- **K8s Manifest Stack:** Generate in `/k8s`. Each manifest is validated automatically after it's written — if the next message reports errors for one, fix it before the next file. (You do NOT call `validate_generated_code`.)
 
   **MANDATORY object counts — every file must contain EXACTLY these objects (separated by `---`):**
 
@@ -117,7 +117,7 @@ For **`cloud_provider: azure`** specifically:
   - **Prometheus container MUST have `args: ["--config.file=/etc/prometheus/prometheus.yml"]`** — without this arg Prometheus ignores the mounted ConfigMap entirely and uses default settings (no Pushgateway scrape target).
 
 ### 4. CI/CD WORKFLOW (GITHUB ACTIONS)
-- **MANDATORY:** After calling `generate_github_action`, immediately call `validate_generated_code` on the generated file path (`.github/workflows/{{project_id}}_pipeline.yml`). If it reports unresolved placeholders (e.g. `<AWS_ACCOUNT_ID>`), rewrite the workflow with the actual values from context before proceeding to `push_to_github`.
+- **MANDATORY:** The generated workflow (`.github/workflows/{{project_id}}_pipeline.yml`) is validated automatically right after `generate_github_action` — you do NOT call `validate_generated_code`. If the next message reports unresolved placeholders (e.g. `<AWS_ACCOUNT_ID>`), rewrite the workflow with the actual values from context before proceeding to `push_to_github`.
 - **File Location:** `/.github/workflows/{{project_id}}_pipeline.yml`
 - **Cloud-Specific Auth:** Use the correct module from `infra_standard_cicd`:
     - AWS: `aws-actions/configure-aws-credentials@v4` + ECR login + `aws eks update-kubeconfig`. Region MUST be `${{ vars.AWS_DEFAULT_REGION }}` — never substitute the literal region value from context (e.g. never write `eu-central-1` directly).
@@ -133,8 +133,8 @@ For **`cloud_provider: azure`** specifically:
 When `healing_context` is injected into your context, the Medic has diagnosed a specific error. You MUST:
 1. Read the `healing_context` — it names the file and describes the exact problem.
 2. Use **`patch_project_file`** (surgical edit) — the ONLY permitted fix tool in this mode. **`generate_k8s_manifest` is FORBIDDEN in fix mode.** Multi-object files (`prometheus_deployment.yaml` has 4 objects, `configmaps.yaml` has 5) are always silently truncated when regenerated: the LLM only writes what it remembers of the healing_context, losing every other object in the file.
-3. Call `validate_generated_code` on the patched file **before** calling `push_to_github`.
-4. Only if validation returns CLEAN → call `push_to_github`.
+3. The patched file is validated automatically right after the patch — you do NOT call `validate_generated_code`. Check the next message's validation result **before** calling `push_to_github`.
+4. Only if that validation is CLEAN → call `push_to_github`.
 5. If validation still fails → do NOT push. Report the remaining errors so Medic can re-diagnose.
 6. Only modify the file(s) named in `healing_context` — do not touch other manifests.
 
