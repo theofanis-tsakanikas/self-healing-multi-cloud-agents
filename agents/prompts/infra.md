@@ -45,8 +45,7 @@ For **`cloud_provider: azure`** specifically:
     3. `query="Github actions cicd pipelines. Workflow trigger and structure, deployment execution, checkout, github secrets"` → stores as **infra_standard_cicd**
     4. `query="Dockerfile python pipeline image non-root user selective COPY CMD script path"` → stores as **infra_standard_dockerfile**
 - **🧱 DATABRICKS BRANCH:** If `PROJECT_METADATA.provider == "databricks"` (Delta/Jobs — NO storage bucket, NO IAM, NO Kubernetes, NO Dockerfile), execute ONLY query **1 (the injected iac query — already pre-resolved to the Databricks variant)** and query **3 (CI/CD)**; **SKIP queries 2 (K8s) and 4 (Dockerfile)**.
-* **SPEC EXTRACTION:** Parse retrieved documents and extract ONLY **Technical Constants**, mandatory naming patterns, and structural rules.
-* **PERSISTENCE:** Store findings in `collected_specs` using the exact keys above.
+* **THE RETRIEVED STANDARDS ARE THE SPEC:** Each query result is captured verbatim into `collected_specs` under its key (by this node's code) and injected **in full** into your prompt — there is no constant-extraction or manual-storage step. Treat the retrieved standards (naming patterns, structural rules, etc.) as the non-negotiable spec.
 * **CROSS-AGENT ALIGNMENT:** Analyze `arch_standard_...` keys already in state. You are strictly bound by the naming conventions, ports, and logical URIs defined by the Architect.
 
 ### 2. INFRASTRUCTURE AS CODE (TERRAFORM)
