@@ -1,33 +1,15 @@
-# AWS Infrastructure Standards for S3 Object Storage
+# AWS infra config — CONSUMED keys only.
+# The S3 storage-class / encryption / versioning / lifecycle / public-access "standards" live in
+# the KB (terraform_aws_s3.md) — the single owner. They are NOT read from here: only the keys
+# below reach an agent (build_architect_context: data_format/compression_type; build_infra_context:
+# object_ownership/auth_method; architect: service_name). Keeping the rest here only invited
+# divergence (e.g. the old lifecycle differed from the KB's).
 infrastructure_type: "object_storage"
 cloud_provider: "aws"
 service_name: "s3"
 
-# STORAGE STANDARDS
-storage_class: "STANDARD"
 data_format: "parquet"
 compression_type: "snappy"
-block_public_access: true
 
-# SECURITY & ACCESS STANDARDS
 auth_method: "aws_iam_oidc_irsa"
 object_ownership: "BucketOwnerEnforced"
-
-# ENCRYPTION
-encryption:
-  type: "sse-kms"
-  kms_key_provider: "aws_managed"
-
-# VERSIONING & LIFECYCLE
-versioning_enabled: true
-lifecycle_rules:
-  - id: "transition-to-ia"
-    enabled: true
-    transition_days: 90
-    storage_class: "STANDARD_IA"
-
-# NETWORKING & CONNECTIVITY
-target_uri_pattern: "s3a://{bucket_name}/{path}/"
-
-# MONITORING
-logging_enabled: true

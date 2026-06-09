@@ -1,22 +1,14 @@
-# Azure Infrastructure Standards for Data Lake (ADLS Gen2)
+# Azure infra config — CONSUMED keys only.
+# The ADLS storage-tier / hierarchical-namespace / encryption / versioning / soft-delete
+# "standards" live in the KB (the Azure terraform standard) — the single owner. They are NOT read
+# from here: only the keys below reach an agent (build_architect_context: data_format/
+# compression_type; build_infra_context: auth_method, and object_ownership which defaults to
+# "private" when absent; architect: service_name).
 infrastructure_type: "object_storage"
 cloud_provider: "azure"
 service_name: "blob_storage"
 
-# STORAGE STANDARDS
-storage_tier: "Hot"
-hierarchical_namespace: true
 data_format: "parquet"
 compression_type: "snappy"
 
-# SECURITY & ACCESS STANDARDS
 auth_method: "azure_ad_workload_identity"
-public_access_level: "private"
-encryption_type: "microsoft_managed_keys"
-
-# NETWORKING & CONNECTIVITY
-target_uri_pattern: "abfss://{container}@{account}.dfs.core.windows.net/{path}/"
-
-# RETENTION & COMPLIANCE
-versioning_enabled: true
-soft_delete_retention_days: 7
