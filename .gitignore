@@ -33,3 +33,6 @@ agents/prompts_copy/
 # Logs
 *.log
 pipeline_execution.log
+
+# Local TODO / planning notes — not versioned
+todo/
