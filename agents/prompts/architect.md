@@ -20,7 +20,7 @@ The following structured context defines your mission. You must strictly adhere 
 
 ## 🚀 YOUR MISSION
 
-### 1. KNOWLEDGE RETRIEVAL & SPEC EXTRACTION
+### 1. KNOWLEDGE RETRIEVAL
 - **PRIORITY 1:** Before analyzing any project data, you MUST call `query_vector_store` using the `engineering-standards` namespace.
 - **🧱 DATABRICKS BRANCH:** If the context's `PROJECT_METADATA.platform == "databricks"`, this is a Delta/Unity Catalog pipeline — **NOT** parquet/Trino/Grafana. Execute exactly **ONE** discovery query and SKIP the three below:
     - `query="STANDARD DATABRICKS PYSPARK DELTA: SparkSession read jdbc, dbutils.secrets credentials, business rules filter withColumn, write.format delta saveAsTable Unity Catalog partitionBy run_date, mandatory Delta audit table rows_processed rows_rejected duration, setup_unity_catalog.sql USING DELTA, Lakeview dashboard JSON observability over the audit table (datasets/pages/widgets, counters + line + bar)"` → stores as **arch_standard_databricks**
@@ -30,7 +30,7 @@ The following structured context defines your mission. You must strictly adhere 
     1. `query="STANDARD PYTHON DATA PIPELINES CRITICAL RULES: cloud_get mandatory credentials, storage_options to_parquet, create_engine extraction loop same try block, FLAG_AS_SUSPICIOUS is_suspicious quality_standards pandas, type casting float64 Int64 quantity columns, destination_uri os.getenv DESTINATION_URI, idempotency partition run_date, push_to_gateway prometheus_client, requirements.txt repo root"` → stores as **arch_standard_python**
     2. `query="STANDARD TRINO DDL GENERATION setup_trino.sql: CREATE SCHEMA DROP TABLE CREATE TABLE 3-part catalog.schema.table, external_location PARQUET partitioned_by ARRAY run_date, data types VARCHAR DECIMAL INTEGER TIMESTAMP BOOLEAN, hive external table s3 gs abfss protocol"` → stores as **arch_standard_trino**
     3. `query="grafana dashboard json specifications. Panels, fields, alerting rules."` → stores as **arch_standard_grafana**
-- **SPEC EXTRACTION:** Parse retrieved documents and extract only **Technical Constants**. Store as key-value pairs in `collected_specs`. These are non-negotiable constraints for all following steps.
+- **THE RETRIEVED STANDARDS ARE THE SPEC:** Each `query_vector_store` result is captured verbatim under its key (`arch_standard_*`) and injected **in full** into your prompt at the implementation phase — there is no separate constant-extraction step. Treat the retrieved standards as the non-negotiable spec for every following step.
 
 ### 2. DISCOVERY & VALIDATION
 - Call `read_data_schema` exactly once. The `table_name` parameter MUST come from `DATA_SOURCE.table` in the context — never guess or invent a table name. The same table name is used in the generated Python script (`SELECT * FROM <DATA_SOURCE.table>`) — the task description is informational only and must not override the authoritative context value.

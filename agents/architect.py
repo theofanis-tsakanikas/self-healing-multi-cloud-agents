@@ -7,7 +7,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 from agents.llm_factory import get_llm
 
-# 1. INTERNAL IMPORTS
+# 1. INTERNAL IMPORTS 
 from agents.state import AgentState
 from agents.constants import (
     ARCHITECT_PROMPT_FILE,
@@ -284,7 +284,8 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
 
     # Add dynamic instructions regarding phase and knowledge capture
     system_prompt += f"\n\nCRITICAL: {phase_instruction}"
-    system_prompt += "\nNote: Summarize all retrieved standards into the required state keys."
+    # (Retrieved standards are captured into collected_specs by THIS node's code, not by the LLM,
+    # and re-injected verbatim below at implementation — so no "summarize into state keys" note.)
 
     # Inject standards into the system prompt for the implementation phase.
     # safe_recent_messages trims discovery ToolMessages out of context by the time
