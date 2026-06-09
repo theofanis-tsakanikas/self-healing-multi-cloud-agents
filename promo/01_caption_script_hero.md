@@ -1,7 +1,7 @@
 # Hero Promo — Caption Script (exact words + timings)
 
 **Target:** ~120s · captions + music, no voiceover · captions in English.
-**Demo values used below:** NL builds an **AWS / S3** pipeline; slug `promo_orders`; result = its **Grafana** dashboard; scene 5 montage shows the other 3 clouds.
+**Demo values used below:** NL builds an **AWS / S3** pipeline; slug `promo_orders`; source table `raw_eu_sales`; result = the pre-run **Grafana** dashboard; scene 5 montage shows the other 3 clouds. Exact prep + rules file → `04_demo_recipe.md`.
 
 Caption style: large, bottom-center or lower-third, white text with a subtle cyan accent on the
 key word, dark semi-transparent backing. Keep each caption on screen 2.5–4s. One line, no walls of text.
@@ -16,8 +16,9 @@ key word, dark semi-transparent backing. Keep each caption on screen 2.5–4s. O
 
 ### SCENE 1 — The ask (0:08–0:25)
 - **Screen:** Streamlit, "💬 Natural Language" tab. Zoom into the description box. Type (or reveal pre-typed, then a cursor blink):
-  > *Take the orders table from my Postgres database to AWS S3, run daily, drop rows with negative total_amount, and flag missing customer_email.*
+  > *Take the raw_eu_sales orders table from my Postgres database to AWS S3, run it daily. Drop any rows where unit_price is zero or negative, and flag any rows with negative quantity.*
   Click **Continue →**. Brief "Extracting intent…" spinner.
+  > **Note:** uses the REAL seeded columns of `raw_eu_sales` (`unit_price`/`quantity`) — see `04_demo_recipe.md`. Do not type the old `total_amount`/`customer_email` (those columns don't exist → runtime KeyError).
 - **Caption (0:10):** `Describe it in plain English.`
 - **Caption (0:19):** `The AI extracts the intent — source, destination, rules.`
 

@@ -26,7 +26,7 @@ slow/real things first so they're ready; the dashboard footage is reusable.
 
 ### CLIP A — NL describe (the hero typing)
 - **What:** "💬 Natural Language" tab. Type the description (steady, not too fast), click **Continue →**, let the "Extracting intent…" spinner play, land on Step 1.
-- **Description to type:** `Take the orders table from my Postgres database to AWS S3, run daily, drop rows with negative total_amount, and flag missing customer_email.`
+- **Description to type:** `Take the raw_eu_sales orders table from my Postgres database to AWS S3, run it daily. Drop any rows where unit_price is zero or negative, and flag any rows with negative quantity.` (REAL columns of `raw_eu_sales` — see `04_demo_recipe.md`; do NOT use the old `total_amount`/`customer_email`.)
 - **Length:** ~18s raw.
 - **Screen Studio:** strong auto-zoom on the text box while typing; ease out to full wizard.
 
