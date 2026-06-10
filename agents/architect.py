@@ -284,8 +284,7 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
 
     # Add dynamic instructions regarding phase and knowledge capture
     system_prompt += f"\n\nCRITICAL: {phase_instruction}"
-    # (Retrieved standards are captured into collected_specs by THIS node's code, not by the LLM,
-    # and re-injected verbatim below at implementation — so no "summarize into state keys" note.)
+    system_prompt += "\nNote: Summarize all retrieved standards into the required state keys."
 
     # Inject standards into the system prompt for the implementation phase.
     # safe_recent_messages trims discovery ToolMessages out of context by the time
@@ -352,49 +351,47 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                     if tool_name == "query_vector_store":
                         result = tool_func.invoke(tool_args)
                         res_lower = str(result).lower()
+                        q = str(tool_args.get("query", "")).lower()
                         all_skipped_this_iter = False
+                        matched = False
 
-                        # "Catch-All" strategy: scan the response content
-                        # Regardless of what was asked, if the response contains the knowledge, we store it.
-
+                        # Label the retrieved standard by the ISSUED QUERY (not by scanning the
+                        # result blob): the query is short and carries the LLM's clear intent, so
+                        # DISTINCTIVE query terms map each result to exactly ONE key. Mutually-
+                        # exclusive elif (first-match-wins) — never separate ifs that could store one
+                        # result under several keys, nor generic terms ("import "/"def "/"script")
+                        # that also appear in the Trino/Grafana standards. Same proven pattern as
+                        # infra.py (742e340).
                         if is_databricks:
-                            # Databricks discovery captures ONLY the Spark/Delta standard.
-                            # The Trino/Grafana/pandas mappings below are skipped — they are
-                            # irrelevant to the Delta/Unity Catalog architecture.
-                            if any(word in res_lower for word in [
-                                "spark", "delta", "unity catalog", "databricks", "dbutils", ".write.format",
-                            ]):
+                            # Databricks discovery fires only the Spark/Delta query.
+                            if any(x in q for x in ["databricks", "pyspark", "delta", "spark", "unity catalog"]):
                                 collected_specs["arch_standard_databricks"] = str(result)
+                                matched = True
                                 logger.info("🎯 Smart Mapping: Databricks Spark Standard Secured.")
-                        else:
-                            # 1. Check for Python Standards
-                            if any(word in res_lower for word in [
-                                "sqlalchemy", "pandas", "chunksize", "os.getenv",
-                                "python", "def ", "import ", "logging", ".py",
-                                "etl", "ingestion", "script", "boto3", "pyspark",
-                            ]):
-                                collected_specs["arch_standard_python"] = str(result)
-                                logger.info("🎯 Smart Mapping: Python Standards Secured.")
+                        elif any(x in q for x in ["python", "pandas", "cloud_get", "storage_options", "to_parquet"]):
+                            collected_specs["arch_standard_python"] = str(result)
+                            matched = True
+                            logger.info("🎯 Smart Mapping: Python Standards Secured.")
+                        elif any(x in q for x in ["trino", "ddl", "setup_trino", "external_location", "hive"]):
+                            collected_specs["arch_standard_trino"] = str(result)
+                            matched = True
+                            logger.info("🎯 Smart Mapping: Trino Standards Secured.")
+                        elif "grafana" in q:
+                            collected_specs["arch_standard_grafana"] = str(result)
+                            matched = True
+                            logger.info("🎯 Smart Mapping: Grafana Standards Secured.")
 
-                            # 2. Check for Trino Standards
-                            if any(word in res_lower for word in ["trino", "ddl", "create table", "varchar"]):
-                                collected_specs["arch_standard_trino"] = str(result)
-                                logger.info("🎯 Smart Mapping: Trino Standards Secured.")
-
-                            # 3. Check for Grafana Standards
-                            if any(word in res_lower for word in ["grafana", "schemaversion", "json dashboard"]):
-                                collected_specs["arch_standard_grafana"] = str(result)
-                                logger.info("🎯 Smart Mapping: Grafana Standards Secured.")
-
-                        # Fallback: if smart mapping still didn't capture a missing key
-                        # and the result is non-empty, store it for the first missing key.
-                        # Prevents infinite discovery loops when content keywords don't match.
-                        no_relevant = "no relevant guidelines found" in res_lower
-                        still_missing = [k for k in required_knowledge_keys if k not in collected_specs]
-                        if still_missing and not no_relevant and str(result).strip():
-                            target_key = still_missing[0]
-                            collected_specs[target_key] = str(result)
-                            logger.info(f"🎯 Fallback Mapping: {target_key} secured from query result.")
+                        # Fallback: only when THIS result matched no query-keyword (e.g. the LLM
+                        # rephrased the query). Store it under the first still-missing key so
+                        # discovery always makes forward progress — never overwrite an already
+                        # matched result into another key.
+                        if not matched:
+                            no_relevant = "no relevant guidelines found" in res_lower
+                            still_missing = [k for k in required_knowledge_keys if k not in collected_specs]
+                            if still_missing and not no_relevant and str(result).strip():
+                                target_key = still_missing[0]
+                                collected_specs[target_key] = str(result)
+                                logger.info(f"🎯 Fallback Mapping: {target_key} secured from query result.")
 
                     # Logic for Writing Files (Implementation Phase)
                     elif tool_name == "write_project_file":
