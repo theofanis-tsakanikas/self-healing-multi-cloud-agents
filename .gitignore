@@ -25,7 +25,10 @@ coverage.xml
 *.tfstate
 *.tfstate.backup
 *.tfplan
-.terraform.lock.hcl
+# NOTE: .terraform.lock.hcl IS committed (HashiCorp guidance — reproducible
+# provider versions) for the hand-written bootstrap/ stacks. The generated
+# pipeline stack under terraform/ is an agent OUTPUT and is not locked here.
+terraform/.terraform.lock.hcl
 
 # Prompt snapshots — working copies, not versioned
 agents/prompts_copy/

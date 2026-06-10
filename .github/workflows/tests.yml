@@ -43,3 +43,14 @@ jobs:
       - name: Run unit tests + coverage (no cloud, no credentials)
         # fail_under is enforced via [tool.coverage.report] in pyproject.toml.
         run: uv run pytest --cov --cov-report=term-missing
+
+  terraform-fmt:
+    # Formatting gate for the HAND-WRITTEN Terraform only (bootstrap/). The
+    # pipeline stack under terraform/ is an agent-generated output with its own
+    # validation path — not gated here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: terraform fmt -check (bootstrap/)
+        run: terraform fmt -check -recursive bootstrap/

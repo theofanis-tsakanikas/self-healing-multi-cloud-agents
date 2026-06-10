@@ -399,7 +399,7 @@ resource "databricks_storage_credential" "s3" {
   # apply WRITE these flags into state, which is itself an update that the dependent external
   # location would otherwise block ("has 1 dependent storage location; use force option to update").
   force_destroy = true
-  force_update   = true
+  force_update  = true
 
   depends_on = [databricks_metastore_assignment.this, time_sleep.wait_for_uc_iam]
 }
@@ -420,7 +420,7 @@ resource "databricks_external_location" "s3" {
   # data is still purged because the dbfs_root bucket itself is force_destroy=true. force_update
   # lets the Phase-2 targeted apply write these flags despite the dependent managed tables.
   force_destroy = true
-  force_update   = true
+  force_update  = true
 
   depends_on = [databricks_storage_credential.s3]
 }
