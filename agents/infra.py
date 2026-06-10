@@ -103,11 +103,14 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     project_id = state.get("project_id")
     collected_specs = dict(state.get("collected_specs", {}))
 
-    # Resolve ECR/registry URL — single source of truth: the bootstrap phase creates
-    # the ECR repo and publishes its URL to SSM (bootstrap/aws/ssm.tf), so we read it
-    # back from SSM here. cloud_get_infra falls back to .bootstrap_outputs.json for
-    # local dev. We do NOT parse execute_terraform output — the infra agent's terraform
-    # operates on pipeline resources (S3 + IAM), not the ECR repo.
+    # Resolve the container-registry URL — single source of truth is the BOOTSTRAP phase
+    # (which creates the registry), resolved PER-CLOUD (see the branches below):
+    #   • AWS   → SSM (bootstrap/aws/ssm.tf), read via cloud_get_infra
+    #   • Azure → the ACR login server in azure_setup (no SSM)
+    #   • GCP   → artifact_registry_url from bootstrap_outputs, else assembled from gcp_setup (no SSM)
+    # cloud_get_infra falls back to .bootstrap_outputs.json for local dev. We never parse
+    # execute_terraform output — the infra agent's terraform makes S3 + IAM, not the registry.
+    # (`ecr_repository_url` is a legacy name; it holds ANY cloud's registry URL.)
     ecr_repository_url = state.get("ecr_repository_url", "")
     if not ecr_repository_url:
         _pipe_conf = state.get("raw_configs", {}).get("pipeline", {})
