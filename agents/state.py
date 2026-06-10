@@ -64,9 +64,10 @@ class AgentState(TypedDict):
     # exact run triggered by that push, not just the latest run in the repo.
     last_push_sha: str
 
-    # Full ECR repository URL extracted from terraform apply output.
-    # Injected into orchestration_phase_instruction so K8s/GHA generation
-    # uses the real URL instead of writing <AWS_ACCOUNT_ID> placeholders.
+    # Full container-registry URL for the pipeline image (legacy name — holds any cloud's
+    # registry). Resolved from the BOOTSTRAP phase per-cloud (AWS: SSM; Azure: ACR login server;
+    # GCP: Artifact Registry) — NOT parsed from terraform output. Injected into the infra
+    # orchestration phase-instruction so K8s/GHA generation uses the real URL instead of placeholders.
     ecr_repository_url: str
 
     # Set to True by Medic when it requests a fix. Survives through the Architect step

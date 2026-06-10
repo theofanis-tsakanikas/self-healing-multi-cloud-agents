@@ -52,7 +52,8 @@ DEFAULT_REQUIRED_DATABRICKS_TF_FILES = [
 
 # Pinned image versions for K8s manifests.
 # Single source of truth — keep in sync with knowledge_base/infrastructure/k8s_deployment_rules.md.
-# Used by: validate_generated_code (enforcement) and generate_k8s_manifest docstring (guidance).
+# Used by: validate_generated_code (enforcement), the infra.py orchestration phase-instruction,
+# and generate_k8s_manifest docstring (guidance).
 K8S_PINNED_IMAGES: dict[str, str] = {
     "trinodb/trino":    "trinodb/trino:403",
     "grafana/grafana":  "grafana/grafana:10.4.2",

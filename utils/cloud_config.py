@@ -2,7 +2,8 @@
 Unified configuration loader.
 
 Priority chain (highest → lowest):
-  1. AWS SSM Parameter Store   — production runtime (auto-populated by terraform apply)
+  1. AWS SSM Parameter Store   — AWS only (written by the BOOTSTRAP terraform, not the pipeline
+                                 terraform); skipped entirely for GCP/Azure
   2. .bootstrap_outputs.json   — local dev (populated by scripts/export_bootstrap_outputs.py)
   3. Environment variables      — CI/CD, Docker, or last resort
 
@@ -17,8 +18,8 @@ The same API works for any combination of cloud provider and database engine:
     cloud_get("gcp",   "db_host")   # PostgreSQL or MySQL on GCP Cloud SQL
     cloud_get("azure", "db_host")   # PostgreSQL or MySQL on Azure Database
 
-For the env-var fallback (tier 3), both POSTGRES_DB_* and MYSQL_DB_* are tried
-in order, so whichever the operator has set in their environment will be found.
+For the env-var fallback (tier 3), the (cloud, db_type, key) triple selects exactly ONE
+env-var name from _ENV_FALLBACKS, so postgres and mysql credentials are never mixed up.
 
 Backward-compatibility aliases (rds_host etc.) are retained so existing
 .bootstrap_outputs.json files and SSM parameters written before this refactor
@@ -165,7 +166,7 @@ def cloud_get(cloud: str, key: str, db_type: str = "postgres", *, use_ssm: bool 
         cloud:    "aws" | "gcp" | "azure"
         key:      Generic key — db_host | db_port | db_user | db_password | db_name.
                   Legacy RDS-specific keys (rds_host, rds_username, rds_db_name) are
-                  transparently resolved via _LEGACY_ALIASES for backward compatibility.
+                  transparently resolved via _LEGACY_KEY_MAP for backward compatibility.
         db_type:  "postgres" | "mysql" — selects the correct env-var fallback so
                   credentials for different engines are never mixed up.
         use_ssm:  Set False in unit tests to skip the live SSM call.
