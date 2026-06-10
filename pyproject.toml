@@ -1,7 +1,7 @@
 [project]
 name = "multi-cloud-self-healing-agent"
 version = "0.1.0"
-description = "Cloud-agnostic self-healing data engineering agent supporting AWS, Azure, and GCP"
+description = "Cloud-agnostic self-healing data engineering agent supporting AWS, Azure, GCP, and Databricks"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

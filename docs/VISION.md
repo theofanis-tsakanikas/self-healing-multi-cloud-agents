@@ -1,5 +1,7 @@
 # Multi-Cloud Data Engineer Agent — Product Vision
 
+> Forward-looking product framing. For what is built and validated today, see [ARCHITECTURE.md](ARCHITECTURE.md) and the e2e matrix in the [README](../README.md).
+
 ## The Pitch (one sentence)
 
 > "Upload your dataset, tell us what you want to do with it — we show you 4 plans with costs and charts, recommend the best fit, and if you say yes we build it automatically."
@@ -113,12 +115,13 @@ And if a requirement changes, they start over.
 - Trino federation tab (cross-cloud SQL demo)
 - Observability dashboard (metrics + charts)
 - Bootstrap outputs integration (real Terraform values)
-- Databricks infra config (workspace, jobs cluster, SQL warehouse, Delta Lake, Unity Catalog)
+- Databricks end-to-end: bootstrap Terraform (workspace, jobs cluster, serverless SQL warehouse, Unity Catalog), agent-generated Spark/Delta pipeline + `databricks_job` Terraform, Lakeview observability dashboard — **validated e2e 2026-06-08**
+- All four platforms validated end-to-end on live infrastructure (AWS & Azure 2026-06-04, GCP 2026-06-06, Databricks 2026-06-08)
 
 ### ❌ Still To Build
-- Databricks Terraform modules (bootstrap/databricks/)
-- MLflow experiment tracking integration
-- Real Databricks agent tools (create_notebook, run_job, etc.)
+- MLflow experiment tracking integration (Databricks ML workloads)
+- NL authoring for Databricks (today its NL surface is the fixed demo + cost comparison; free-text builder covers the 3 object-storage clouds)
+- SaaS hardening: auth, multi-tenancy, billing
 
 ---
 
