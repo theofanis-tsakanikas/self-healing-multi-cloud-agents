@@ -19,3 +19,11 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # Major action bumps are reviewed manually: the cloud workflows
+      # (run_agent/destroy/power/cleanup + the generated deploy) only run on
+      # workflow_dispatch, so a PR's green CI never exercises them — and the
+      # generated workflow's action versions are owned by the CI/CD standard,
+      # not by this repo's files. Minor/patch (incl. security) flow normally.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
