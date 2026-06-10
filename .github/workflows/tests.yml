@@ -35,8 +35,10 @@ jobs:
       - name: Install dependencies (incl. dev group)
         run: uv sync --group dev
 
-      - name: Lint test suite (ruff)
-        run: uv run ruff check tests/
+      - name: Lint (ruff, whole repo)
+        # Generated pipeline scripts are excluded via [tool.ruff] extend-exclude —
+        # they have their own validation gate at generation time.
+        run: uv run ruff check .
 
       - name: Run unit tests + coverage (no cloud, no credentials)
         # fail_under is enforced via [tool.coverage.report] in pyproject.toml.

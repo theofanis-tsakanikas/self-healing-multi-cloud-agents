@@ -54,6 +54,12 @@ dev = [
     "ruff>=0.15.14",
 ]
 
+[tool.ruff]
+# Generated pipeline scripts are agent OUTPUTS validated by their own gate
+# (validate_generated_code runs targeted ruff rules at generation time) — the
+# repo-wide lint covers the agent system itself, not the artifacts it produces.
+extend-exclude = ["scripts/pipe_*.py"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

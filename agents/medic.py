@@ -190,7 +190,7 @@ def medic_node(state: AgentState):
                 f"Always pass head_sha='{last_push_sha}' when calling fetch_github_action_logs "
                 f"so you examine the exact run triggered by that push."
             )
-    except Exception as e:
+    except Exception:
         system_prompt = "Diagnostic mode active. Analyze CI/CD logs."
 
     # 2. VALIDATION SUMMARY — parsed at the Python layer, never left to the LLM to scan messages.
@@ -337,8 +337,10 @@ def medic_node(state: AgentState):
                 # ToolMessage is still appended below so the LLM sees the rejection and
                 # self-corrects.
                 target = str(tool_args.get("target_agent", "")).lower()
-                if "arch" in target: reset_architect = True
-                if "infra" in target: reset_infra = True
+                if "arch" in target:
+                    reset_architect = True
+                if "infra" in target:
+                    reset_infra = True
                 fix_requested = True
                 # Capture the error signature (what is being fixed) so the convergence
                 # guard below can tell a recurring identical failure (oscillation) apart

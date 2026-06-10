@@ -164,7 +164,7 @@ def seed_chaos(target_arg, db_type, n_rows):
                 table_name = f"raw_{target}"
 
                 # TEST CONNECTION: If it doesn't connect here, it will go to except
-                with engine.connect() as conn:
+                with engine.connect():   # connection test only — failure routes to except
                     logger.info(f"Connection successful to {db_type} for target={target}")
 
                 logger.info(f"🔥 Injecting {n_rows} chaotic rows into '{table_name}'...")

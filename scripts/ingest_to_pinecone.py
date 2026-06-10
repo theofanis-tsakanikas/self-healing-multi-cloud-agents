@@ -2,8 +2,6 @@ import os
 import yaml
 import argparse
 import logging
-import zipfile
-import io
 from pathlib import Path
 from glob import glob
 from pinecone import Pinecone

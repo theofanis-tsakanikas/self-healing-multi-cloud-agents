@@ -1,4 +1,4 @@
-from typing import Annotated, TypedDict, List, Union
+from typing import Annotated, TypedDict, List
 import operator
 from langchain_core.messages import BaseMessage
 

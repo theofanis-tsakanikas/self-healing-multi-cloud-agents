@@ -23,8 +23,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 def _normalize_medic_target(raw: str) -> str | None:
     """Map LLM strings to standard agent keys."""
     key = (raw or "").strip().lower()
-    if any(x in key for x in ("architect", "code", "logic")): return "architect"
-    if any(x in key for x in ("infra", "terraform", "docker", "k8s", "ci")): return "infra"
+    if any(x in key for x in ("architect", "code", "logic")):
+        return "architect"
+    if any(x in key for x in ("infra", "terraform", "docker", "k8s", "ci")):
+        return "infra"
     return None
 
 def _extract_medic_fix_target(messages) -> str | None:
@@ -64,7 +66,7 @@ def supervisor_node(state: AgentState):
         raw_configs = state.get("raw_configs", {})
         project_folder_name = raw_configs.get("pipeline", {}).get("project_folder_name", "multi-cloud-self-healing-agent")
         system_prompt = format_prompt(raw_template, project_folder_name=project_folder_name)
-    except Exception as e:
+    except Exception:
         system_prompt = "Lead Orchestrator mode. Guide the team based on architect_status and infra_status."
 
     # 2. STATE ANALYSIS (Using the new Status Schema)

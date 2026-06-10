@@ -625,6 +625,32 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
     finally:
         root.removeHandler(handler)
 
+
+def _start_run(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
+    lq, sq = queue.Queue(), queue.Queue()
+    st.session_state.update({
+        "log_q": lq, "state_q": sq,
+        "pipeline_meta": {
+            "pipeline_id": pipeline_id,
+            "cloud": pipe_conf.get("cloud_provider", "?").upper(),
+            "db":    db_conf.get("db_type", "?"),
+            "rules": len(rules_conf.get("quality_standards", [])),
+        },
+        "written_files": [], "run_status": "running",
+        "node_statuses":  {"supervisor": "pending", "architect": "pending",
+                            "infra": "pending", "medic": "pending"},
+        "agent_messages": {"supervisor": "", "architect": "", "infra": "", "medic": ""},
+        "healing_cycles": 0,
+        "run_start_time": time.time(),
+    })
+    t = threading.Thread(
+        target=_run_agent,
+        args=(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task, lq, sq),
+        daemon=True,
+    )
+    t.start()
+    st.session_state.agent_thread = t
+
 # ---------------------------------------------------------------------------
 # HEADER
 # ---------------------------------------------------------------------------
@@ -897,7 +923,7 @@ def _render_arch_report(report: dict):
 def _render_rules_selector(key_prefix: str):
     from utils.rules_loader import (
         load_demo_rules, list_demo_domains, parse_rules_file,
-        extract_rules_from_nl, SIMPLE_TEMPLATE,
+        SIMPLE_TEMPLATE,
     )
 
     mode = st.radio(
@@ -1443,10 +1469,13 @@ with tab_nl:
         with _s1c1:
             if st.button("Confirm fields →", key="nl_wizard_step1_confirm", type="primary"):
                 _errs = []
-                if not _slug_v.strip():  _errs.append("Pipeline name is required.")
-                if not _table_v.strip(): _errs.append("Source table is required.")
+                if not _slug_v.strip():
+                    _errs.append("Pipeline name is required.")
+                if not _table_v.strip():
+                    _errs.append("Source table is required.")
                 if _errs:
-                    for _e in _errs: st.error(_e)
+                    for _e in _errs:
+                        st.error(_e)
                 else:
                     st.session_state.nl_answers = {
                         "pipeline_slug": _slug_v.strip(),
@@ -2069,37 +2098,10 @@ with tab_obs:
             unsafe_allow_html=True,
         )
 
-# ---------------------------------------------------------------------------
-# LAUNCH HELPERS
-# ---------------------------------------------------------------------------
-
-def _start_run(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
-    lq, sq = queue.Queue(), queue.Queue()
-    st.session_state.update({
-        "log_q": lq, "state_q": sq,
-        "pipeline_meta": {
-            "pipeline_id": pipeline_id,
-            "cloud": pipe_conf.get("cloud_provider", "?").upper(),
-            "db":    db_conf.get("db_type", "?"),
-            "rules": len(rules_conf.get("quality_standards", [])),
-        },
-        "written_files": [], "run_status": "running",
-        "node_statuses":  {"supervisor": "pending", "architect": "pending",
-                            "infra": "pending", "medic": "pending"},
-        "agent_messages": {"supervisor": "", "architect": "", "infra": "", "medic": ""},
-        "healing_cycles": 0,
-        "run_start_time": time.time(),
-    })
-    t = threading.Thread(
-        target=_run_agent,
-        args=(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task, lq, sq),
-        daemon=True,
-    )
-    t.start()
-    st.session_state.agent_thread = t
-
-
 # launch_nl is always False — the wizard deploys directly inside tab_nl step 4.
+# (_start_run lives next to _run_agent above — it MUST be defined before the
+#  tab blocks: Streamlit executes the script top-to-bottom, so a call from the
+#  wizard's step 4 would hit a NameError if the def came later in the file.)
 
 if launch_existing:
     with st.spinner(f"Loading {existing_choice} config..."):

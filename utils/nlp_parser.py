@@ -897,23 +897,16 @@ def _build_from_answers(
         **{k: v for k, v in defaults.items() if k not in ("default_region", "trino_catalog")},
     }
 
-    if cloud == "aws":
-        if v := cloud_outputs.get("aws_account_id"):  cloud_setup["aws_account_id"] = v
-        if v := cloud_outputs.get("state_bucket"):    cloud_setup["state_bucket"] = v
-        if v := cloud_outputs.get("lock_table"):      cloud_setup["lock_table"] = v
-        if v := cloud_outputs.get("eks_oidc_issuer"): cloud_setup["eks_oidc_issuer"] = v
-    elif cloud == "azure":
-        if v := cloud_outputs.get("acr_login_server"):      cloud_setup["acr_login_server"] = v
-        if v := cloud_outputs.get("aks_cluster_name"):      cloud_setup["aks_cluster_name"] = v
-        if v := cloud_outputs.get("aks_oidc_issuer_url"):   cloud_setup["aks_oidc_issuer_url"] = v
-        if v := cloud_outputs.get("state_storage_account"): cloud_setup["state_storage_account"] = v
-        if v := cloud_outputs.get("state_container"):       cloud_setup["state_container"] = v
-        if v := cloud_outputs.get("resource_group_name"):   cloud_setup["resource_group_name"] = v
-    elif cloud == "gcp":
-        if v := cloud_outputs.get("project_id"):            cloud_setup["project_id"] = v
-        if v := cloud_outputs.get("region"):                cloud_setup["region"] = v
-        if v := cloud_outputs.get("artifact_registry_url"): cloud_setup["artifact_registry_url"] = v
-        if v := cloud_outputs.get("state_bucket"):          cloud_setup["state_bucket"] = v
+    # Per-cloud bootstrap-output keys copied verbatim into cloud_setup (only when present).
+    _BOOTSTRAP_KEYS = {
+        "aws":   ("aws_account_id", "state_bucket", "lock_table", "eks_oidc_issuer"),
+        "azure": ("acr_login_server", "aks_cluster_name", "aks_oidc_issuer_url",
+                  "state_storage_account", "state_container", "resource_group_name"),
+        "gcp":   ("project_id", "region", "artifact_registry_url", "state_bucket"),
+    }
+    for k in _BOOTSTRAP_KEYS.get(cloud, ()):
+        if v := cloud_outputs.get(k):
+            cloud_setup[k] = v
 
     pipeline_conf = {
         "pipeline_id": pipeline_id,

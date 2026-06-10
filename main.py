@@ -1,7 +1,6 @@
 import os
 import sys
 import datetime
-import yaml
 import logging
 from dotenv import load_dotenv
 

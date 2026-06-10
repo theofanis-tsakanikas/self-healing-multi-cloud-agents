@@ -50,7 +50,8 @@ def files_exist_in_state(target_files: list, written_files: list) -> bool:
     Checks if target_files are present in written_files.
     Uses lower-case comparison for cross-platform reliability.
     """
-    if not target_files: return False
+    if not target_files:
+        return False
     written_files_lower = {f.lower() for f in written_files}
     return set(f.lower() for f in target_files).issubset(written_files_lower)
 
@@ -628,7 +629,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                     else:  # generate_github_action
                         already_exists = any(".github/workflows" in f.lower() for f in updated_files)
                     if already_exists:
-                        result = f"Skipped: file already exists."
+                        result = "Skipped: file already exists."
                         new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
                         logger.info(f"⏭️ Skipping existing file for tool: {t_name}")
                         continue

@@ -7,10 +7,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from langchain_core.tools import tool
-import sqlite3
-import pandas as pd
 import json
-from faker import Faker
 import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
@@ -524,7 +521,7 @@ def validate_generated_code(filename: str) -> str:
     # ── requirements.txt ─────────────────────────────────────────────────────
     elif base == "requirements.txt":
         with open(filename, encoding="utf-8") as f:
-            lines = [l.strip() for l in f if l.strip() and not l.strip().startswith("#")]
+            lines = [ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")]
         content_lower = " ".join(lines).lower()
         # Databricks pipelines run on the cluster runtime (pyspark + delta built in) with the
         # source JDBC driver attached as a Maven library — the pandas/Trino/Prometheus stack and
@@ -532,7 +529,7 @@ def validate_generated_code(filename: str) -> str:
         # artifact there). A `pyspark` line is the databricks signature → skip the K8s checks.
         if "pyspark" not in content_lower:
             mandatory = ["pandas", "sqlalchemy", "pyarrow", "trino", "prometheus-client"]
-            missing = [p for p in mandatory if not any(p in l.lower() for l in lines)]
+            missing = [p for p in mandatory if not any(p in ln.lower() for ln in lines)]
             if missing:
                 errors.append(f"REQUIREMENTS: missing mandatory packages: {missing}")
             # Cloud-specific filesystem driver for to_parquet() — omitting causes silent S3/GCS/ADLS failures.
@@ -799,7 +796,7 @@ def validate_generated_code(filename: str) -> str:
                     else:
                         fixes.append(f"  {img}:latest  →  pin to a specific version from k8s_deployment_rules.md")
                 errors.append(
-                    f"K8S: ':latest' image tag(s) found for public images — replace with pinned versions:\n"
+                    "K8S: ':latest' image tag(s) found for public images — replace with pinned versions:\n"
                     + "\n".join(fixes)
                 )
             if registry_latest:
@@ -1407,8 +1404,8 @@ def patch_project_file(filename: str, replacements: list) -> str:
 
     if not replacements:
         return (
-            f"Error: replacements list is empty — patch_project_file requires at least one replacement. "
-            f"To check a file without modifying it, use validate_generated_code instead."
+            "Error: replacements list is empty — patch_project_file requires at least one replacement. "
+            "To check a file without modifying it, use validate_generated_code instead."
         )
 
     applied, skipped = [], []
