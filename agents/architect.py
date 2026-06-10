@@ -7,7 +7,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 from agents.llm_factory import get_llm
 
-# 1. INTERNAL IMPORTS 
+# 1. INTERNAL IMPORTS
 from agents.state import AgentState
 from agents.constants import (
     ARCHITECT_PROMPT_FILE,
@@ -56,10 +56,10 @@ def _is_architect_allowed_file(filename: str) -> bool:
     # Blocked: Infrastructure and Core Configuration
     blocked_names = {"dockerfile", "docker-compose.yml", "docker-compose.yaml"}
     blocked_exts = {".tf", ".tfvars", ".yaml", ".yml"}
-    
+
     if lower_name in blocked_names or ext in blocked_exts:
         return False
-    
+
     # Path-based blocking for protected directories
     if any(p in lower_path for p in ["/k8s/", "k8s/", "/terraform/", "terraform/"]):
         return False
@@ -115,18 +115,18 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     surfacing auto-validate as a separate ROOT trace in LangSmith instead of a nested span.
     """
     logger.info("--- STARTING ARCHITECT NODE ---")
-    
+
     llm = get_llm(temperature=TEMPERATURE)
 
     # 1. INITIALIZE TRACKING & KNOWLEDGE STORAGE
     written_files = list(state.get("written_files", []))
     # Retrieve existing specs from state or initialize a new dictionary
-    collected_specs = dict(state.get("collected_specs", {})) 
+    collected_specs = dict(state.get("collected_specs", {}))
 
     # 2. CONTEXT EXTRACTION
     project_id = state.get("project_id", "Unknown")
     raw_configs = state.get("raw_configs", {})
-    
+
     pipe_conf = raw_configs.get("pipeline", {})
     db_conf = raw_configs.get("database", {})
     rules_conf = raw_configs.get("rules", {})

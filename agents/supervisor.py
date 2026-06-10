@@ -72,9 +72,9 @@ def supervisor_node(state: AgentState):
     # 2. STATE ANALYSIS (Using the new Status Schema)
     last_step = state.get("last_agent", "None")
     # Updated keys
-    arch_status = state.get("architect_status", "pending") 
+    arch_status = state.get("architect_status", "pending")
     infra_status = state.get("infra_status", "pending")
-    
+
     recent_messages = state["messages"][-5:] if state["messages"] else []
     # Scan only AIMessages — ToolMessages contain retrieved knowledge base content
     # which includes error examples (SyntaxError, ImportError, etc.) that would
@@ -83,7 +83,7 @@ def supervisor_node(state: AgentState):
         str(m.content) for m in recent_messages
         if isinstance(m, AIMessage) and not isinstance(m, ToolMessage)
     ).lower()
-    
+
     logger.info(f"Supervisor | Last Agent: {last_step} | Arch Status: {arch_status} | Infra Status: {infra_status}")
 
     # 3. DETERMINISTIC ROUTING (State-Driven Logic)
@@ -127,7 +127,7 @@ def supervisor_node(state: AgentState):
         if any(x in normalized_last for x in infra_errors):
             logger.warning("Infra/Deployment failure detected via keyword scan. Routing to MEDIC.")
             return {"next_step": "medic"}
-        
+
         # 2. Status Check (The gate to Medic)
         if infra_status == "completed":
             logger.info("🎯 Infra phase COMPLETED. Routing to MEDIC for validation.")
@@ -150,7 +150,7 @@ def supervisor_node(state: AgentState):
         # list at the Python layer) over re-parsing the request_fix message — the LLM has
         # named both agents for one .py error, which the message scan cannot disambiguate.
         medic_target = state.get("medic_fix_target") or _extract_medic_fix_target(state["messages"])
-        
+
         if medic_target == "architect":
             logger.info("Medic requested Logic fix. Resetting architect_status to pending.")
             return {
@@ -187,12 +187,12 @@ def supervisor_node(state: AgentState):
     Last Agent: {last_step}
     Error Log: {state.get('error_log', 'None')}
     """
-    
+
     messages = [
-        SystemMessage(content=system_prompt), 
+        SystemMessage(content=system_prompt),
         HumanMessage(content=f"{state_summary}\nDecide the next agent (ARCHITECT, INFRA, MEDIC, or FINISH):")
     ]
-    
+
     try:
         response = llm.invoke(messages)
         decision = response.content.upper().strip()

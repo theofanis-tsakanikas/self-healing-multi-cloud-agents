@@ -8,11 +8,11 @@ def format_prompt(template: str, **kwargs) -> str:
         # Get the content between {{ }}
         full_key = match.group(1).strip()
         keys = full_key.split('.')
-        
+
         value = kwargs
         try:
             for k in keys:
-                # Go deeper into the dictionary 
+                # Go deeper into the dictionary
                 value = value[k]
             return str(value)
         except (KeyError, TypeError):

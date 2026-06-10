@@ -42,7 +42,7 @@ The following structured context defines your mission. You must strictly adhere 
   1. Extract keywords from `target_criteria` (the quoted terms: `'price'`, `'quantity'`, `'order_id'`, etc.).
   2. Match to the actual column names returned by `read_data_schema` — find columns whose names contain any keyword (case-insensitive). The `target_criteria` is business language, not a column name — always resolve to the real schema.
   3. Generate real pandas code using the matched column name and the `on_failure_action` pattern from `arch_standard_python`. See the Business Rules Mapping section for the full algorithm and a worked example.
-- **TRANSFORMATION_LOGIC non-empty → step 3b is mandatory, no exceptions.** Count the entries in TRANSFORMATION_LOGIC. Your step 3b MUST contain exactly that many pandas implementations — one per rule. A missing implementation is a compliance violation, not a judgment call. 
+- **TRANSFORMATION_LOGIC non-empty → step 3b is mandatory, no exceptions.** Count the entries in TRANSFORMATION_LOGIC. Your step 3b MUST contain exactly that many pandas implementations — one per rule. A missing implementation is a compliance violation, not a judgment call.
 - The 3-step mapping always succeeds: every rule's `target_criteria` contains at least one keyword that matches a real column via substring. If a match seems ambiguous, use the first meaningful noun in `target_criteria` and pick the closest column name — a best-effort implementation is required.
 - No rule may appear only as a comment. Omit step 3b **only** when TRANSFORMATION_LOGIC itself is absent from your context. Never omit it because mapping felt difficult.
 - **`is_suspicious` is conditional — not a default column:**

@@ -27,14 +27,14 @@ def load_pipeline_bundle(base_dir: str, pipeline_path: str):
 
 def build_architect_context(pipeline_conf: dict, db_conf: dict, rules_conf: dict, infra_conf: dict) -> str:
     """
-    Unified context for the Architect. 
+    Unified context for the Architect.
     Includes logical mappings for Data, Catalog (Trino), and Monitoring (Grafana).
     """
     # 1. Determine Cloud Provider & Protocol
     provider = pipeline_conf.get('cloud_provider', 'aws').lower()
     setup_key = f"{provider}_setup"
     cloud_setup = pipeline_conf.get(setup_key, {})
-    
+
     if provider == 'aws':
         target_uri = f"s3://{cloud_setup.get('bucket_name')}/processed/"
     elif provider == 'gcp':
@@ -78,7 +78,7 @@ def build_architect_context(pipeline_conf: dict, db_conf: dict, rules_conf: dict
             }
         }
     }
-    
+
     return json.dumps(context, indent=2)
 
 def build_databricks_architect_context(pipeline_conf: dict, db_conf: dict, rules_conf: dict, infra_conf: dict) -> str:
@@ -145,14 +145,14 @@ def build_databricks_architect_context(pipeline_conf: dict, db_conf: dict, rules
 def build_infra_context(pipeline_conf: dict, infra_conf: dict, db_conf: dict = None) -> str:
     """
     Unified context for the Infra Engineer.
-    Focuses on physical resource identifiers, cloud providers, 
+    Focuses on physical resource identifiers, cloud providers,
     and orchestration metadata.
     """
     # 1. Cloud Provider Identification
     provider = pipeline_conf.get('cloud_provider', 'aws').lower()
     setup_key = f"{provider}_setup"
     cloud_setup = pipeline_conf.get(setup_key, {})
-    
+
     # 2. Project & Folder Metadata (Essential for CI/CD paths)
     project_metadata = {
         "project_id": pipeline_conf.get("pipeline_id"),
@@ -243,7 +243,7 @@ def build_infra_context(pipeline_conf: dict, infra_conf: dict, db_conf: dict = N
         "ORCHESTRATION": orchestration,
         "ARTIFACT_PATHS": artifacts
     }
-    
+
     return json.dumps(infra_summary, indent=2)
 
 def build_databricks_infra_context(pipeline_conf: dict, infra_conf: dict) -> str:

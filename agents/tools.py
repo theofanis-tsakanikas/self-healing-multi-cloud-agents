@@ -1291,7 +1291,7 @@ def _canonical_lakeview_dashboard(audit: str) -> str:
 @tool
 def write_project_file(filename: str, content: str):
     """
-    Writes project files. 
+    Writes project files.
     If filename includes a directory path (e.g., 'custom/path/file.txt'), it uses that.
     Otherwise, it routes by extension: .py -> scripts/, .sql -> sql/, .json -> dashboards/, .csv -> data/.
     """
@@ -1528,20 +1528,20 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
         # 2. Create engine and fetch metadata
         engine = create_engine(db_url)
         inspector = inspect(engine)
-        
+
         # Fetch columns
         columns = inspector.get_columns(table_name)
         if not columns:
             return f"Table '{table_name}' not found in {db_type}."
-            
+
         schema_desc = [f"{col['name']} ({col['type']})" for col in columns]
-        
+
         # 3. Fetch sample data
         with engine.connect() as conn:
             # LIMIT 3 is enough for the agent to infer structure
             result = conn.execute(text(f"SELECT * FROM {table_name} LIMIT 3"))
             sample = [dict(row._mapping) for row in result.fetchall()]
-        
+
         return {
             "status": "success",
             "database": db_type,
@@ -1608,12 +1608,12 @@ def execute_terraform(command: str, vars_dict: dict = None):
 
     # Build the base command
     cmd = ["terraform", subcommand]
-    
+
     # Add standardized flags if not already present
     for flag in auto_flags.get(subcommand, []):
         if flag not in parts:
             cmd.append(flag)
-            
+
     # Add any other arguments the LLM provided (minus the subcommand)
     cmd.extend(parts[1:])
 
@@ -1689,7 +1689,7 @@ def generate_dockerfile(content: str):
 @tool
 def generate_docker_compose(content: str):
     """
-    Generates a docker-compose.yml file. 
+    Generates a docker-compose.yml file.
     Use this to orchestrate the environment (databases + runner) for local testing.
     """
     with open("docker-compose.yml", "w", encoding="utf-8") as f:
@@ -1707,26 +1707,26 @@ def execute_docker_command(image_name: str, registry_url: str = None, tag: str =
         # 1. Determine the full image path
         is_remote = registry_url or ("." in image_name and "/" in image_name)
         full_image_path = f"{registry_url}:{tag}" if registry_url else f"{image_name}:{tag}"
-        
+
         # 2. Docker Build
         logger.info(f"Starting build for: {full_image_path}")
         build_res = subprocess.run(["docker", "build", "-t", full_image_path, "."], capture_output=True, text=True)
-        
+
         if build_res.returncode != 0:
             return f"STATUS: ERROR | Message: Docker Build Failed: {build_res.stderr}"
-            
+
         # 3. Docker Push
         if is_remote:
             logger.info(f"Pushing image to registry: {full_image_path}")
             push_res = subprocess.run(["docker", "push", full_image_path], capture_output=True, text=True)
-            
+
             if push_res.returncode != 0:
                 return f"STATUS: ERROR | Message: Docker Push Failed: {push_res.stderr}"
-            
+
             return f"STATUS: SUCCESS | Message: Image successfully built and pushed to {full_image_path}"
-            
+
         return f"STATUS: SUCCESS | Message: Image {image_name} built successfully locally."
-        
+
     except Exception as e:
         return f"STATUS: ERROR | Message: System error during Docker execution: {str(e)}"
 
@@ -1811,8 +1811,8 @@ def generate_k8s_manifest(filename: str, content: str):
     """
     target_dir = "k8s"
     os.makedirs(target_dir, exist_ok=True)
-    
-    # Remove any existing .yaml/.yml to re-append it cleanly, 
+
+    # Remove any existing .yaml/.yml to re-append it cleanly,
     # but also check if the agent is trying to pass an SQL file as a manifest
     # Strip k8s/ prefix if the LLM includes it — the tool always writes into k8s/
     basename = os.path.basename(filename)
@@ -2166,7 +2166,7 @@ def query_vector_store(query: str):
                 include_metadata=True,
                 namespace=ns
             )
-            
+
             for match in res['matches']:
                 score = match['score']
                 if score < 0.5:
@@ -2188,7 +2188,7 @@ def query_vector_store(query: str):
 
         # Sort by relevance across both namespaces
         all_results.sort(key=lambda x: x['score'], reverse=True)
-        
+
         if not all_results:
             return "No relevant guidelines found. Proceed with standard engineering practices."
 
@@ -2350,22 +2350,22 @@ def fetch_github_action_logs(project_id: str, head_sha: str = "", run_id: str = 
         return f"Run {resolved_id} completed with conclusion '{run_conclusion}' but no individual job failures found."
 
     parts = [f"--- DEBUGGING LOGS FOR PROJECT: {project_id} ---"]
-    
+
     for j in failed_jobs:
         jid = j["id"]
         name = j["name"]
         log_url = f"{_GITHUB_API}/repos/{owner}/{repo}/actions/jobs/{jid}/logs"
-        
+
         try:
             raw_log = _github_get_job_log_text(log_url, token)
-            
+
             # 3. TAIL LOGS: Keep the last 100 lines
             # That's where the error hides, not in the environment setup
             log_lines = raw_log.splitlines()
             tail_log = "\n".join(log_lines[-100:]) if len(log_lines) > 100 else raw_log
-            
+
             parts.append(f"\n❌ JOB FAILED: {name}\nID: {jid}\n{'-'*20}\n{tail_log}")
-            
+
         except Exception as e:
             parts.append(f"Could not fetch logs for {name}: {e}")
 
@@ -2388,19 +2388,19 @@ def store_architectural_insight(error_summary: str, solution: str, cloud_provide
     _pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
     _index_name = os.getenv("PINECONE_INDEX_NAME", "unified-intelligence-fabric")
     _idx = _pc.Index(_index_name)
-    
+
     # 2. Prepare the text for embedding
     insight_text = f"ISSUE: {error_summary}\nFIX: {solution}\nPROVIDER: {cloud_provider}"
-    
+
     # 3. Generate Embedding (using the same logic as the injection script)
     vector = get_embedding(insight_text) # Use text-embedding-3-small
-    
+
     if vector:
         # 4. Upsert to Pinecone in the 'dynamic-experience' namespace
         _idx.upsert(
             vectors=[(
-                f"fix-{uuid.uuid4()}", 
-                vector, 
+                f"fix-{uuid.uuid4()}",
+                vector,
                 {
                     "category": "experience",
                     "provider": cloud_provider,
@@ -2412,5 +2412,5 @@ def store_architectural_insight(error_summary: str, solution: str, cloud_provide
             namespace="dynamic-experience"
         )
         return "✨ Insight successfully stored in the Intelligence Fabric (dynamic-experience)."
-    
+
     return "❌ Failed to store insight due to embedding error."

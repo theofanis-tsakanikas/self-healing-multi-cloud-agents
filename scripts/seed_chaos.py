@@ -15,7 +15,7 @@ from utils.cloud_config import cloud_get
 
 # --- LOGGING CONFIGURATION ---
 logging.basicConfig(
-    level=logging.INFO, 
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ def create_chaos_data(target, n_rows=100):
     This saves memory by not generating unused data.
     """
     logger.info(f"Generating chaos data for target: {target}")
-    
+
     if target in ("eu_sales", "sales_lakehouse"):
         # sales_lakehouse reuses the EU-Sales schema (same business rules) but lands in its
         # OWN dedicated RDS / table — see build_engine + raw_{target}.
@@ -76,7 +76,7 @@ def create_chaos_data(target, n_rows=100):
                 "event_timestamp": np.random.choice([fake.date_time_this_year(), fake.future_datetime(end_date="+2y"), None], p=[0.8, 0.1, 0.1]),
             })
         return pd.DataFrame(data_list)
-    
+
     return pd.DataFrame()
 
 def build_engine(db_type, target):
@@ -168,7 +168,7 @@ def seed_chaos(target_arg, db_type, n_rows):
                     logger.info(f"Connection successful to {db_type} for target={target}")
 
                 logger.info(f"🔥 Injecting {n_rows} chaotic rows into '{table_name}'...")
-                
+
                 df.to_sql(
                     name=table_name,
                     con=engine,
@@ -186,32 +186,32 @@ def seed_chaos(target_arg, db_type, n_rows):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Advanced Chaos Engineering Engine")
-    
+
     parser.add_argument(
-        "--target", 
+        "--target",
         choices=["eu_sales", "sales_lakehouse", "us_crm", "global_marketing", "all"],
         default="all",
         help="The functional scope of the data"
     )
-    
+
     parser.add_argument(
-        "--db-type", 
-        choices=["sqlite", "postgres", "mysql"], 
+        "--db-type",
+        choices=["sqlite", "postgres", "mysql"],
         default="postgres",
         help="Database engine to use"
     )
-    
+
     parser.add_argument(
-        "--rows", 
-        type=int, 
+        "--rows",
+        type=int,
         default=100,
         help="Number of rows to generate per table"
     )
-    
+
     args = parser.parse_args()
 
     os.makedirs("data", exist_ok=True)
-    
+
     logger.info(f"🚀 STARTING CHAOS: Scope={args.target}, DB={args.db_type}, Rows={args.rows}")
     seed_chaos(args.target, args.db_type, args.rows)
     logger.info("✨ Process Completed.")

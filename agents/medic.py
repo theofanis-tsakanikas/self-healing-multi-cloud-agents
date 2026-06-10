@@ -157,10 +157,10 @@ def medic_node(state: AgentState):
 
     llm = get_llm(temperature=TEMPERATURE)
     llm_with_tools = llm.bind_tools(tools)
-    
+
     project_id = state.get("project_id", "Unknown")
     target_infra = state.get("target_infra", "Unknown")
-    
+
     # 1. LOAD SYSTEM PROMPT
     try:
         prompt_path = os.path.join(PROMPTS_DIR, MEDIC_PROMPT_FILE)
@@ -174,7 +174,7 @@ def medic_node(state: AgentState):
             target_infra=target_infra,
             evidence_markers=_evidence_markers,
         )
-        
+
         # Adding instructions for the new infra_status flag
         system_prompt += (
             "\n- If infra/deployment fails: use request_fix(target_agent='infra')."
@@ -260,7 +260,7 @@ def medic_node(state: AgentState):
 
     # We include more history for Medic to see the previous Infra logic
     messages = [{"role": "system", "content": system_prompt}] + safe_recent_messages(state["messages"], limit=10)
-    
+
     new_messages_for_state = []
     reset_architect = False
     reset_infra = False

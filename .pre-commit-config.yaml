@@ -1,0 +1,39 @@
+# Local quality gates — mirrors what CI enforces (tests.yml lint + security.yml
+# secret scan + the terraform fmt gate). Install once with:
+#   uv run pre-commit install
+#
+# Generated agent OUTPUTS are excluded — they are never edited by hand (fixed
+# via standards/prompts and regenerated), so hooks must not "clean them up".
+exclude: '^(scripts/pipe_.*\.py|k8s/|sql/|dashboards/|terraform/|Dockerfile|requirements\.txt|\.github/workflows/pipe_.*\.yml)'
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+        exclude: '^\.github/workflows/'   # workflows carry ${{ }} templating; validated in CI instead
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.16
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: terraform-fmt-bootstrap
+        name: terraform fmt -check (bootstrap/)
+        entry: terraform fmt -check -recursive bootstrap/
+        language: system
+        files: '^bootstrap/.*\.tf$'
+        pass_filenames: false

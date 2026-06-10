@@ -9,8 +9,8 @@ from agents.medic import medic_node
 
 # Import the tools that the Medic uses
 from agents.tools import (
-    fetch_github_action_logs, 
-    query_vector_store, 
+    fetch_github_action_logs,
+    query_vector_store,
     request_fix,
     store_architectural_insight
 )
@@ -19,8 +19,8 @@ from agents.tools import (
 
 # Define which tools will be available in the Tools Node
 medic_tools = [
-    fetch_github_action_logs, 
-    query_vector_store,  
+    fetch_github_action_logs,
+    query_vector_store,
     request_fix,
     store_architectural_insight
 ]
@@ -30,16 +30,16 @@ tools_node = ToolNode(medic_tools)
 
 def should_continue(state: AgentState):
     """
-    Decision function to check if the Medic needs to 
+    Decision function to check if the Medic needs to
     call a tool or return to the supervisor.
     """
     messages = state["messages"]
     last_message = messages[-1]
-    
+
     # If the LLM called some tool (e.g. Pinecone)
     if getattr(last_message, "tool_calls", None):
         return "execute_tools"
-    
+
     # If the LLM wrote text (response), return to the supervisor
     return "supervisor"
 
@@ -65,7 +65,7 @@ workflow.add_node("supervisor", supervisor_node)
 workflow.add_node("architect", architect_node)
 workflow.add_node("infra", infra_node)
 workflow.add_node("medic", medic_node)
-workflow.add_node("execute_tools", tools_node) 
+workflow.add_node("execute_tools", tools_node)
 
 # --- EDGES ---
 

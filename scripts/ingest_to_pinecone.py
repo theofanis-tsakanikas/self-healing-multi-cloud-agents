@@ -58,14 +58,14 @@ def upload_file_to_pinecone(file_path):
         path_obj = Path(file_path)
         category = path_obj.parent.name if path_obj.parent.name else "general"
         file_name = path_obj.name
-        
+
         with open(file_path, 'r', encoding='utf-8') as f:
             raw_content = f.read()
 
         # 2. METADATA EXTRACTION
         # For standards, project_id is 'global' because they apply to all projects.
         project_id = "global"
-        
+
         # If this is a YAML file, try to detect whether it defines a specific project_id.
         if file_path.endswith(('.yaml', '.yml')):
             try:
@@ -88,8 +88,8 @@ def upload_file_to_pinecone(file_path):
                 "type": "standard", # Label used by the Medic
                 "last_updated": "2026-04-23" # Optional timestamp
             }
-            
-            # 3. UPSERT TO ENGINEERING-STANDARDS    
+
+            # 3. UPSERT TO ENGINEERING-STANDARDS
             index.upsert(
                 vectors=[(vector_id, embedding, metadata)],
                 namespace="engineering-standards"
@@ -103,15 +103,15 @@ def upload_file_to_pinecone(file_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Unified Intelligence Fabric - Knowledge Ingestor")
-    
+
     # The default path is now knowledge_base.
     parser.add_argument(
-        "--path", 
-        type=str, 
-        default="knowledge_base", 
+        "--path",
+        type=str,
+        default="knowledge_base",
         help="Directory containing the knowledge base files"
     )
-    
+
     args = parser.parse_args()
     kb_path = args.path
 
@@ -121,7 +121,7 @@ def main():
         os.path.join(kb_path, "**/*.yaml"),
         os.path.join(kb_path, "**/*.yml")
     ]
-    
+
     files = []
     for pattern in search_patterns:
         files.extend(glob(pattern, recursive=True))

@@ -152,7 +152,7 @@ def run_self_healing_system(pipeline_name: str):
     Main entry point to run the self-healing data engineering system.
     Dynamically loads the full configuration bundle and initiates the LangGraph workflow.
     """
-    
+
     pipeline_dir = os.path.join(CONFIGS_DIR, "pipelines")
     spec_file = os.path.join(pipeline_dir, f"{pipeline_name}_pipeline.yaml")
     objective_file = os.path.join(pipeline_dir, f"{pipeline_name}_objective.md")

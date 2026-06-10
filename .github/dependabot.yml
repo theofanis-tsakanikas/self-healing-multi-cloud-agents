@@ -1,0 +1,21 @@
+# Automated dependency updates. Python deps resolve through uv (pyproject +
+# uv.lock); GitHub Actions pins are bumped per workflow file. The generated
+# pipeline workflow (pipe_*.yml) is an agent OUTPUT — Dependabot PRs against
+# it are fine to close: the standard owns its action versions.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      python-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

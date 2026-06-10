@@ -209,7 +209,7 @@ data:
         honor_labels: true
 ```
 
---- 
+---
 
 ## 3. SHARED SERVICES (TRINO & GRAFANA)
 

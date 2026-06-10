@@ -96,7 +96,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     """
     logger.info("--- STARTING INFRASTRUCTURE NODE ---")
     llm = get_llm(temperature=TEMPERATURE)
-    
+
     # 1. LOCAL STATE EXTRACTION
     written_files = state.get("written_files", [])
     tf_done = state.get("infra_provisioned", False)
@@ -150,7 +150,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         if ecr_repository_url:
             logger.info(f"Image registry resolved for {_cloud}: {ecr_repository_url}")
 
-    
+
     # 2. CONTEXT GENERATION
     raw_configs = state.get("raw_configs", {})
     pipeline_conf = raw_configs.get("pipeline", {})
@@ -204,7 +204,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         # Agent is forced to retrieve engineering standards before writing any code
         selected_keys = ["query_vector_store"]
         logger.info("🛡️ GATE: Discovery Phase. Only query_vector_store allowed.")
-    
+
     # --- GATE 2: DATABRICKS ---
     elif is_databricks:
         logger.info("✅ GATE: Implementation Phase. Standards verified.")
@@ -530,10 +530,10 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             )
 
     messages = [{"role": "system", "content": system_prompt}] + safe_recent_messages(state["messages"], limit=5)
-    
+
     # 8. LLM INVOCATION
     response = llm_with_tools.invoke(messages)
-    
+
     # 9. TOOL EXECUTION & STATE UPDATES
     new_messages = [response]
     updated_files = list(written_files)
@@ -810,7 +810,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                         if sha_match:
                             last_push_sha = sha_match.group(1)
                             logger.info(f"📌 Commit SHA captured: {last_push_sha}")
-                
+
                 # D. Terraform Provisioning Check
                 if t_name == "execute_terraform" and "apply complete" in result_str.lower():
                     infra_success_detected = True
