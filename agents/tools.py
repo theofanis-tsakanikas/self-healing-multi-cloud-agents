@@ -1648,13 +1648,17 @@ def execute_terraform(command: str, vars_dict: dict = None):
                     or "state lock" in combined.lower()):
                 return (
                     "PENDING: STATE_LOCK_ERROR — Terraform could not acquire the state lock; "
-                    "the tfstate blob is locked by a previous run. This is an OPERATIONAL "
+                    "the tfstate is locked by a previous run. This is an OPERATIONAL "
                     "issue, not a code bug: no artifact change can fix it. If a CI run is "
                     "genuinely still in progress, wait for it to finish. If the lock is stale "
-                    "(left behind by a cancelled/killed run), the user must break the blob "
-                    "lease (Azure: `az storage blob lease break`, or Portal → the tfstate "
-                    "blob → Break lease) or run `terraform force-unlock <LOCK_ID>`, then "
-                    f"re-run. Do NOT call request_fix.\n{result.stderr}"
+                    "(left behind by a cancelled/killed run), break it then re-run. The "
+                    "universal fix is `terraform force-unlock <LOCK_ID>` (works on every "
+                    "backend); the per-cloud alternative removes the same lock at its source — "
+                    "AWS: delete the stale lock item from the DynamoDB lock table; "
+                    "GCP: remove the stale lock on the GCS state object; "
+                    "Azure: break the tfstate blob lease (`az storage blob lease break`, or "
+                    "Portal → the tfstate blob → Break lease). "
+                    f"Do NOT call request_fix.\n{result.stderr}"
                 )
             # Return the stderr to the Medic for diagnosis
             return f"FAILED: Terraform {subcommand}\nERROR: {result.stderr}\nOUTPUT: {result.stdout}"

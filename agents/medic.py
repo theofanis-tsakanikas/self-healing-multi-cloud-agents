@@ -268,7 +268,8 @@ def medic_node(state: AgentState):
     verification_successful = False # To know if we will store the insight
 
     # 2b. TERRAFORM STATE-LOCK GUARD — operational issue, not a code bug.
-    # A locked tfstate blob cannot be resolved by any artifact change, so request_fix
+    # A locked tfstate (DynamoDB on AWS, GCS lock on GCP, blob lease on Azure) cannot be
+    # resolved by any artifact change, so request_fix
     # would loop forever on no-op patches. Detect the marker execute_terraform emits and
     # short-circuit BEFORE the LLM runs: surface actionable guidance and FINISH (via
     # fix_loop_escalated, which the Supervisor routes to FINISH).
@@ -276,13 +277,16 @@ def medic_node(state: AgentState):
     if "STATE_LOCK_ERROR" in _recent_blob:
         logger.warning("Terraform STATE_LOCK_ERROR detected — operational, surfacing to user (no fix loop).")
         _lock_msg = (
-            "Terraform could not acquire the state lock — the tfstate blob is locked by a "
-            "previous (cancelled/killed) run, so NO code fix applies. Break the stale lease "
-            "and re-run:\n"
-            "  • Azure CLI: az storage blob lease break --account-name <tfstate-account> "
-            "--container-name tfstate --blob-name <state-key>\n"
-            "  • or Azure Portal → the tfstate blob → Break lease\n"
-            "  • or, from terraform/: terraform force-unlock <LOCK_ID>"
+            "Terraform could not acquire the state lock — the tfstate is locked by a "
+            "previous (cancelled/killed) run, so NO code fix applies. Break the stale lock "
+            "and re-run. The universal fix works on every backend; the per-cloud notes "
+            "remove the same stale lock at its source:\n"
+            "  • Universal (any backend): from terraform/, run `terraform force-unlock <LOCK_ID>`\n"
+            "  • AWS — delete the stale lock item from the DynamoDB lock table (terraform-state-lock)\n"
+            "  • GCP — remove the stale lock on the GCS state object (delete the .tflock)\n"
+            "  • Azure — break the tfstate blob lease: az storage blob lease break "
+            "--account-name <tfstate-account> --container-name tfstate --blob-name <state-key> "
+            "(or Portal → the tfstate blob → Break lease)"
         )
         return {
             "messages": [HumanMessage(content=_lock_msg)],
