@@ -53,6 +53,17 @@ dev = [
     "ruff>=0.15.14",
 ]
 
+[tool.uv]
+# The project never runs on Windows (CI = ubuntu, local dev = macOS, pipeline
+# images = linux). Without this, uv resolves the lock for ALL platforms incl.
+# the `python >= 3.14 + win32` split, where older dependency floors have no
+# solution — which made Dependabot's uv updater fail with
+# dependency_file_not_resolvable.
+environments = [
+    "sys_platform == 'linux'",
+    "sys_platform == 'darwin'",
+]
+
 [tool.ruff]
 # Generated pipeline scripts are agent OUTPUTS validated by their own gate
 # (validate_generated_code runs targeted ruff rules at generation time) — the
