@@ -130,10 +130,13 @@ test: ## Run the full test suite
 	uv run pytest tests/ -v --tb=short
 
 .PHONY: format
-format: ## Format code with Black and isort
-	@echo "Formatting code..."
-	uv run isort .
-	uv run black .
+format: ## Autofix lint findings with ruff (generated pipe_*.py excluded via pyproject)
+	@echo "Fixing lint findings..."
+	uv run ruff check --fix .
+
+.PHONY: lint
+lint: ## Lint the whole repo with ruff (same command CI runs)
+	uv run ruff check .
 
 .PHONY: clean
 clean: ## Remove temporary files and caches
