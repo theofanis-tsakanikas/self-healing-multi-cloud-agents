@@ -4,6 +4,19 @@
 
 Production-grade AI orchestration system that autonomously designs, deploys, and self-heals data pipelines across AWS, Azure, GCP, and Databricks using a LangGraph multi-agent architecture: **Supervisor → Architect → Infra → Medic**.
 
+Key docs: `docs/ARCHITECTURE.md` (as-built), `docs/RUNBOOK.md` (verification/ops), `SECURITY.md` (posture + demo trade-offs).
+
+## Commands
+
+```bash
+make install                  # uv sync
+make test                     # 156+ hermetic unit tests — no cloud, no credentials
+make lint                     # ruff, same command CI runs
+make run p=<pipeline>         # eu_sales | us_crm | global_marketing | sales_lakehouse
+make ingest                   # sync knowledge_base/ -> Pinecone (REQUIRED after editing any standard)
+make chaos target=<p> db_type=<t> rows=N
+```
+
 ---
 
 ## Non-Negotiable Principles
@@ -167,7 +180,7 @@ This is **not a monorepo**. All paths are relative to the repo root:
 
 Standards live in `knowledge_base/`. Pinecone loads the full content of each standard (no chunking) — every agent has access to the complete text.
 
-**After editing any `knowledge_base/*.md` standard, the next `run_agent.yml` MUST set `sync_knowledge_base: sync`.** Pinecone serves the *last synced* version — without a re-sync the agents read the OLD standard and your edits are silently ignored. (Exception: the infra agent reads k8s/dockerfile/cicd standards straight from disk, bypassing Pinecone — see `infra.py` `_disk_standards`.)
+**After editing any `knowledge_base/*.md` standard, the next `run_agent.yml` MUST set `sync_knowledge_base: sync`.** Pinecone serves the *last synced* version — without a re-sync the agents read the OLD standard and your edits are silently ignored. This applies to ALL standards for ALL agents — the infra agent's former disk-read override was removed in `742e340`; everything now goes through Pinecone.
 
 The validator (`validate_generated_code`) is a **safety net** for architectural issues the LLM can't know from general knowledge (custom modules, cloud-specific quirks). It is not a substitute for correct prompts and standards. Do not add fragile regex checks for general Python best practices.
 
@@ -189,16 +202,13 @@ The validator (`validate_generated_code`) is a **safety net** for architectural 
 
 ## Git Workflow
 
-After every set of changes:
-1. `git diff` → show full output.
-2. Ask: **"Commit and push? [yes / no]"**
-3. If yes: conventional commit message + push.
+Commit and push after every coherent set of changes — no per-change confirmation gate. One logical change per commit.
 
 Format: `<type>(<scope>): <description>`
 Types: `feat | fix | infra | docs | refactor | test | chore`
-Scopes: `architect | infra | medic | supervisor | bootstrap | configs | knowledge-base | ci`
+Scopes: `architect | infra | medic | supervisor | bootstrap | configs | knowledge-base | ci | streamlit`
 
-Never commit `.env` files or credential JSON.
+Never commit `.env` files or credential JSON. pre-commit hooks (ruff, gitleaks, terraform fmt) and CI (`tests.yml`, `security.yml`) gate every push.
 
 ---
 
@@ -209,24 +219,15 @@ Never commit `.env` files or credential JSON.
 - Am I using `cloud_get()` for credentials? (Databricks: `dbutils.secrets.get` instead — never `cloud_get()`.)
 - Does the fix need a code example? → standard. Is it a one-line prohibition? → prompt. See "Prompt vs. Standard" section.
 
-**Never edit generated artifacts to get a quick result.** Files under `scripts/`, `k8s/`, `sql/`, `dashboards/`, `terraform/`, `.github/workflows/<pipeline>_pipeline.yml`, `Dockerfile`, `requirements.txt` are OUTPUTS — fix the standard/prompt and let the next agent run regenerate them. The only exception is repo-infrastructure the agent does not generate (e.g. `run_agent.yml`, `bootstrap/`).
+**Never edit generated artifacts to get a quick result.** `scripts/pipe_*.py`, `k8s/`, `sql/`, `dashboards/`, `terraform/`, `.github/workflows/<pipeline>_pipeline.yml`, `Dockerfile`, `requirements.txt` are OUTPUTS — fix the standard/prompt and let the next agent run regenerate them. (`scripts/seed_chaos.py`, `scripts/ingest_to_pinecone.py`, `scripts/export_bootstrap_outputs.py` are agent-side utilities — normal code.) The only exception is repo-infrastructure the agent does not generate (e.g. `run_agent.yml`, `bootstrap/`).
 
 ---
 
-## Verifying a Successful Pipeline Run
+## Verifying a Run / Operations
 
-AWS CLI + kubectl run locally against the cluster using credentials from `.env` (load with `python-dotenv`; `aws eks update-kubeconfig --name multi-cloud-agent-cluster`). For in-cluster checks the CI job logs work too.
+Full per-cloud verification steps, failure signatures, and teardown procedures live in **`docs/RUNBOOK.md`** — read it before debugging a "run succeeded but X looks wrong" report. The four invariants that bite during *code* changes:
 
-1. **S3:** `aws s3 ls s3://<bucket>/processed/ --recursive` → expect `run_date=YYYY-MM-DD/part_0.parquet`.
-2. **Glue:** Table `<schema>.<pipeline_id>` exists with correct schema + the `run_date` partition registered (Trino `sync_partition_metadata`).
-3. **Grafana:** LoadBalancer DNS on `:3000`, login `admin` / the `grafana-admin` K8s secret (`kubectl get secret grafana-admin -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d`; pre-hardening deployments: `admin/admin`), dashboard "…Observability" — **5 panels** populated (Record Count, Last Success, Rejection Rate, Run Duration, Rejections by Reason). The 5th (piechart) shows the per-rule breakdown — empty/"No data" only when the pipeline has no DROP_RECORD/EXCLUDE_AND_LOG rules.
-4. **Metrics:** all five gauges present in Prometheus — `pipeline_rows_processed_total`, `pipeline_last_success_timestamp`, `pipeline_rows_rejected_total`, `pipeline_duration_seconds`, `pipeline_rows_rejected_by_reason` (labeled per `reason`, one series per business rule).
-5. **Cost note:** EKS + node EC2 + ECR persist after a run. `cleanup_k8s.yml` (manual `workflow_dispatch`) tears down only the K8s workloads — it never touches bootstrap infra.
-
-**Grafana shows "No data" but the run succeeded?** Check in this order: (1) **metrics actually in Prometheus?** `query pipeline_rows_processed_total` — if present, the pipeline + Pushgateway are fine and the problem is the dashboard. (2) **Dashboard query mismatch** — a stale/degraded `grafana-dash-config` ConfigMap on the cluster (hardcoded `project_id="unknown"`, no `$project_id` template var) never matches the real label → No data. The deployed ConfigMap can lag the committed (correct) artifact; re-applying the good `k8s/configmaps.yaml` + `kubectl rollout restart deploy/grafana` fixes it. (3) **Idempotency skip** — if `run_date=YYYY-MM-DD` already exists in storage the pipeline logs "already populated. Skipping" and returns *before* emitting metrics; the Pushgateway is also in-memory (a restart drops all metrics). Delete only that day's partition and re-run, or wait for the next day.
-
-**Azure verification:** `az aks get-credentials -g multi-cloud-agent-rg -n multi-cloud-agent-aks`, then ADLS `az storage fs file list -f <container> --account-name <acct> --path processed`, Trino `kubectl exec deploy/trino -- trino --execute "SELECT count(*) FROM hive.<schema>.<table>"`.
-
-**GCP verification (validated e2e 2026-06-04→06 — `global_marketing` baseline):** auth with `gcloud container clusters get-credentials multi-cloud-agent-gke --region europe-west3` (needs `gke-gcloud-auth-plugin` locally — install via `gcloud components install`, or query **Cloud Logging** instead: `gcloud logging read 'resource.labels.container_name="pipeline"'`). **GCS:** `gcloud storage ls gs://<bucket>/processed/` → `run_date=YYYY-MM-DD/part_0.parquet`. **Trino:** `kubectl exec deploy/trino -- trino --execute "SELECT count(*) FROM hive.<schema>.<table>"`. **Grafana:** the LoadBalancer external IP from `gcloud compute forwarding-rules list` (port 3000), login `admin` / the `grafana-admin` secret (pre-hardening deployments: admin/admin). Required repo **Secrets**: `GCP_SA_KEY_JSON`, `MYSQL_DB_PASSWORD`; **Variables**: `GCP_PROJECT_ID`, `MYSQL_DB_HOST/PORT/USER/NAME`. GCP-specific deploy invariants: the **job.yaml image uses `:latest`** (the build pushes it; **NO image-tag sed** — see CI), the **`processed/` directory is pre-created** by the pipeline terraform (`google_storage_bucket_object`, else Trino `CREATE TABLE` fails "External location must be a directory"), and the terraform **backend prefix = `CLOUD_SETUP.state_prefix` verbatim** (a self-derived prefix splits state → `409 bucket already exists`).
-
-**Databricks verification (validated e2e 2026-06-08 — `sales_lakehouse` baseline):** local Databricks CLI with `DATABRICKS_HOST` / `DATABRICKS_TOKEN` sourced from `.env`; the source RDS must be `available` first (`aws rds start-db-instance --db-instance-identifier sales-lakehouse-raw-data`). **Run state:** `databricks jobs list-runs --job-id <id>` → `result=SUCCESS`. **Data write (from the script's own logs):** `databricks jobs get-run-output <task_run_id>` → grep `Wrote N rows` + `Audit row written` (the baseline: 100 seeded chaos rows → 68 written / 32 rejected, `monetary_integrity`+`temporal_validity`). **Delta / Unity Catalog:** table `multi_cloud_agent_workspace.raw.pipe_sales_lakehouse` + its `_audit` table. **Dashboard (the Grafana equivalent):** a Lakeview dashboard "`<pipeline> — Observability`" under **/Shared** (workspace → Dashboards) — 5 metrics off the `_audit` table (records processed/rejected, rejection rate, run duration, rejections-by-reason bar) on the serverless SQL warehouse; `terraform output -raw dashboard_id`. The dashboard runs its queries as the **human viewer** (`embed_credentials=false`), so the viewer needs Unity Catalog read — the databricks bootstrap grants the built-in `account users` group `USE_CATALOG`+`USE_SCHEMA`+`SELECT` on the catalog (`databricks_grants.catalog_read`). **Widgets all showing `[INSUFFICIENT_PERMISSIONS] … does not have USE CATALOG` = that grant is missing** (UC access is explicit — even admins need it); re-run the databricks bootstrap. (This is NOT a data/idempotency problem — the `_audit` rows are there; the widgets just can't read the catalog.) **Spark UI diagnostic:** a stage stuck at `0/1` with duration **"Unknown" = ZERO executors** — the cluster was a broken single-node (`num_workers=0` + UC SINGLE_USER with no `spark.master=local[*]`); the fix is `num_workers=1` in `bootstrap/databricks/main.tf` (the read task never gets a slot otherwise). A *running-but-stuck* task instead points at the JDBC read (verify `?sslmode=require` + DBR runtime **18.2**, not 14.3 which hangs the SSL handshake). **Cost (pause):** `aws rds stop-db-instance …` + `databricks clusters delete <id>` (config persists, auto-restarts next run); the serverless SQL warehouse auto-stops. **No `cleanup_k8s.yml`** applies (Databricks has no K8s). **Full teardown:** `destroy.yml` (manual `workflow_dispatch`, `cloud: databricks`) destroys the workspace + Unity Catalog + jobs cluster + serverless warehouse + source RDS + DBFS S3 bucket + IAM, keeping ONLY `s3://multi-cloud-agent-bootstrap-state` (the terraform backend — a backend, NOT a managed resource, so `terraform destroy` never touches it; same as every cloud's kept state bucket). Phase 1 destroys the pipeline terraform (job + secret scope + `databricks_dashboard`); Phase 2 a targeted `apply` writes the teardown flags into state — `force_destroy` on `dbfs_root`/metastore/catalog/`raw` schema/storage credential/external location, **plus `force_update`** on the storage credential & external location — then `terraform destroy`. All need the flags because the Spark job creates **managed tables at runtime** (not in terraform), so a plain destroy fails sequentially: schema *'not empty'* → external location *'N dependent managed tables'* → credential *'use force option to update'*. The job env MUST pass `TF_VAR_databricks_client_id` (the SP app id — a required, no-default bootstrap+pipeline var; without it both phases abort "No value for required variable") alongside the SP (`DATABRICKS_CLIENT_ID`/`SECRET`/`ACCOUNT_ID`) + AWS creds.
+- **Grafana "No data" ≠ pipeline failure.** Order of checks: metrics in Prometheus? → stale `grafana-dash-config` ConfigMap on the cluster (lags the committed artifact)? → idempotency skip (existing `run_date=` partition returns *before* metrics; Pushgateway is in-memory).
+- **Grafana login:** `admin` / the `grafana-admin` K8s secret (pre-hardening deployments: admin/admin).
+- **Databricks `[INSUFFICIENT_PERMISSIONS] … USE CATALOG` on all widgets** = the bootstrap `account users` catalog grant is missing (viewer-credential dashboards) — NOT a data problem.
+- **Databricks teardown is two-phase** (`destroy.yml`): runtime-created managed tables require `force_destroy`/`force_update` flags applied into state before `terraform destroy` — a plain destroy always fails.
