@@ -34,5 +34,9 @@ agents/prompts_copy/
 *.log
 pipeline_execution.log
 
-# Local TODO / planning notes — not versioned
+# Local TODO / planning / promo notes — not versioned
 todo/
+promo/
+
+# macOS
+.DS_Store
