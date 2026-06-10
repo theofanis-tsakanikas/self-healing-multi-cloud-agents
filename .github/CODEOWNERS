@@ -1,0 +1,7 @@
+# Default owner for everything in the repo.
+* @theofanis-tsakanikas
+
+# The knowledge base is the single source of truth for generated artifacts —
+# changes here alter what the agents produce and require a Pinecone re-sync.
+/knowledge_base/ @theofanis-tsakanikas
+/agents/prompts/ @theofanis-tsakanikas

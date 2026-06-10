@@ -1,6 +1,6 @@
 [project]
 name = "multi-cloud-self-healing-agent"
-version = "0.1.0"
+version = "1.0.0"
 description = "Cloud-agnostic self-healing data engineering agent supporting AWS, Azure, GCP, and Databricks"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -83,4 +83,5 @@ show_missing = true
 # infra_node, medic_node) are integration/eval-deferred, so total line coverage is
 # dominated by intentionally-untested code. This floor guards the deterministic logic
 # (validators, routing, cloud_get, state helpers) from silently losing coverage.
-fail_under = 22
+# Raise it whenever real coverage grows (was 22 at ~26% real; now 28 at ~32% real).
+fail_under = 28
