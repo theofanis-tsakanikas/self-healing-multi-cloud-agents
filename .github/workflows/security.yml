@@ -22,7 +22,7 @@ jobs:
     name: Secret scan (git history)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0   # full history — gitleaks scans every commit
       - uses: gitleaks/gitleaks-action@v3.0.0
@@ -33,7 +33,7 @@ jobs:
     name: Dependency CVEs (blocking)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
@@ -47,7 +47,7 @@ jobs:
     name: IaC misconfig (report-only)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
