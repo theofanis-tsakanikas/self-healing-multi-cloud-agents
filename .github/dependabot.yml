@@ -8,6 +8,13 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    # Refresh uv.lock within the EXISTING pyproject ranges. The default
+    # bump_versions strategy raises the pyproject floors to the newest
+    # release, which conflicts with transitive caps (e.g. raising
+    # pyarrow>=16 to >=24 collides with langchain-google-vertexai's
+    # pyarrow<24 cap) and fails the whole job with
+    # dependency_file_not_resolvable. Floors stay human-managed.
+    versioning-strategy: lockfile-only
     groups:
       python-deps:
         patterns: ["*"]
