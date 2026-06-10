@@ -152,6 +152,7 @@ CI (`tests.yml`) runs lint + the suite with a coverage floor on every push/PR. T
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — as-built architecture: agents, state machine, per-cloud execution models, credential resolution
 - [docs/VISION.md](docs/VISION.md) — product vision and roadmap
+- [SECURITY.md](SECURITY.md) — what is hardened, the deliberate demo trade-offs, and the production posture for each
 - [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, dependency management
 - [CLAUDE.md](CLAUDE.md) — the project's full engineering rulebook (also used by AI coding assistants)
 

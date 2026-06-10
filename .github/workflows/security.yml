@@ -1,0 +1,56 @@
+name: Security
+
+# Three scanners, three blast radii:
+#   gitleaks      → secrets anywhere in git history (blocking)
+#   trivy fs      → known CVEs in locked dependencies + secrets in the worktree (blocking)
+#   trivy config  → IaC misconfigurations across Terraform/K8s/Dockerfile (REPORT-ONLY:
+#                   the public-endpoint findings are the documented demo posture — see
+#                   SECURITY.md "Deliberate demo trade-offs" — so they must not gate CI)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'   # weekly sweep — catches newly published CVEs with no code change
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Secret scan (git history)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history — gitleaks scans every commit
+      - uses: gitleaks/gitleaks-action@v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-scan:
+    name: Dependency CVEs (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+  iac-scan:
+    name: IaC misconfig (report-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: '0'   # report-only: public DB endpoints etc. are the documented demo posture (SECURITY.md)
