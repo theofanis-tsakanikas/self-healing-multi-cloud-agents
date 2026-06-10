@@ -84,9 +84,9 @@ A defining property of this repo: **part of it is the agent, part of it is the a
 | `bootstrap/` | One-time per-cloud baseline Terraform (EKS/AKS/GKE/Databricks workspace, registries, source DBs, state) |
 | `utils/`, `tests/` | Shared libraries + hermetic unit tests (no cloud, no credentials) |
 | `streamlit_app.py`, `utils/nlp_parser.py`, `utils/cost_estimator.py` | NL authoring demo: free text → pipeline config, with a 4-cloud cost comparison before deploy |
-| **Generated:** `scripts/`, `k8s/`, `sql/`, `dashboards/`, `terraform/`, `Dockerfile`, `requirements.txt`, `.github/workflows/*_pipeline.yml` | **Agent outputs** — written by the agents, fixed only through standards/prompts, never edited by hand |
+| **Generated:** `scripts/pipe_*.py`, `k8s/`, `sql/`, `dashboards/`, `terraform/`, `Dockerfile`, `requirements.txt`, `.github/workflows/*_pipeline.yml` | **Agent outputs** — populated by each agent run (the deploy CI consumes them from the repo), fixed only through standards/prompts, never edited by hand |
 
-> Note: the root `requirements.txt` is the *generated pipeline image's* dependency file. The project itself is managed with `uv` via `pyproject.toml` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+> Note: the generated paths are empty between runs — each run commits a fresh, coherent set for its target cloud. The complete artifact set from the four validated runs is preserved permanently at the [`v1.0.0` tag](https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/tree/v1.0.0). The root `requirements.txt` (when present) is the *generated pipeline image's* dependency file — the project itself is managed with `uv` via `pyproject.toml` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ---
 

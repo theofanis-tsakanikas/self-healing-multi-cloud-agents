@@ -1,5 +1,0 @@
-prometheus-client
-trino
-pyarrow
-sqlalchemy
-pandas
