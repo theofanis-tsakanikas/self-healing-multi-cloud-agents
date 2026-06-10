@@ -307,6 +307,7 @@ spec:
 - Service type: `LoadBalancer`, port `3000`
 - Mount `grafana-dash-config` at `/etc/grafana/provisioning/dashboards` (dashboard JSON)
 - Mount `grafana-datasource-config` at `/etc/grafana/provisioning/datasources` (Prometheus auto-wiring)
+- **Admin password from the `grafana-admin` Secret — NEVER default `admin/admin`.** The Service is a public LoadBalancer, so the deployment MUST set `GF_SECURITY_ADMIN_PASSWORD` via `secretKeyRef` to the `grafana-admin` Secret (key `admin-password`). The deploy workflow creates that Secret in `monitoring` *before* applying this manifest (see the CI/CD standard — "Create Grafana Admin Secret"). Do not put the password value in the manifest itself.
 
 ```yaml
 apiVersion: apps/v1
@@ -339,6 +340,15 @@ spec:
         # browser-locale translation (e.g. Greek "λίγα δευτερόλεπτα πριν").
         - name: GF_USERS_DEFAULT_LANGUAGE
           value: "en-US"
+        # Admin password from the `grafana-admin` Secret (created by the deploy workflow
+        # BEFORE this manifest is applied). The Service below is a PUBLIC LoadBalancer —
+        # shipping the Grafana default admin/admin would expose the dashboard to anyone
+        # with the LB address.
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana-admin
+              key: admin-password
         resources:
           requests:
             memory: "512Mi"

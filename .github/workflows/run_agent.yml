@@ -74,6 +74,9 @@ on:
         default: '100'
         type: string
 
+permissions:
+  contents: read   # agent pushes use GH_PAT, never the workflow GITHUB_TOKEN
+
 jobs:
   run-agent:
     runs-on: ubuntu-latest

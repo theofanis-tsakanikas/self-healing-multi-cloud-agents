@@ -8,6 +8,9 @@ on:
         required: true
         default: 'pipe-eu-sales-to-s3'
 
+permissions:
+  contents: read   # kubectl authenticates with cloud credentials, not GITHUB_TOKEN
+
 jobs:
   cleanup:
     runs-on: ubuntu-latest

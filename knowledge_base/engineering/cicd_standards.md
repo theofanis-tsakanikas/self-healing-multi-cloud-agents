@@ -19,9 +19,13 @@ This standard defines the mandatory, modular structure for GitHub Actions workfl
         - 'sql/**'
         - 'dashboards/**'
         - 'requirements.txt'
+
+  permissions:
+    contents: read
   ```
 
   Never use `paths: ['**']` (triggers on every commit, including standards/prompt edits) and never use `projects/{{project_folder}}/**` or any `projects/...` prefix — this is not a monorepo.
+- **Permissions:** the top-level `permissions: { contents: read }` block above is MANDATORY — the workflow authenticates to the clouds with their own credentials and must not receive a write-capable `GITHUB_TOKEN`.
 - **Job Name:** The single job MUST be named `deploy`.
 - **Global Env:** No custom `GH_TOKEN` env block needed — this workflow does not use the `gh` CLI. Git authentication is handled by AWS/GCP/Azure credentials. Do not add `GH_TOKEN: ${{ secrets.GH_TOKEN }}` to the job env.
 
@@ -143,7 +147,16 @@ jobs:
         run: |
           sed -i 's|image: <acr_login_server>/<project_id_rfc1123>:.*|image: <acr_login_server>/<project_id_rfc1123>:${{ github.sha }}|' k8s/job.yaml
 
-      - name: Deploy Shared Services to Kubernetes   # 🔴 MUST run BEFORE the secret — 00_namespaces.yaml creates the `analytics` namespace
+      - name: Create Grafana Admin Secret   # 🔴 MUST run BEFORE grafana_deployment.yaml — the Deployment reads GF_SECURITY_ADMIN_PASSWORD from this Secret (public LB ⇒ never default admin/admin). Create-if-absent keeps the password stable across runs; the openssl fallback is fail-secure when no repo secret is set. Retrieve with: kubectl get secret grafana-admin -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d
+        env:
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+        run: |
+          kubectl apply -f k8s/00_namespaces.yaml   # idempotent — ensures `monitoring` exists
+          kubectl get secret grafana-admin -n monitoring >/dev/null 2>&1 || \
+            kubectl create secret generic grafana-admin -n monitoring \
+              --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD:-$(openssl rand -base64 24)}"
+
+      - name: Deploy Shared Services to Kubernetes   # 🔴 MUST run BEFORE the db secret — 00_namespaces.yaml creates the `analytics` namespace
         run: |
           kubectl apply -f k8s/00_namespaces.yaml
           kubectl apply -f k8s/configmaps.yaml
@@ -223,6 +236,19 @@ The following steps MUST appear in this exact order:
 - name: Set Image Tag in Job Manifest
   run: |
     sed -i 's|image: <real_ecr_url>.*|image: <real_ecr_url>:${{ github.sha }}|' k8s/job.yaml
+- name: Create Grafana Admin Secret
+  # 🔴 BEFORE grafana_deployment.yaml — the Deployment reads GF_SECURITY_ADMIN_PASSWORD
+  # from this Secret (public LB ⇒ never default admin/admin). Create-if-absent keeps the
+  # password stable across runs; the openssl fallback is fail-secure when no repo secret
+  # is configured. Retrieve it with:
+  #   kubectl get secret grafana-admin -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d
+  env:
+    GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+  run: |
+    kubectl apply -f k8s/00_namespaces.yaml   # idempotent — ensures `monitoring` exists
+    kubectl get secret grafana-admin -n monitoring >/dev/null 2>&1 || \
+      kubectl create secret generic grafana-admin -n monitoring \
+        --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD:-$(openssl rand -base64 24)}"
 - name: Deploy Shared Services to Kubernetes
   run: |
     kubectl apply -f k8s/00_namespaces.yaml
@@ -324,6 +350,9 @@ Per-cloud `--from-literal` key mapping:
 **## 5. SECURITY & COMPLIANCE**
 - **Secret Usage:** DB credentials are read at runtime by `cloud_get()` — AWS reads from SSM Parameter Store via IRSA (K8s secret exists but is empty), GCP/Azure read from env vars injected via K8s secret. Never hardcode credentials in workflow files.
 - **Isolation:** Pipelines must be restricted to their respective project namespaces to prevent cross-project interference.
+- **Grafana admin:** the deploy workflow MUST create the `grafana-admin` Secret (see "Create Grafana Admin Secret" above) before applying `grafana_deployment.yaml` — Grafana sits on a public LoadBalancer and must never come up with the default `admin/admin`.
+- **Workflow token scope:** every generated workflow declares least-privilege `permissions:` at the top level — `permissions: { contents: read }` (deploys authenticate to the clouds via their own credentials, never via `GITHUB_TOKEN`).
+- **Action pinning:** third-party actions are pinned to a release tag (e.g. `databricks/setup-cli@v1.2.1`) — NEVER a mutable branch like `@main`.
 
 ---
 
@@ -363,7 +392,7 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
-      - uses: databricks/setup-cli@main          # the unified `databricks` CLI
+      - uses: databricks/setup-cli@v1.2.1        # the unified `databricks` CLI — pinned tag, never @main
 
       - name: Upload Spark script to DBFS
         run: |
