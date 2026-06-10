@@ -48,7 +48,7 @@ This is **not a monorepo**. All paths are relative to the repo root:
 - Docker build context: `.`
 - Dockerfile: `Dockerfile`
 - K8s applies: `k8s/job.yaml`
-- GHA trigger: `on: push` scoped to **artifact paths only** (`Dockerfile`, `scripts/**`, `k8s/**`, `sql/**`, `dashboards/**`, `requirements.txt`). Never `paths: ['**']` — standards/prompt/agent-code edits must NOT trigger a pipeline redeploy.
+- GHA trigger: `on: push` scoped to **artifact paths only** (`Dockerfile`, `scripts/pipe_*.py`, `k8s/**`, `sql/**`, `dashboards/**`, `requirements.txt`). Never `paths: ['**']`, and never `scripts/**` — `scripts/` also holds agent-side utilities (seed_chaos, ingest_to_pinecone), and a lint touch to those must NOT redeploy the pipeline (bitten 2026-06-10). Standards/prompt/agent-code edits must NOT trigger a pipeline redeploy.
 - Never use `projects/multi-cloud-self-healing-agent/` anywhere.
 
 ---

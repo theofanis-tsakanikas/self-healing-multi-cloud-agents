@@ -14,7 +14,7 @@ This standard defines the mandatory, modular structure for GitHub Actions workfl
     push:
       paths:
         - 'Dockerfile'
-        - 'scripts/**'
+        - 'scripts/pipe_*.py'
         - 'k8s/**'
         - 'sql/**'
         - 'dashboards/**'
@@ -25,6 +25,7 @@ This standard defines the mandatory, modular structure for GitHub Actions workfl
   ```
 
   Never use `paths: ['**']` (triggers on every commit, including standards/prompt edits) and never use `projects/{{project_folder}}/**` or any `projects/...` prefix — this is not a monorepo.
+- **`scripts/pipe_*.py`, NOT `scripts/**`:** the `scripts/` directory also holds agent-side utilities (`seed_chaos.py`, `ingest_to_pinecone.py`, `export_bootstrap_outputs.py`) — a broad `scripts/**` makes any lint/maintenance touch to those redeploy the pipeline. Only the generated pipeline script(s) (`pipe_*.py`) are deployable artifacts.
 - **Permissions:** the top-level `permissions: { contents: read }` block above is MANDATORY — the workflow authenticates to the clouds with their own credentials and must not receive a write-capable `GITHUB_TOKEN`.
 - **Job Name:** The single job MUST be named `deploy`.
 - **Global Env:** No custom `GH_TOKEN` env block needed — this workflow does not use the `gh` CLI. Git authentication is handled by AWS/GCP/Azure credentials. Do not add `GH_TOKEN: ${{ secrets.GH_TOKEN }}` to the job env.
