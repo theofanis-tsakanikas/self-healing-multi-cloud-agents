@@ -61,7 +61,7 @@ For **`cloud_provider: azure`** specifically:
 - **Deployment:** Execute `execute_terraform` (init & apply). Do not proceed until infrastructure is physically provisioned.
 
 ### 3. CONTAINERIZATION & ORCHESTRATION
-- **Dockerfile:** Build a `python:3.11-slim` image following the dockerfile standard. **`ENV PYTHONPATH=/app` is mandatory** — without it `from utils.cloud_config import cloud_get` fails at runtime because Python adds `scripts/` not `/app` to sys.path.
+- **Dockerfile:** Build a `python:3.12-slim` image following the dockerfile standard. **`ENV PYTHONPATH=/app` is mandatory** — without it `from utils.cloud_config import cloud_get` fails at runtime because Python adds `scripts/` not `/app` to sys.path.
     - **Validation is automatic:** the Dockerfile is validated by this node right after `generate_dockerfile` — you do NOT call `validate_generated_code` (it is not one of your tools). If the next message reports errors, fix it before proceeding.
 - **K8s Manifest Stack:** Generate in `/k8s`. Each manifest is validated automatically after it's written — if the next message reports errors for one, fix it before the next file. (You do NOT call `validate_generated_code`.)
 

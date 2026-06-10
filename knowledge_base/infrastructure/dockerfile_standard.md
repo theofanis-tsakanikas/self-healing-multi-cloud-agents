@@ -3,7 +3,7 @@
 ## MANDATORY STRUCTURE
 
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -25,7 +25,7 @@ CMD ["python", "scripts/<pipeline_script_name>.py"]
 
 ## CRITICAL RULES
 
-- **Base image:** Always `python:3.11-slim` — never `python:3.11` (full image is 3x larger).
+- **Base image:** Always `python:3.12-slim` — never the full `python:3.12` (3x larger). 3.12 matches the project's `requires-python` and the CI interpreter — one Python version everywhere.
 - **Script path in CMD:** The pipeline script lives in `scripts/`, not the root. CMD must be `["python", "scripts/<name>.py"]` — never `["python", "<name>.py"]`.
 - **Selective COPY — MANDATORY list:** Never use `COPY . .`. The following directories MUST ALL be present — omitting any one causes a runtime import error:
     1. `COPY scripts/ scripts/` — the pipeline entry point
