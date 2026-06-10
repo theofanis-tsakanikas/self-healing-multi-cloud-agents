@@ -200,7 +200,7 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
         phase_instruction = (
             f"CURRENT PHASE: DISCOVERY. "
             f"Execute query_vector_store for the MISSING standards only: {missing_keys}. "
-            "Use the exact query strings defined under 'KNOWLEDGE RETRIEVAL & SPEC EXTRACTION' in your instructions. "
+            "Use the exact query strings defined under 'KNOWLEDGE RETRIEVAL' in your instructions. "
             "Do NOT query for any other topic."
         )
         logger.info(f"⚠️ GATE: Discovery Phase. Missing keys: {missing_keys}")

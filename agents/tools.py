@@ -1796,9 +1796,9 @@ def generate_k8s_manifest(filename: str, content: str):
       grafana/grafana:10.4.2
       prom/prometheus:v2.51.0
       prom/pushgateway:v1.8.0
-      For ECR custom images: use the actual ECR repository URL from execute_terraform output
-        (e.g. 123456789012.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest)
-        — extract the 12-digit account ID from the ECR URL, never write <AWS_ACCOUNT_ID>.
+      For the pipeline image: use the registry URL provided in your phase-instruction (it is
+        pre-resolved from the bootstrap — SSM on AWS, ACR/Artifact Registry on Azure/GCP)
+        — never write <AWS_ACCOUNT_ID> or any other placeholder.
 
     MANDATORY job.yaml fields:
       spec.backoffLimit: 0

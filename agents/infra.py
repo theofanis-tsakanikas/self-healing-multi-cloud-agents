@@ -108,8 +108,9 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     #   • AWS   → SSM (bootstrap/aws/ssm.tf), read via cloud_get_infra
     #   • Azure → the ACR login server in azure_setup (no SSM)
     #   • GCP   → artifact_registry_url from bootstrap_outputs, else assembled from gcp_setup (no SSM)
-    # cloud_get_infra falls back to .bootstrap_outputs.json for local dev. We never parse
-    # execute_terraform output — the infra agent's terraform makes S3 + IAM, not the registry.
+    # cloud_get_infra falls back to .bootstrap_outputs.json for local dev. This resolution does
+    # NOT rely on terraform output (the infra agent's terraform makes S3 + IAM, not the registry);
+    # a legacy defensive capture from terraform output later in the tool loop is normally a no-op.
     # (`ecr_repository_url` is a legacy name; it holds ANY cloud's registry URL.)
     ecr_repository_url = state.get("ecr_repository_url", "")
     if not ecr_repository_url:
@@ -392,8 +393,9 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         }
 
     # 6. LLM BINDING (Injecting only allowed tools for the current phase)
-    # parallel_tool_calls=False prevents OpenAI from wrapping calls in multi_tool_use.parallel,
-    # which LangChain can misparse and corrupt tool arguments with JSON fragments.
+    # Note: parallel tool calls are NOT explicitly disabled here. If OpenAI ever wraps calls in
+    # multi_tool_use.parallel and LangChain misparses them (corrupting tool args), pass
+    # parallel_tool_calls=False to the bind_tools calls below.
     current_tools = {k: v for k, v in full_tools_map.items() if k in selected_keys}
 
     # Force tool_choice="required" in discovery phase so the LLM cannot skip
@@ -811,12 +813,12 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                 # D. Terraform Provisioning Check
                 if t_name == "execute_terraform" and "apply complete" in result_str.lower():
                     infra_success_detected = True
-                    # Extract ECR repo URL so it's available as a concrete value
-                    # when generating K8s manifests and GHA — no <AWS_ACCOUNT_ID> placeholder needed.
-                    # Pattern is broad: matches any 12-digit.dkr.ecr.*.amazonaws.com/...
-                    # regardless of terraform output key name or quoting style.
-                    # Primary: match the exact terraform output key name.
-                    # Fallback: match any ECR URL pattern (covers renamed outputs).
+                    # LEGACY/DEFENSIVE capture: if an ECR URL ever appears in the terraform
+                    # output, use it. Normally a NO-OP — the infra agent's terraform makes
+                    # S3 + IAM (not the registry), and the authoritative ecr_repository_url is
+                    # already resolved at the top of this node from the bootstrap (SSM/ACR/AR).
+                    # AWS-only pattern; kept as a last-resort override (safe to remove during
+                    # the next infra re-validation).
                     ecr_match = re.search(
                         r'ecr_repository_url\s*=\s*"([^"]+)"', result_str
                     ) or re.search(
@@ -827,7 +829,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                         ecr_repository_url = ecr_match.group(1).rstrip("/")
                         logger.info(f"📦 ECR repo URL captured: {ecr_repository_url}")
                     else:
-                        logger.warning("⚠️ ECR repo URL not found in terraform output — LLM will need to extract it manually.")
+                        logger.debug("ECR URL not in terraform output (expected) — using the bootstrap/SSM value resolved at the top of this node.")
 
             except Exception as e:
                 logger.error(f"Tool {t_name} execution error: {e}")
