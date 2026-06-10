@@ -55,6 +55,7 @@ on:
           - eu_sales
           - global_marketing
           - us_crm
+          - sales_lakehouse
           - all
         default: eu_sales
 

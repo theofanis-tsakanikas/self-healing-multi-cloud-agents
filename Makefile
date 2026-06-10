@@ -23,6 +23,12 @@ bootstrap-gcp: ## Provision baseline GCP infrastructure (GKE + Cloud SQL + AR)
 	terraform -chdir=bootstrap/gcp init
 	terraform -chdir=bootstrap/gcp apply
 
+.PHONY: bootstrap-databricks
+bootstrap-databricks: ## Provision baseline Databricks infrastructure (workspace + Unity Catalog + jobs cluster + SQL warehouse + source RDS)
+	@echo "Provisioning Databricks baseline infrastructure..."
+	terraform -chdir=bootstrap/databricks init
+	terraform -chdir=bootstrap/databricks apply
+
 .PHONY: destroy-aws
 destroy-aws: ## DANGER: Tear down all baseline AWS infrastructure
 	@echo "Destroying baseline AWS infrastructure..."
@@ -40,6 +46,13 @@ destroy-gcp: ## DANGER: Tear down all baseline GCP infrastructure
 	@echo "Destroying baseline GCP infrastructure..."
 	terraform -chdir=bootstrap/gcp init
 	terraform -chdir=bootstrap/gcp destroy
+
+.PHONY: destroy-databricks
+destroy-databricks: ## DANGER: Databricks teardown — use the destroy.yml workflow (two-phase: force_destroy/force_update flags, then destroy)
+	@echo "Databricks teardown is a TWO-PHASE process (runtime-created managed tables need"
+	@echo "force_destroy/force_update flags applied into state before terraform destroy)."
+	@echo "Use the supported path: GitHub Actions → destroy.yml → cloud: databricks"
+	@exit 1
 
 ## Single source of truth: pyproject.toml
 ## Before running: cp .env.example .env  (then fill in your credentials)
@@ -85,7 +98,7 @@ install: ## Install all dependencies using uv
 	uv sync
 
 .PHONY: ingest
-ingest: ## Sync Global Knowledge Base (all 3 clouds) to Pinecone
+ingest: ## Sync Knowledge Base standards (all 4 providers) to Pinecone
 	@echo "Syncing Global Standards to Pinecone..."
 	$(PYTHON) $(SCRIPTS_DIR)/ingest_to_pinecone.py --path knowledge_base
 
@@ -102,10 +115,11 @@ run: ## Run the Self-Healing Agent. Usage: make run p=eu_sales
 	$(PYTHON) $(APP) $(p)
 
 .PHONY: run-all
-run-all: ## Run all three pipelines sequentially
+run-all: ## Run all four pipelines sequentially (AWS, Azure, GCP, Databricks)
 	@make run p=eu_sales
 	@make run p=us_crm
 	@make run p=global_marketing
+	@make run p=sales_lakehouse
 
 .PHONY: demo-aws
 demo-aws: ## Full AWS demo: ingest + chaos + run eu_sales
@@ -124,6 +138,12 @@ demo-gcp: ## Full GCP demo: ingest + chaos + run global_marketing
 	@make ingest
 	@make chaos target=global_marketing db_type=mysql rows=100
 	@make run p=global_marketing
+
+.PHONY: demo-databricks
+demo-databricks: ## Full Databricks demo: ingest + chaos + run sales_lakehouse
+	@make ingest
+	@make chaos target=sales_lakehouse db_type=postgres rows=100
+	@make run p=sales_lakehouse
 
 .PHONY: test
 test: ## Run the full test suite
