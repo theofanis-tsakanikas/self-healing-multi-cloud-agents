@@ -72,8 +72,6 @@ segment, and any mismatch makes Terraform read a DIFFERENT (empty) state on the 
 it tries to re-create the already-existing bucket → `Error 409: ... you already own it`.
 ```hcl
 provider "google" {
-
-provider "google" {
   project = var.project_id
   region  = var.region
 }

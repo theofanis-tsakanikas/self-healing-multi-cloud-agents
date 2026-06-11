@@ -69,12 +69,13 @@ Use two Grafana template variables so the user can filter interactively by cloud
 
 **Why both labels matter:** `cloud_provider` groups panels per cloud (aws/azure/gcp). `project_id` filters by pipeline run session. Without `cloud_provider`, the cross-cloud dashboard cannot distinguish EU Sales (AWS) from US CRM (Azure) when both are visible.
 
-## Alerting
-Use the pipeline name (not `project_id`) in alert names and annotations:
-- `"name": "EU Sales — Data Silence Alert"` ✅
-- `"name": "EU_SALES-20260505-0443 — Data Silence Alert"` ❌
-
-Alert labels MUST include both `pipeline` and `cloud_provider` static labels so PagerDuty/Slack notifications show which cloud is affected.
+## Alerting — NOT provisioned (do not emit)
+Alert rules are **not** part of `monitoring_specs.json`: in Grafana 9+ unified alerting, rules
+are provisioned separately from the dashboard JSON, and this pipeline provisions none — a
+top-level `"alerting"` object in the dashboard JSON is silently ignored by Grafana and must
+NOT be emitted (data-silence is checked operationally via the Last Success panel). If alert
+provisioning is ever added, name rules by the pipeline (never `project_id`) and label them
+with `pipeline` + `cloud_provider`.
 
 ## Full Example Structure
 ```json
@@ -210,14 +211,6 @@ Alert labels MUST include both `pipeline` and `cloud_provider` static labels so 
         }
       ]
     }
-  ],
-  "alerting": {
-    "name": "EU Sales — Data Silence Alert",
-    "condition": "no data for 60 minutes",
-    "severity": "critical",
-    "for": "60m",
-    "labels": { "severity": "critical", "pipeline": "eu-sales", "cloud_provider": "aws" },
-    "annotations": { "summary": "No data received for EU Sales pipeline (AWS) in the last 60 minutes." }
-  }
+  ]
 }
 ```

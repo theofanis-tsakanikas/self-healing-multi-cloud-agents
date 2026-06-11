@@ -374,7 +374,13 @@ fails ("Failed to get existing workspaces / NoCredentialProviders").
 name: Deploy Pipeline
 on:
   push:
-    paths: ['scripts/**', 'sql/**', 'terraform/**']
+    # scripts/pipe_*.py — NOT scripts/** (scripts/ also holds agent-side utilities;
+    # a lint touch to those must not redeploy — same rule as Section 1).
+    paths: ['scripts/pipe_*.py', 'sql/**', 'terraform/**']
+
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest

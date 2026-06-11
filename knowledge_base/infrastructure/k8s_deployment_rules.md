@@ -552,7 +552,7 @@ This applies to ALL derived names: `<project_id>-job`, `<project_id>-db-credenti
 
 ## 6. OBSERVABILITY
 - **Labels:** Every resource must have `project_id` and `component` labels.
-- **Heartbeat:** The pipeline script must log a final "Processing Complete" message for the Medic agent to track success.
+- **Run-success signal:** the Medic tracks success from the deploy workflow's final `echo "Deployment Complete"` step (see the CI/CD standard) — the pipeline script itself only needs its normal completion log; no special heartbeat string is required in the script.
 
 ---
 
