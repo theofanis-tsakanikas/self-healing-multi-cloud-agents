@@ -322,7 +322,6 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     # instead of writing the one still missing (e.g. requirements.txt).
     any_tool_error = False
     patch_clean_files: set = set()  # tracks files successfully patched+validated across all iters
-    last_generated_code = state.get("generated_code", "")
     new_messages = []
 
     for _iter in range(3):
@@ -418,8 +417,6 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                             result = tool_func.invoke(tool_args)
                             if filename not in written_files:
                                 written_files.append(filename)
-                            if filename.endswith(".py"):
-                                last_generated_code = tool_args.get("content", "")
                             all_skipped_this_iter = False
 
                             # AUTO-VALIDATE immediately after every successful write.
@@ -572,7 +569,6 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     return {
         "messages": new_messages,
         "written_files": written_files,
-        "generated_code": last_generated_code,
         "collected_specs": collected_specs,
         "schema_discovered": schema_discovered,
         "target_infra": target_infra_name,

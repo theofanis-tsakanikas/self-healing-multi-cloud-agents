@@ -10,7 +10,6 @@ def _make_state(**kwargs):
     base = {
         "task": "test",
         "messages": [HumanMessage(content="ok")],
-        "generated_code": "",
         "error_log": "",
         "project_id": "test_proj",
         "config_path": "",

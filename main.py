@@ -62,7 +62,6 @@ def _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
     initial_state = {
         "task": task,
         "messages": [],
-        "generated_code": "",
         "error_log": "",
         "project_id": unique_project_id,
         "config_path": "",
