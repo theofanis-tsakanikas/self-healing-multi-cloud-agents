@@ -3,7 +3,7 @@ import logging
 import json
 from pathlib import Path
 from dotenv import load_dotenv
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from agents.llm_factory import get_llm
 
@@ -170,6 +170,7 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     schema_discovered = state.get("schema_discovered", False)
 
     missing_artifacts = []
+    codegen_errors: list[str] = []  # deterministic-generation failures (generator bugs)
 
     # 3-Phase Gate (fix mode bypasses all gates)
     if is_fix_mode:
@@ -216,6 +217,17 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
         # validate_generated_code is NOT in the LLM's tool list — it runs automatically
         # in Python after every write_project_file call (see auto-validation block below).
         allowed_tool_names = ["write_project_file"]
+
+        # Code-owned artifacts FIRST (requirements.txt, monitoring_specs.json; Lakeview
+        # for databricks): generated deterministically from config — agents/codegen.py —
+        # so they never appear in the LLM's missing list. The LLM keeps what needs
+        # judgment: the pipeline script and the SQL DDL (schema + NL rules → code).
+        if not is_fix_mode:
+            from agents.codegen import ensure_architect_artifacts
+            _gen_files, _gen_errors = ensure_architect_artifacts(
+                pipe_conf, db_conf, infra_conf, written_files)
+            written_files.extend(_gen_files)
+            codegen_errors.extend(_gen_errors)
 
         # Compute missing artifacts using exact filenames/paths so the LLM
         # passes the correct `filename` argument without ambiguity.
@@ -550,6 +562,16 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
             break  # Not in implementation phase — one iteration is enough
 
     # 8. STATUS UPDATE & RETURN
+    # A codegen validation failure is a GENERATOR bug — surface it with the standard
+    # VALIDATION FAILED marker so the medic's evidence gate accepts it.
+    if codegen_errors:
+        any_tool_error = True
+        new_messages.append(HumanMessage(content=(
+            "DETERMINISTIC CODEGEN — VALIDATION FAILED for code-generated artifact(s); "
+            "the permanent fix is in agents/codegen.py, a patch only unblocks this run:\n"
+            + "\n\n".join(codegen_errors)
+        )))
+
     still_missing_final = _resolve_artifacts(pipe_conf, written_files)
 
     # In fix mode: patch+auto-validation is the primary success signal.

@@ -197,6 +197,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
 
     selected_keys = []
     orchestration_phase_instruction = None
+    codegen_errors: list[str] = []  # deterministic-generation failures (generator bugs)
 
     # --- GATE 1: KNOWLEDGE DISCOVERY ---
     if not has_all_standards:
@@ -221,25 +222,19 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                 selected_keys = ["execute_terraform"]
             logger.info("🧱 Databricks GATE: Terraform phase.")
 
-        elif not github_action_ready or medic_triggered_fix:
-            selected_keys = ["generate_github_action"]
-            orchestration_phase_instruction = (
-                "CURRENT OPERATIONAL PHASE: DATABRICKS CI/CD. Generate the GitHub Actions "
-                "workflow following the Databricks module in the CI/CD standard (§3.5) VERBATIM: "
-                "actions/checkout + setup-terraform + databricks/setup-cli, upload the Spark "
-                "script to DBFS (databricks fs cp), then `databricks jobs run-now` the job + poll "
-                "the run to SUCCESS. The secret scope + databricks_job terraform is applied by the "
-                "agent's execute_terraform (NOT this workflow); it reads the source DB connection "
-                "from SSM (data aws_ssm_parameter), so there are NO TF_VAR_db_* and NO db_* "
-                "terraform variables. Auth = DATABRICKS_HOST + DATABRICKS_TOKEN. "
-                "NO docker build, NO kubectl, NO Dockerfile/K8s — Databricks manages its compute."
-            )
-            logger.info("🧱 Databricks GATE: CI/CD phase.")
-
         else:
+            # The deploy workflow is CODE-OWNED (agents/codegen.py — the §3.5 template
+            # had zero open inputs, the LLM was copying it). Generate + validate it
+            # deterministically, then the only LLM step left is the push.
+            if not medic_triggered_fix and not github_action_ready:
+                from agents.codegen import ensure_infra_artifacts
+                _gen, _cg_err = ensure_infra_artifacts(
+                    pipeline_conf, infra_conf, ecr_repository_url, written_files)
+                written_files = written_files + _gen
+                codegen_errors.extend(_cg_err)
             if not state.get("github_done", False) or medic_triggered_fix:
                 selected_keys = ["push_to_github"]
-            logger.info("🧱 Databricks GATE: Push phase.")
+            logger.info("🧱 Databricks GATE: Push phase (workflow code-generated).")
 
     # --- GATE 2: INFRASTRUCTURE IMPLEMENTATION ---
     else:
@@ -263,6 +258,17 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
 
         # Step B: Orchestration & CI/CD
         else:
+            # CODE-OWNED orchestration artifacts first: Dockerfile, the six K8s
+            # manifests and the deploy workflow are generated deterministically from
+            # config (agents/codegen.py) — fixed topology, zero open inputs. The LLM
+            # branch below remains only as the fix-mode / fallback path.
+            if not medic_triggered_fix:
+                from agents.codegen import ensure_infra_artifacts
+                _gen, _cg_err = ensure_infra_artifacts(
+                    pipeline_conf, infra_conf, ecr_repository_url, written_files)
+                written_files = written_files + _gen
+                codegen_errors.extend(_cg_err)
+
             k8s_required = infra_conf.get(
                 "required_k8s_manifests",
                 DEFAULT_REQUIRED_K8S_MANIFESTS,
@@ -537,12 +543,16 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     new_messages = [response]
     updated_files = list(written_files)
     infra_success_detected = tf_done
-    validation_errors: list[str] = []  # Accumulated for error_log → Medic signal
+    validation_errors: list[str] = list(codegen_errors)  # codegen failures + tool-loop failures → Medic signal
+    if codegen_errors:
+        any_tool_error_from_codegen = True
+    else:
+        any_tool_error_from_codegen = False
 
     github_success = state.get("github_done", False)
     push_attempted = False  # True after first push_to_github call — blocks same-turn retry
     last_push_sha = state.get("last_push_sha", "")
-    any_tool_error = False
+    any_tool_error = any_tool_error_from_codegen
 
     if response.tool_calls:
         for tool_call in response.tool_calls:

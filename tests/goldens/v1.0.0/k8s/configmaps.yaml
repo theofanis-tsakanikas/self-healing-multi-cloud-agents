@@ -1,0 +1,162 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trino-sql-config
+  namespace: analytics
+  labels:
+    project_id: multi-cloud-self-healing-agent
+data:
+  setup_trino.sql: |-
+    CREATE SCHEMA IF NOT EXISTS hive.marketing_global;
+    DROP TABLE IF EXISTS hive.marketing_global.pipe_mkt_global_to_gcp;
+    CREATE TABLE hive.marketing_global.pipe_mkt_global_to_gcp (
+        campaign_id VARCHAR,
+        platform_name VARCHAR,
+        ad_spend DECIMAL(18,2),
+        clicks BIGINT,
+        impressions DOUBLE,
+        event_timestamp TIMESTAMP,
+        is_suspicious BOOLEAN,
+        run_date DATE
+    ) WITH (
+        format = 'PARQUET',
+        external_location = 'gs://global-marketing-insights-data/processed/',
+        partitioned_by = ARRAY['run_date']
+    );
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hive-catalog-config
+  namespace: analytics
+  labels:
+    project_id: multi-cloud-self-healing-agent
+data:
+  hive.properties: |
+    connector.name=hive
+    hive.metastore=file
+    hive.metastore.catalog.dir=gs://global-marketing-insights-data/metastore/
+    hive.gcs.use-access-token=false
+    hive.allow-drop-table=true
+    hive.allow-rename-table=true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dash-config
+  namespace: monitoring
+  labels:
+    project_id: multi-cloud-self-healing-agent
+data:
+  dashboard-provider.yaml: |
+    apiVersion: 1
+    providers:
+    - name: default
+      orgId: 1
+      folder: ''
+      type: file
+      disableDeletion: false
+      editable: true
+      options:
+        path: /etc/grafana/provisioning/dashboards
+  monitoring_specs.json: "{\n  \"uid\": \"global-marketing-data-observability\",\n\
+    \  \"title\": \"Global Marketing Data Observability\",\n  \"schemaVersion\": 37,\n\
+    \  \"version\": 1,\n  \"refresh\": \"5m\",\n  \"time\": { \"from\": \"now-6h\"\
+    , \"to\": \"now\" },\n  \"tags\": [\"data-pipeline\", \"global-marketing\", \"\
+    gcp\"],\n  \"templating\": {\n    \"list\": [\n      {\n        \"name\": \"cloud_provider\"\
+    ,\n        \"type\": \"query\",\n        \"datasource\": \"Prometheus\",\n   \
+    \     \"query\": \"label_values(pipeline_rows_processed_total, cloud_provider)\"\
+    ,\n        \"refresh\": 2,\n        \"includeAll\": true,\n        \"multi\":\
+    \ true,\n        \"label\": \"Cloud\"\n      },\n      {\n        \"name\": \"\
+    project_id\",\n        \"type\": \"query\",\n        \"datasource\": \"Prometheus\"\
+    ,\n        \"query\": \"label_values(pipeline_rows_processed_total{cloud_provider=~\\\
+    \"$cloud_provider\\\"}, project_id)\",\n        \"refresh\": 2,\n        \"includeAll\"\
+    : true,\n        \"label\": \"Pipeline Run\"\n      }\n    ]\n  },\n  \"panels\"\
+    : [\n    {\n      \"id\": 1,\n      \"title\": \"Record Count\",\n      \"type\"\
+    : \"stat\",\n      \"datasource\": \"Prometheus\",\n      \"gridPos\": { \"x\"\
+    : 0, \"y\": 0, \"w\": 12, \"h\": 8 },\n      \"fieldConfig\": { \"defaults\":\
+    \ { \"color\": { \"mode\": \"fixed\", \"fixedColor\": \"green\" }, \"graphMode\"\
+    : \"area\" } },\n      \"targets\": [\n        {\n          \"expr\": \"pipeline_rows_processed_total{cloud_provider=~\\\
+    \"$cloud_provider\\\", project_id=~\\\"$project_id\\\"}\",\n          \"legendFormat\"\
+    : \"{{cloud_provider}} / {{project_id}}\"\n        }\n      ]\n    },\n    {\n\
+    \      \"id\": 2,\n      \"title\": \"Last Success\",\n      \"type\": \"stat\"\
+    ,\n      \"datasource\": \"Prometheus\",\n      \"gridPos\": { \"x\": 12, \"y\"\
+    : 0, \"w\": 12, \"h\": 8 },\n      \"fieldConfig\": {\n        \"defaults\": {\n\
+    \          \"unit\": \"time:YYYY-MM-DD HH:mm:ss\",\n          \"color\": { \"\
+    mode\": \"fixed\", \"fixedColor\": \"blue\" }\n        }\n      },\n      \"targets\"\
+    : [\n        {\n          \"expr\": \"pipeline_last_success_timestamp{cloud_provider=~\\\
+    \"$cloud_provider\\\", project_id=~\\\"$project_id\\\"} * 1000\",\n          \"\
+    legendFormat\": \"{{cloud_provider}} / {{project_id}}\"\n        }\n      ]\n\
+    \    },\n    {\n      \"id\": 3,\n      \"title\": \"Rejection Rate\",\n     \
+    \ \"type\": \"stat\",\n      \"datasource\": \"Prometheus\",\n      \"gridPos\"\
+    : { \"x\": 0, \"y\": 8, \"w\": 12, \"h\": 8 },\n      \"options\": { \"colorMode\"\
+    : \"value\", \"graphMode\": \"none\", \"textMode\": \"value\" },\n      \"fieldConfig\"\
+    : {\n        \"defaults\": {\n          \"unit\": \"percent\",\n          \"min\"\
+    : 0,\n          \"max\": 100,\n          \"thresholds\": { \"mode\": \"absolute\"\
+    , \"steps\": [\n            { \"color\": \"green\", \"value\": null },\n     \
+    \       { \"color\": \"yellow\", \"value\": 20 },\n            { \"color\": \"\
+    red\", \"value\": 50 }\n          ] }\n        }\n      },\n      \"targets\"\
+    : [\n        {\n          \"expr\": \"pipeline_rows_rejected_total{cloud_provider=~\\\
+    \"$cloud_provider\\\", project_id=~\\\"$project_id\\\"} / clamp_min(pipeline_rows_processed_total{cloud_provider=~\\\
+    \"$cloud_provider\\\", project_id=~\\\"$project_id\\\"} + pipeline_rows_rejected_total{cloud_provider=~\\\
+    \"$cloud_provider\\\", project_id=~\\\"$project_id\\\"}, 1) * 100\",\n       \
+    \   \"legendFormat\": \"{{cloud_provider}} / {{project_id}}\"\n        }\n   \
+    \   ]\n    },\n    {\n      \"id\": 4,\n      \"title\": \"Run Duration\",\n \
+    \     \"type\": \"gauge\",\n      \"datasource\": \"Prometheus\",\n      \"gridPos\"\
+    : { \"x\": 12, \"y\": 8, \"w\": 12, \"h\": 8 },\n      \"fieldConfig\": {\n  \
+    \      \"defaults\": {\n          \"unit\": \"s\",\n          \"thresholds\":\
+    \ { \"mode\": \"absolute\", \"steps\": [\n            { \"color\": \"green\",\
+    \ \"value\": null },\n            { \"color\": \"yellow\", \"value\": 60 },\n\
+    \            { \"color\": \"red\", \"value\": 120 }\n          ] }\n        }\n\
+    \      },\n      \"targets\": [\n        {\n          \"expr\": \"pipeline_duration_seconds{cloud_provider=~\\\
+    \"$cloud_provider\\\", project_id=~\\\"$project_id\\\"}\",\n          \"legendFormat\"\
+    : \"{{cloud_provider}} / {{project_id}}\"\n        }\n      ]\n    },\n    {\n\
+    \      \"id\": 5,\n      \"title\": \"Rejections by Reason\",\n      \"type\"\
+    : \"piechart\",\n      \"datasource\": \"Prometheus\",\n      \"gridPos\": { \"\
+    x\": 0, \"y\": 16, \"w\": 24, \"h\": 8 },\n      \"options\": {\n        \"pieType\"\
+    : \"pie\",\n        \"legend\": { \"displayMode\": \"table\", \"placement\": \"\
+    right\", \"values\": [\"value\", \"percent\"] },\n        \"reduceOptions\": {\
+    \ \"values\": false, \"calcs\": [\"lastNotNull\"] }\n      },\n      \"targets\"\
+    : [\n        {\n          \"expr\": \"pipeline_rows_rejected_by_reason{cloud_provider=~\\\
+    \"$cloud_provider\\\", project_id=~\\\"$project_id\\\"}\",\n          \"legendFormat\"\
+    : \"{{reason}}\"\n        }\n      ]\n    }\n  ],\n  \"alerting\": {\n    \"name\"\
+    : \"Global Marketing \u2014 Data Silence Alert\",\n    \"condition\": \"no data\
+    \ for 60 minutes\",\n    \"severity\": \"critical\",\n    \"for\": \"60m\",\n\
+    \    \"labels\": { \"severity\": \"critical\", \"pipeline\": \"global-marketing\"\
+    , \"cloud_provider\": \"gcp\" },\n    \"annotations\": { \"summary\": \"No data\
+    \ received for Global Marketing pipeline (GCP) in the last 60 minutes.\" }\n \
+    \ }\n}"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource-config
+  namespace: monitoring
+  labels:
+    project_id: multi-cloud-self-healing-agent
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus.monitoring.svc.cluster.local:9090
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+  labels:
+    project_id: multi-cloud-self-healing-agent
+data:
+  prometheus.yml: |-
+    global:
+      scrape_interval: 15s
+    scrape_configs:
+      - job_name: pushgateway
+        static_configs:
+          - targets: ['pushgateway.monitoring.svc.cluster.local:9091']
+        honor_labels: true
