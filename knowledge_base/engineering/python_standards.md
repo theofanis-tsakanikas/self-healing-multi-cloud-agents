@@ -8,7 +8,7 @@ last_reviewed: 2026-06-11
 
 # STANDARD: PYTHON DATA PIPELINES
 All Python scripts generated for data engineering must follow these standards exactly.
-After writing any `.py` file, you MUST call `validate_generated_code` on it — if it returns errors, fix them before proceeding.
+After writing any `.py` file, automatic validation runs (`validate_generated_code`, in Python — it is NOT an LLM tool call). If the result reports errors, fix them and rewrite the file before proceeding.
 
 ---
 
