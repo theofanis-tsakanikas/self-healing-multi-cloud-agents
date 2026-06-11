@@ -59,6 +59,8 @@ resource "databricks_secret_scope" "pipeline" {
 }
 
 # DB connection from SSM (published by bootstrap/databricks/ssm.tf). One source of truth.
+# The /multi-cloud-self-healing-agent/ SSM prefix is the PROJECT CONVENTION (the namespace the
+# bootstrap publishes under) — in a different installation change it together with the bootstrap.
 data "aws_ssm_parameter" "db_host"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_host" }
 data "aws_ssm_parameter" "db_name"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_name" }
 data "aws_ssm_parameter" "db_user"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_user" }

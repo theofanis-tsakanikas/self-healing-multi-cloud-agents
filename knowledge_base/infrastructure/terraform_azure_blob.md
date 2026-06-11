@@ -62,10 +62,10 @@ terraform {
   }
 
   backend "azurerm" {
-    resource_group_name  = "multi-cloud-agent-rg"
-    storage_account_name = "multicloudagenttfstate"
-    container_name       = "tfstate"
-    key                  = "azure/us-crm-insights/terraform.tfstate"   # = CLOUD_SETUP.state_key
+    resource_group_name  = "<resource_group_name>"     # = CLOUD_SETUP.resource_group_name
+    storage_account_name = "<state_storage_account>"   # = CLOUD_SETUP.state_storage_account
+    container_name       = "<state_container>"         # = CLOUD_SETUP.state_container
+    key                  = "<state_key>"               # = CLOUD_SETUP.state_key (e.g. azure/us-crm-insights/terraform.tfstate)
   }
 }
 
@@ -76,9 +76,11 @@ provider "azurerm" {
 
 **`providers.tf` MUST contain BOTH blocks — the `terraform {}` block AND the `provider "azurerm" { features {} }` block.** The provider block is NOT optional: omitting it (or its `features {}`) makes `terraform apply` fail with `Invalid provider configuration` / `Insufficient features blocks: At least 1 "features" blocks are required`. Never generate only the `terraform {}` block and stop. (Auth itself comes from the ARM_* env vars the CI exports — `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_SUBSCRIPTION_ID`, `ARM_TENANT_ID` — for both the backend and the provider; never hardcode `subscription_id`.)
 
-**Backend RG note:** `resource_group_name` MUST be `multi-cloud-agent-rg` — that is where
-bootstrap creates the `multicloudagenttfstate` state storage account. Any other RG name
-(e.g. a separate `…-tfstate-rg`) makes `terraform init` fail with "storage account not found".
+**Backend values come from `CLOUD_SETUP` — copy them VERBATIM, never invent them.** The
+state storage account lives in the bootstrap resource group (`CLOUD_SETUP.resource_group_name`);
+substituting any other RG name (e.g. a separate `…-tfstate-rg`) makes `terraform init` fail
+with "storage account not found", and a self-derived `key` reads an EMPTY state → 409
+"already exists" on apply (see the `state_key` rule above).
 
 **State Prerequisite:** The state storage account and container must be created manually once before running `terraform init`. They are NOT managed by this Terraform configuration to avoid circular dependency.
 

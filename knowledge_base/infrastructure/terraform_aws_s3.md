@@ -61,7 +61,7 @@ terraform {
     bucket         = "<concrete-bucket-name>"
     key            = "terraform/<pipeline-name>/terraform.tfstate"
     region         = "<concrete-region>"
-    dynamodb_table = "terraform-state-lock"
+    dynamodb_table = "terraform-state-lock"   # project convention — the lock table bootstrap creates
   }
 }
 
@@ -199,6 +199,8 @@ resource "aws_iam_policy" "s3_access_policy" {
           "ssm:GetParameters",
           "ssm:GetParametersByPath"
         ]
+        # The /multi-cloud-self-healing-agent/ prefix is the project's SSM namespace
+        # (the same one cloud_get() reads) — change it only together with the bootstrap.
         Resource = "arn:aws:ssm:*:*:parameter/multi-cloud-self-healing-agent/*"
       }
     ]

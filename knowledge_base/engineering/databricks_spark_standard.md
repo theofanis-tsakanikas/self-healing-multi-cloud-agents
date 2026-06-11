@@ -165,16 +165,17 @@ if __name__ == "__main__":
 ## Unity Catalog DDL (`sql/setup_unity_catalog.sql`)
 Delta + Unity Catalog syntax — NOT Trino-Hive. Create BOTH the data table and the `_audit` table.
 ```sql
-CREATE CATALOG IF NOT EXISTS multi_cloud_agent_workspace;
-CREATE SCHEMA  IF NOT EXISTS multi_cloud_agent_workspace.raw;
+-- <catalog> / <schema> come from DELTA_DESTINATION.unity_catalog — never invented.
+CREATE CATALOG IF NOT EXISTS <catalog>;
+CREATE SCHEMA  IF NOT EXISTS <catalog>.<schema>;
 
-CREATE TABLE IF NOT EXISTS multi_cloud_agent_workspace.raw.<table_name> (
+CREATE TABLE IF NOT EXISTS <catalog>.<schema>.<table_name> (
     -- columns from read_data_schema ...
     run_date STRING
 ) USING DELTA
 PARTITIONED BY (run_date);
 
-CREATE TABLE IF NOT EXISTS multi_cloud_agent_workspace.raw.<table_name>_audit (
+CREATE TABLE IF NOT EXISTS <catalog>.<schema>.<table_name>_audit (
     run_timestamp TIMESTAMP,
     run_date STRING,
     rows_processed BIGINT,
