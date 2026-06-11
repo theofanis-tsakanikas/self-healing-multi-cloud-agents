@@ -58,3 +58,9 @@ The agent pushes generated artifacts (including `.github/workflows/` files) and 
 Metrics are demo telemetry; a Pushgateway restart drops them (documented in the verification runbook).
 
 - **Production:** durable metrics via remote-write to a managed TSDB (AMP, Azure Monitor, GCM) and alerting rules with paging.
+
+### 7. The knowledge base is uploaded to Pinecone (third-party SaaS)
+`knowledge_base/*.md` is embedded and stored in Pinecone (full documents, including their text in metadata) so the agents can retrieve standards at generation time. The corpus is audited to contain **no credentials** — but it does carry non-sensitive environment details (resource-naming conventions, the project's SSM namespace, backend/state conventions).
+
+- **Why:** RAG over the org's own engineering standards is the core mechanism; the content is classification-level *internal*, not *secret*.
+- **Production:** a self-hosted or VPC-peered vector store (e.g. pgvector, OpenSearch), or a Pinecone tier with CMEK/private networking; keep secrets out of standards as a hard rule either way (enforced here by gitleaks in CI and by the credential-access policy in generated code).

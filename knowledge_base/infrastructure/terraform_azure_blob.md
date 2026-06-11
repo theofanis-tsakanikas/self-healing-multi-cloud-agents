@@ -1,3 +1,11 @@
+---
+id: terraform-azure-blob
+applies_to: azure
+primary_consumer: infra-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
+enforced_by: validate_generated_code (safety net) + agent prompts
+last_reviewed: 2026-06-11
+---
+
 # STANDARD: TERRAFORM AZURE ADLS GEN2 & BACKEND
 This standard defines the mandatory configuration for Azure Storage (ADLS Gen2) resources and Terraform state management.
 

@@ -1,3 +1,11 @@
+---
+id: terraform-databricks
+applies_to: databricks
+primary_consumer: infra-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
+enforced_by: validate_generated_code (safety net) + agent prompts
+last_reviewed: 2026-06-11
+---
+
 # STANDARD: TERRAFORM — DATABRICKS PIPELINE (Delta + Unity Catalog + Jobs)
 
 This standard governs the **pipeline-level** Terraform for a Databricks pipeline

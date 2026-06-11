@@ -1,3 +1,11 @@
+---
+id: databricks-spark-standard
+applies_to: databricks
+primary_consumer: architect-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
+enforced_by: validate_generated_code (safety net) + agent prompts
+last_reviewed: 2026-06-11
+---
+
 # STANDARD: DATABRICKS PYSPARK + DELTA PIPELINES
 
 For pipelines whose `target_infra_config.provider` is **databricks**. This REPLACES the

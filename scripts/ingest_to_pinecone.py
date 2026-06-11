@@ -1,4 +1,5 @@
 import os
+import datetime
 import yaml
 import argparse
 import logging
@@ -86,7 +87,8 @@ def upload_file_to_pinecone(file_path):
                 "content": raw_content,
                 "project_id": project_id,
                 "type": "standard", # Label used by the Medic
-                "last_updated": "2026-04-23" # Optional timestamp
+                # Real file mtime — a hardcoded date here silently lies about staleness.
+                "last_updated": datetime.date.fromtimestamp(path_obj.stat().st_mtime).isoformat(),
             }
 
             # 3. UPSERT TO ENGINEERING-STANDARDS

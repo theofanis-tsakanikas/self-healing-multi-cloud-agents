@@ -1,3 +1,11 @@
+---
+id: k8s-deployment-rules
+applies_to: aws, azure, gcp (object-storage)
+primary_consumer: infra-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
+enforced_by: validate_generated_code (safety net) + agent prompts
+last_reviewed: 2026-06-11
+---
+
 # STANDARD: KUBERNETES DEPLOYMENT & ORCHESTRATION
 This standard defines the mandatory structure and security protocols for deploying the Data Fabric stack (Trino, Grafana, and Data Jobs).
 
@@ -542,6 +550,8 @@ This applies to ALL derived names: `<project_id>-job`, `<project_id>-db-credenti
 ---
 
 ## 5. SECURITY & RESOURCE CONTROL
+
+- **Pinned image versions** (`trinodb/trino:403`, `grafana/grafana:10.4.2`, `prom/prometheus:v2.51.0`, `prom/pushgateway:v1.8.0`) are mirrored in `agents/constants.py:K8S_PINNED_IMAGES`, which the validator enforces — when bumping a version, update BOTH this standard and that constant, never just one.
 
 - **IRSA:** Always specify `serviceAccountName`. Never use node-level IAM roles.
 - **Resources:** - Jobs: Minimum 1Gi RAM / 500m CPU.

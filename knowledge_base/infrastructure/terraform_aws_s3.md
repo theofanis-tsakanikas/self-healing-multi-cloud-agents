@@ -1,3 +1,11 @@
+---
+id: terraform-aws-s3
+applies_to: aws
+primary_consumer: infra-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
+enforced_by: validate_generated_code (safety net) + agent prompts
+last_reviewed: 2026-06-11
+---
+
 # STANDARD: TERRAFORM AWS S3 & BACKEND
 This standard defines the mandatory configuration for AWS S3 resources and Terraform state management to ensure compliance and avoid provider deprecation warnings.
 

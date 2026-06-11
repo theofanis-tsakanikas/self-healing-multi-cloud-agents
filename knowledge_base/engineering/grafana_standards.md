@@ -1,3 +1,11 @@
+---
+id: grafana-standards
+applies_to: aws, azure, gcp (object-storage)
+primary_consumer: architect-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
+enforced_by: validate_generated_code (safety net) + agent prompts
+last_reviewed: 2026-06-11
+---
+
 # STANDARD: GRAFANA DASHBOARD GENERATION
 When generating `dashboards/monitoring_specs.json`, ensure the following:
 

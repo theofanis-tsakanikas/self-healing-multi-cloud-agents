@@ -1,3 +1,11 @@
+---
+id: dockerfile-standard
+applies_to: aws, azure, gcp (object-storage)
+primary_consumer: infra-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
+enforced_by: validate_generated_code (safety net) + agent prompts
+last_reviewed: 2026-06-11
+---
+
 # STANDARD: DOCKERFILE FOR DATA PIPELINE IMAGES
 
 ## MANDATORY STRUCTURE

@@ -1,3 +1,11 @@
+---
+id: python-standards
+applies_to: aws, azure, gcp (object-storage)
+primary_consumer: architect-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
+enforced_by: validate_generated_code (safety net) + agent prompts
+last_reviewed: 2026-06-11
+---
+
 # STANDARD: PYTHON DATA PIPELINES
 All Python scripts generated for data engineering must follow these standards exactly.
 After writing any `.py` file, you MUST call `validate_generated_code` on it — if it returns errors, fix them before proceeding.

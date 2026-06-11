@@ -1,3 +1,11 @@
+---
+id: terraform-gcp-bucket
+applies_to: gcp
+primary_consumer: infra-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
+enforced_by: validate_generated_code (safety net) + agent prompts
+last_reviewed: 2026-06-11
+---
+
 # STANDARD: TERRAFORM GCP CLOUD STORAGE & BACKEND
 This standard defines the mandatory configuration for GCP Cloud Storage (GCS) resources and Terraform state management.
 

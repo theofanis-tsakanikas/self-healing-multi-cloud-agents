@@ -1,5 +1,19 @@
+---
+id: cicd-standards
+applies_to: all
+primary_consumer: infra-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
+enforced_by: validate_generated_code (safety net) + agent prompts
+last_reviewed: 2026-06-11
+---
+
 # STANDARD: GITHUB ACTIONS CI/CD PIPELINES (MULTI-CLOUD)
 This standard defines the mandatory, modular structure for GitHub Actions workflows. The pipeline is split into a provider-agnostic core and cloud-specific authentication modules.
+
+> **Placeholder notation in this standard:** `{{name}}` and `<name>` are BOTH context
+> placeholders — substitute the concrete value from the orchestration context (CLOUD_SETUP,
+> PROJECT_METADATA, the resolved `ecr_repository_url`, …) before emitting the file. Neither
+> form may ever appear in generated output. They are unrelated to the GitHub Actions `${{ }}`
+> expression syntax below, which IS emitted literally.
 
 > **CRITICAL — GitHub Actions Expression Syntax:** All GitHub Actions expressions MUST use `${{ }}` with the `$` prefix — never bare `{{ }}`. Writing `{{ github.sha }}` instead of `${{ github.sha }}` is a syntax error that causes the literal string `{{ github.sha }}` to appear in the command, breaking Docker builds and all downstream steps. Every occurrence of `secrets.*`, `github.*`, `env.*`, and `matrix.*` in the generated YAML must be wrapped in `${{ }}`.
 

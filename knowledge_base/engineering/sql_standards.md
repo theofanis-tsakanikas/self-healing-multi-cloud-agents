@@ -1,3 +1,11 @@
+---
+id: sql-standards
+applies_to: aws, azure, gcp (object-storage)
+primary_consumer: architect-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
+enforced_by: validate_generated_code (safety net) + agent prompts
+last_reviewed: 2026-06-11
+---
+
 # STANDARD: TRINO DDL GENERATION
 When generating `setup_trino.sql`, ensure the following:
 
