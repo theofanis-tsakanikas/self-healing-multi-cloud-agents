@@ -271,8 +271,14 @@ metadata:
   annotations:
     eks.amazonaws.com/role-arn: arn:aws:iam::{account_id}:role/{role}"""
     if cloud == "azure":
-        client_id = _tf_output("managed_identity_client_id") or \
-            (cloud_get_infra("azure", "managed_identity_client_id") or "")
+        # Primary: the pipeline terraform's output (it has just applied). Fallbacks try
+        # BOTH key spellings: the pipeline output name and the bootstrap output name
+        # (crm_managed_identity_client_id in .bootstrap_outputs.json for local dev).
+        client_id = (
+            _tf_output("managed_identity_client_id")
+            or (cloud_get_infra("azure", "managed_identity_client_id") or "")
+            or (cloud_get_infra("azure", "crm_managed_identity_client_id") or "")
+        )
         return f"""apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -919,8 +925,12 @@ def _render_workflow_azure(pipe_conf: dict, registry_url: str) -> str:
     rg = setup.get("resource_group_name", "")
     aks = setup.get("aks_cluster_name", "")
     storage = setup.get("storage_account_name", "")
-    acr = registry_url or setup.get("acr_login_server", "")
-    image = f"{acr}/{_rfc1123(pipe_conf.get('pipeline_id', ''))}"
+    # registry_url arrives as the FULL image reference (host/image — infra_node appends
+    # the segment for azure, same as gcp). Derive the bare ACR host only for `az acr login`.
+    image = registry_url or (
+        f"{setup.get('acr_login_server', '')}/{_rfc1123(pipe_conf.get('pipeline_id', ''))}"
+    )
+    acr_host = image.split("/")[0]
     secret_name = f"{_rfc1123(pipe_conf.get('pipeline_id', ''))}-db-credentials"
     return (_WF_HEADER + f"""
       - name: Azure Login
@@ -930,7 +940,7 @@ def _render_workflow_azure(pipe_conf: dict, registry_url: str) -> str:
 
       - name: ACR Login
         run: |
-          REG="$(echo '{acr}' | cut -d'.' -f1)"
+          REG="$(echo '{acr_host}' | cut -d'.' -f1)"
           for i in 1 2 3; do
             az acr login --name "$REG" && break || {{ echo "ACR login attempt $i failed (transient), retrying in 10s..."; sleep 10; }}
           done
@@ -1169,6 +1179,23 @@ def ensure_infra_artifacts(pipe_conf: dict, infra_conf: dict, registry_url: str,
     if not any(".github/workflows" in f.lower() for f in written_files):
         workflow_abs = os.path.join(str(REPO_ROOT), ".github", "workflows",
                                     f"{pipeline_id}_pipeline.yml")
+        # CROSS-TRIGGER GUARD: the repo holds ONE pipeline's artifact set at a time
+        # (k8s/, Dockerfile, requirements.txt are shared paths), so a deploy workflow
+        # left behind by a PREVIOUS pipeline would fire on THIS pipeline's artifact
+        # push and deploy the wrong cloud's manifests to its cluster. Remove every
+        # other generated pipe_*_pipeline.yml; push_to_github stages the deletions
+        # (git add on the workflows dir). Repo-infrastructure workflows
+        # (run_agent/tests/security/...) never match the pipe_* pattern.
+        import glob as _glob
+        for _stale in _glob.glob(os.path.join(str(REPO_ROOT), ".github", "workflows",
+                                              "pipe_*_pipeline.yml")):
+            if os.path.basename(_stale) != f"{pipeline_id}_pipeline.yml":
+                try:
+                    os.remove(_stale)
+                    logger.info(f"🧹 CODEGEN: removed stale deploy workflow "
+                                f"{os.path.basename(_stale)} (cross-trigger guard)")
+                except OSError as _exc:
+                    errors.append(f"{_stale}: stale-workflow removal failed: {_exc}")
         content = render_workflow(pipe_conf, cloud, registry_url, is_databricks)
         try:
             os.makedirs(os.path.dirname(workflow_abs), exist_ok=True)

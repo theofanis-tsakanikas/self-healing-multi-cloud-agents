@@ -235,7 +235,7 @@ class TestWorkflows:
 
     @pytest.mark.parametrize("conf,cloud,registry", [
         (AWS_CONF, "aws", "000000000000.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo"),
-        (AZURE_CONF, "azure", "mcselfhealagentacr.azurecr.io"),
+        (AZURE_CONF, "azure", "mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure"),
         (GCP_CONF, "gcp", GCP_REGISTRY),
     ])
     def test_k8s_workflow_invariants(self, conf, cloud, registry):
@@ -328,3 +328,58 @@ class TestEnsureOrchestrators:
         assert written == [".github/workflows/pipe_sales_lakehouse_pipeline.yml"]
         assert not (tmp_path / "Dockerfile").exists()
         assert not (tmp_path / "k8s").exists()
+
+
+class TestImageContract:
+    """The CI sed contract: the job.yaml image and the workflow's build/push/sed target
+    MUST be byte-identical (host/image). This is the integration invariant the Azure
+    bare-host bug violated — infra_node now appends the image segment for azure, so
+    every render consumes the same full reference."""
+
+    @pytest.mark.parametrize("conf,cloud,registry", [
+        (AWS_CONF, "aws", "000000000000.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo"),
+        (AZURE_CONF, "azure", "mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure"),
+        (GCP_CONF, "gcp", GCP_REGISTRY),
+    ])
+    def test_job_image_equals_workflow_build_target(self, conf, cloud, registry):
+        job = _docs(codegen.render_job(conf, cloud, registry))[0]
+        job_image = job["spec"]["template"]["spec"]["containers"][0]["image"]
+        assert job_image == f"{registry}:latest"
+        assert "/" in job_image.rsplit(":", 1)[0], "image must carry the image segment, not a bare host"
+
+        wf = codegen.render_workflow(conf, cloud, registry, is_databricks=False)
+        assert f"docker build -t {registry}:" in wf
+        assert f"docker push {registry}:" in wf
+        if cloud in ("aws", "azure"):
+            # the tag-rewrite sed must anchor on the EXACT image the job carries
+            assert f"image: {registry}" in wf
+
+    def test_azure_acr_login_uses_bare_host_label(self):
+        wf = codegen.render_workflow(
+            AZURE_CONF, "azure", "mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure",
+            is_databricks=False)
+        assert "echo 'mcselfhealagentacr.azurecr.io' | cut -d'.' -f1" in wf
+
+
+class TestStaleWorkflowCleanup:
+    """One pipeline's artifact set at a time: generating pipeline X's workflow must
+    remove other pipe_*_pipeline.yml files (their triggers match X's shared artifact
+    paths and would deploy the wrong cloud), and must never touch repo workflows."""
+
+    def test_removes_other_pipelines_keeps_repo_workflows(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(codegen, "REPO_ROOT", tmp_path)
+        wf_dir = tmp_path / ".github" / "workflows"
+        wf_dir.mkdir(parents=True)
+        (wf_dir / "pipe_eu_sales_to_s3_pipeline.yml").write_text("stale")
+        (wf_dir / "run_agent.yml").write_text("repo infra — must survive")
+        (wf_dir / "tests.yml").write_text("repo infra — must survive")
+
+        written, errors = codegen.ensure_infra_artifacts(
+            {"pipeline_id": "pipe_sales_lakehouse", "cloud_provider": "aws"},
+            {"provider": "databricks"}, "", [])
+        assert errors == []
+        assert not (wf_dir / "pipe_eu_sales_to_s3_pipeline.yml").exists()
+        assert (wf_dir / "pipe_sales_lakehouse_pipeline.yml").exists()
+        assert (wf_dir / "run_agent.yml").exists()
+        assert (wf_dir / "tests.yml").exists()

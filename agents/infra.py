@@ -119,6 +119,16 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             # Azure has no SSM. The image registry is the ACR login server created by
             # bootstrap and carried in the pipeline's azure_setup — read it directly.
             ecr_repository_url = (_pipe_conf.get("azure_setup", {}) or {}).get("acr_login_server", "")
+            # The ACR login server is a BARE HOST — append the image segment (the stable
+            # rfc1123 pipeline id) so ecr_repository_url is the full image reference, the
+            # same shape AWS (repo URL from SSM) and GCP (segment appended below) carry.
+            # Both render_job and render_workflow consume it verbatim; a bare host here
+            # produced job.yaml `image: <host>:latest` — invalid, and the workflow's sed
+            # (anchored on host/image) never matched it. Idempotent.
+            if ecr_repository_url:
+                _az_img = (_pipe_conf.get("pipeline_id", "pipeline")).replace("_", "-").lower()
+                if not ecr_repository_url.rstrip("/").endswith("/" + _az_img):
+                    ecr_repository_url = ecr_repository_url.rstrip("/") + "/" + _az_img
         elif _cloud == "gcp":
             # GCP has no SSM either. Prefer the registry URL published by bootstrap
             # (.bootstrap_outputs.json, local dev); otherwise assemble it from the

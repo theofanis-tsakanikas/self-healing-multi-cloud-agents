@@ -836,6 +836,18 @@ def validate_generated_code(filename: str) -> str:
             if fname == "job.yaml":
                 if "BACKOFFLIMIT:0" not in content_upper.replace(" ", ""):
                     errors.append("K8S job.yaml [project policy]: backoffLimit must be 0 — jobs are idempotent; retries mask failures.")
+                # The pipeline image must be a FULL reference (registry-host/IMAGE[:tag]).
+                # A bare registry host (e.g. `myacr.azurecr.io:latest` — no image segment)
+                # is invalid AND silently breaks the workflow's tag-rewrite sed, which
+                # anchors on host/image. The terraform-output sentinel is the one allowed
+                # slash-less value (the CI sed replaces it wholesale).
+                for _img in _re.findall(r'^\s*image:\s*["\']?([^\s"\']+)', raw, _re.MULTILINE):
+                    if "/" not in _img and "RESOLVE_FROM_EXECUTE_TERRAFORM_OUTPUT" not in _img:
+                        errors.append(
+                            f"K8S job.yaml [project policy]: container image '{_img}' has no image "
+                            "segment — it looks like a bare registry host. Use the full reference "
+                            "<registry-host>/<image>[:tag] (identical to the workflow's build/push/sed target)."
+                        )
                 if "ENVFROM" not in content_upper:
                     errors.append("K8S job.yaml [project policy]: missing envFrom: secretRef — DB credentials must be injected via K8s Secret, never in env[].")
                 if not _re.search(r'namespace:\s*analytics', raw):
