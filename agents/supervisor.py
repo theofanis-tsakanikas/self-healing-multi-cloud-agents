@@ -143,7 +143,10 @@ def supervisor_node(state: AgentState):
         # target — the doomed request_fix message is still in history and would
         # otherwise route us straight back into the loop the guard just broke.
         if state.get("fix_loop_escalated"):
-            logger.warning("Medic abandoned a non-converging fix loop. Routing to FINISH.")
+            logger.warning(
+                "Medic escalated a terminal failure "
+                f"(mission_status='{state.get('mission_status', '') or 'unset'}'). Routing to FINISH."
+            )
             return {"next_step": "FINISH", "fix_loop_escalated": False}
 
         # Prefer the Medic's deterministic ownership target (derived from the FAILED-file
@@ -175,7 +178,9 @@ def supervisor_node(state: AgentState):
         # Final Sign-off
         if "verified" in normalized_last or "alignment_ok" in normalized_last:
             logger.info("✅ Mission accomplished. System signaling FINISH.")
-            return {"next_step": "FINISH"}
+            # mission_status set here too (authoritative confirm) — medic already set it,
+            # but the entry points fail anything that is not explicitly "verified".
+            return {"next_step": "FINISH", "mission_status": "verified"}
 
     # 4. LLM FALLBACK (Enhanced with State Context)
     # We pass the actual status values to the LLM so it makes an informed decision

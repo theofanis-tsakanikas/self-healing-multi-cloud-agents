@@ -564,6 +564,7 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
             "written_files": [], "infra_provisioned": False, "collected_specs": {},
             "architect_status": "", "infra_status": "", "schema_discovered": False,
             "github_done": False, "last_push_sha": "", "medic_fix_requested": False,
+            "mission_status": "",
             "raw_configs": {"pipeline": pipe_conf, "database": db_conf,
                             "rules": rules_conf, "infrastructure": infra_conf},
         }
@@ -574,6 +575,7 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
         log_q.put(("sep",  "─" * 55))
         state_q.put({"project_id": project_id})
 
+        mission_status = ""
         for output in graph.stream(initial_state, config={
             "run_name": f"streamlit_{pipeline_id}_{timestamp}",
             "recursion_limit": 200,
@@ -581,6 +583,8 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
         }):
             for node_name, state_update in output.items():
                 log_q.put(("node", f"\n{_NODE_LABELS.get(node_name, node_name.upper())}"))
+                if state_update.get("mission_status"):
+                    mission_status = state_update["mission_status"]
                 if nxt := state_update.get("next_step"):
                     if nxt != "FINISH":
                         log_q.put(("route", f"  → {nxt.upper()}"))
@@ -616,8 +620,16 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
                     state_q.put({"healing_cycle": 1})
 
         log_q.put(("sep", "─" * 55))
-        log_q.put(("ok",  "🎉  Deployment complete!"))
-        state_q.put({"status": "DONE"})
+        if mission_status == "verified":
+            log_q.put(("ok",  "🎉  Deployment complete — verified end-to-end!"))
+            state_q.put({"status": "DONE"})
+        else:
+            # The graph ENDED but without verified deployment (fix loop abandoned,
+            # CI unverified, or an LLM-fallback FINISH) — never celebrate a failure.
+            from main import mission_failure_summary
+            reason = mission_failure_summary(mission_status)
+            log_q.put(("err", f"❌  Mission failed (mission_status={mission_status or 'unset'}): {reason}"))
+            state_q.put({"status": "ERROR", "error": f"Unverified termination: {reason}"})
 
     except Exception as exc:
         log_q.put(("err", f"❌  {exc}"))

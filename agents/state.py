@@ -106,3 +106,15 @@ class AgentState(TypedDict):
     # REJECTED_BY_MEDIC JSON buried in message history.
     # Written by medic_node, read and cleared by architect_node / infra_node.
     healing_context: str
+
+    # Terminal mission outcome — the contract between the graph and its entry points
+    # (main.py exit code, Streamlit banner, LangSmith root-run status):
+    #   "verified"      → Medic verified the deployment end-to-end (the ONLY success)
+    #   "escalated"     → self-heal abandoned: same error survived 3 fix rounds, or an
+    #                     operational blocker (e.g. Terraform state lock) needs a human
+    #   "ci_unverified" → CI logs never arrived (run pending >10min / token 403) —
+    #                     deployment outcome UNKNOWN, treated as failure
+    #   ""              → graph ended without explicit verification (e.g. LLM-fallback
+    #                     FINISH) — fail-safe: entry points treat anything that is not
+    #                     "verified" as failure
+    mission_status: str

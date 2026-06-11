@@ -294,6 +294,7 @@ def medic_node(state: AgentState):
             "last_agent": "medic",
             "healing_context": "",
             "fix_loop_escalated": True,   # Supervisor → FINISH; do not re-route a doomed fix
+            "mission_status": "escalated",  # terminal: operational blocker, entry points fail the run
             "fix_attempt": 0,
             "last_fix_signature": "",
             "medic_fix_target": "",
@@ -473,6 +474,7 @@ def medic_node(state: AgentState):
             # re-derive the fix target from the request_fix message still in history and
             # route back to the architect, defeating this guard.
             output_state["fix_loop_escalated"] = True
+            output_state["mission_status"] = "escalated"  # terminal: entry points fail the run
             escalated_fix_loop = True
         else:
             output_state["fix_attempt"] = fix_attempt
@@ -481,6 +483,7 @@ def medic_node(state: AgentState):
         # Clean verification — reset so the next pipeline's fix cycle starts fresh.
         output_state["fix_attempt"] = 0
         output_state["last_fix_signature"] = ""
+        output_state["mission_status"] = "verified"  # the ONLY terminal success signal
 
     # Apply resets and critically UPDATE infra_status (skipped when the loop guard
     # escalated — we must NOT re-route the non-converging fix back to an agent).
@@ -501,18 +504,25 @@ def medic_node(state: AgentState):
         attempt = state.get("ci_poll_attempt", 0)
 
         if _should_stop_polling(attempt):
-            # Exceeded ~10 minutes of cumulative waiting — stop polling, surface to user.
-            logger.warning("CI run has been pending for over 10 minutes. Stopping poll, routing to supervisor.")
+            # Exceeded ~10 minutes of cumulative waiting — TERMINAL. The deployment outcome
+            # is UNKNOWN, so this must end the run as a failure, deterministically. Before
+            # this was terminal, the supervisor's LLM fallback could route back to MEDIC
+            # with the counter freshly reset — re-polling for another ~17 minutes per cycle
+            # until the recursion limit (hours of sleeps in CI).
+            logger.warning("CI run has been pending for over 10 minutes. Terminal: deployment unverified.")
             new_messages_for_state.append(
                 HumanMessage(content=(
                     "CI run has been pending for over 10 minutes with no result. "
-                    "Possible causes: workflow file not pushed, wrong trigger branch, or GHA disabled. "
-                    "Please check GitHub Actions manually."
+                    "Possible causes: workflow file not pushed, wrong trigger branch, GHA disabled, "
+                    "or a GH_TOKEN permissions error (403) on log fetch. "
+                    "The deployment is UNVERIFIED — please check GitHub Actions manually."
                 ))
             )
             output_state["messages"] = new_messages_for_state
             output_state["ci_poll_attempt"] = 0  # reset for next pipeline run
             output_state["next_step"] = "supervisor"
+            output_state["fix_loop_escalated"] = True       # supervisor routes FINISH deterministically
+            output_state["mission_status"] = "ci_unverified"
         else:
             wait = _poll_backoff_seconds(attempt) + random.uniform(0, 5)
             logger.info(f"CI poll attempt {attempt+1}: logs pending. Waiting {wait:.1f}s before retry.")

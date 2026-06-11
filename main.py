@@ -28,6 +28,66 @@ logging.basicConfig(
 logger = logging.getLogger("PIPELINE_ORCHESTRATOR")
 
 
+class MissionFailedError(RuntimeError):
+    """The graph terminated without a verified deployment (mission_status != 'verified').
+
+    Thrown INTO the stream generator at the FINISH update so the LangSmith root run is
+    marked status=error with this message, then re-raised to the caller which exits 1 —
+    the GitHub Action goes red. 'The graph ran to completion' is not success; only the
+    Medic's end-to-end verification is."""
+
+
+_MISSION_FAILURE_SUMMARIES = {
+    "escalated": (
+        "self-healing was abandoned — the same error survived 3 fix rounds, or an "
+        "operational blocker (e.g. a Terraform state lock) needs a human. "
+        "See the Medic's last message in the log above for the exact diagnosis."
+    ),
+    "ci_unverified": (
+        "the CI run never produced a result within the polling budget (~10 min) — "
+        "the deployment outcome is UNKNOWN. Check GitHub Actions manually "
+        "(workflow not pushed / wrong branch / GHA disabled / GH_TOKEN 403)."
+    ),
+    "": (
+        "the graph finished without explicit Medic verification (e.g. an LLM-fallback "
+        "FINISH). Treating an unverified end as failure."
+    ),
+}
+
+
+def mission_failure_summary(mission_status: str) -> str:
+    """Human-readable failure reason for a terminal mission_status (fail-safe default)."""
+    return _MISSION_FAILURE_SUMMARIES.get(mission_status, _MISSION_FAILURE_SUMMARIES[""])
+
+
+def _consume_stream(stream) -> str:
+    """Drive the graph stream to completion, tracking the terminal mission_status.
+
+    On a FINISH update without mission_status == 'verified', throws MissionFailedError
+    INTO the generator (stream.throw) so the tracing callbacks record the root run as
+    an error, then lets the exception propagate to the caller. Returns the final
+    mission_status when the run is verified.
+    """
+    mission_status = ""
+    for output in stream:
+        for node_name, state_update in output.items():
+            logger.info(f"Node '{node_name.upper()}' finished execution.")
+            if "written_files" in state_update:
+                logger.info(f"📂 Files: {state_update['written_files']}")
+            if state_update.get("mission_status"):
+                mission_status = state_update["mission_status"]
+            if "next_step" in state_update:
+                print(f"    👉 Routing to: {state_update['next_step']}")
+            if state_update.get("error_log"):
+                logger.warning(f"Health issues reported by '{node_name}'.")
+            if state_update.get("next_step") == "FINISH" and mission_status != "verified":
+                stream.throw(MissionFailedError(
+                    f"mission_status='{mission_status or 'unset'}' — "
+                    f"{mission_failure_summary(mission_status)}"
+                ))
+    return mission_status
+
+
 def _is_natural_language(arg: str) -> bool:
     """
     Heuristic: if the argument is longer than 4 words it is a natural language
@@ -83,6 +143,7 @@ def _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
         "fix_loop_escalated": False,
         "medic_fix_target": "",
         "healing_context": "",
+        "mission_status": "",
         "raw_configs": {
             "pipeline": pipe_conf,
             "database": db_conf,
@@ -104,18 +165,18 @@ def _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
             "configurable": {"thread_id": unique_project_id},
         }
         logger.info("Handing over to LangGraph Supervisor...")
-        for output in app.stream(initial_state, config=run_config):
-            for node_name, state_update in output.items():
-                logger.info(f"Node '{node_name.upper()}' finished execution.")
-                if "written_files" in state_update:
-                    logger.info(f"📂 Files: {state_update['written_files']}")
-                if "next_step" in state_update:
-                    print(f"    👉 Routing to: {state_update['next_step']}")
-                if state_update.get("error_log"):
-                    logger.warning(f"Health issues reported by '{node_name}'.")
+        _consume_stream(app.stream(initial_state, config=run_config))
+    except MissionFailedError as e:
+        # The graph ENDED, but without a verified deployment — this is a mission
+        # failure, not an engine crash. Exit 1 so the GitHub Action goes red; the
+        # LangSmith root run already carries this error via stream.throw().
+        logger.error(f"❌ MISSION FAILED: {e}")
+        sys.exit(1)
     except Exception as e:
         logger.critical(f"Workflow engine crashed: {str(e)}")
         sys.exit(1)
+
+    logger.info("✅ MISSION VERIFIED — deployment completed and validated end-to-end.")
 
 
 def run_from_natural_language(description: str):
