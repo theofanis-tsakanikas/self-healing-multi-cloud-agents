@@ -106,3 +106,54 @@ class TestLatestAutovalidationFailure:
     def test_returns_empty_when_no_marker(self):
         msgs = [HumanMessage(content="all good, nothing failed")]
         assert _latest_autovalidation_failure(msgs) == ""
+
+
+class TestResolveRelevantStandards:
+    """Post-codegen: standards for code-owned artifacts are fetched on demand —
+    architect/infra no longer pre-load them into collected_specs."""
+
+    _INDICATORS = {
+        "arch_standard_python": ["scripts/", "pandas"],
+        "infra_standard_k8s": ["k8s/", "configmap"],
+        "infra_standard_cicd": [".github/", "workflow"],
+    }
+
+    def test_preloaded_standard_comes_from_collected_specs(self):
+        from agents.medic import _resolve_relevant_standards
+        fetched = []
+        out = _resolve_relevant_standards(
+            "validation failed in scripts/pipe_x.py pandas chunk",
+            self._INDICATORS, {"arch_standard_python": "THE PYTHON STANDARD"},
+            fetch=lambda q: fetched.append(q) or "should not be used",
+        )
+        assert out == {"arch_standard_python": "THE PYTHON STANDARD"}
+        assert fetched == []  # no Pinecone round-trip for pre-loaded keys
+
+    def test_code_owned_standard_is_fetched_on_demand(self):
+        from agents.medic import _resolve_relevant_standards
+        out = _resolve_relevant_standards(
+            "kubectl apply failed for k8s/job.yaml configmap missing",
+            self._INDICATORS, {},  # collected_specs no longer carries k8s standard
+            fetch=lambda q: "K8S STANDARD CONTENT",
+        )
+        assert out == {"infra_standard_k8s": "K8S STANDARD CONTENT"}
+
+    def test_unmatched_error_fetches_nothing(self):
+        from agents.medic import _resolve_relevant_standards
+        out = _resolve_relevant_standards(
+            "terraform state lock error", self._INDICATORS, {},
+            fetch=lambda q: "X",
+        )
+        assert out == {}
+
+    def test_fetch_failure_and_empty_results_are_skipped(self):
+        from agents.medic import _resolve_relevant_standards
+
+        def boom(q):
+            raise RuntimeError("pinecone down")
+
+        assert _resolve_relevant_standards(
+            "workflow .github/ failed", self._INDICATORS, {}, fetch=boom) == {}
+        assert _resolve_relevant_standards(
+            "workflow .github/ failed", self._INDICATORS, {},
+            fetch=lambda q: "No relevant guidelines found.") == {}

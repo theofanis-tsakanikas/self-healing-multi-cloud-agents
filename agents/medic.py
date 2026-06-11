@@ -35,6 +35,56 @@ _MAX_POLL_WAIT_SECONDS = 300  # 5-minute ceiling per backoff step
 _MAX_POLL_ATTEMPTS = 5        # stop after ~10 min cumulative instead of looping forever
 
 
+# Standards that are CODE-OWNED since the codegen migration: architect/infra no longer
+# retrieve them during discovery, so collected_specs never carries them. When a failure
+# matches one of these categories the medic fetches the standard from Pinecone ITSELF —
+# deterministically, at the Python layer (never relying on the LLM to think of querying).
+# Query strings = the canonical discovery queries the agents used to issue.
+_CODE_OWNED_STANDARD_QUERIES = {
+    "arch_standard_grafana": (
+        "grafana dashboard json specifications. Panels, fields, templating variables, "
+        "stable uid, $project_id $cloud_provider"
+    ),
+    "infra_standard_k8s": (
+        "Kubernetes job.yaml initContainers serviceAccountName volumeMounts volumes "
+        "hive-catalog-config grafana-dash-config prometheus-config DESTINATION_URI "
+        "namespace analytics monitoring. Deployment Trino Grafana Prometheus Pushgateway "
+        "AWS Glue metastore hive connector Section 8.4"
+    ),
+    "infra_standard_cicd": (
+        "Github actions cicd pipelines. Workflow trigger and structure, deployment "
+        "execution, checkout, github secrets"
+    ),
+    "infra_standard_dockerfile": (
+        "Dockerfile python pipeline image non-root user selective COPY CMD script path"
+    ),
+}
+
+
+def _resolve_relevant_standards(error_context: str, indicators: dict,
+                                collected_specs: dict, fetch) -> dict:
+    """Map the current failure to the standards the medic should see.
+
+    Pre-loaded standards (LLM-owned artifacts) come from collected_specs; standards for
+    CODE-OWNED artifacts are fetched from the KB on demand via `fetch` (they are no
+    longer retrieved at generation time, but they remain the medic's diagnostic
+    reference — the spec of what a correct artifact looks like)."""
+    matched = {}
+    for key, inds in indicators.items():
+        if not any(ind in error_context for ind in inds):
+            continue
+        if key in collected_specs:
+            matched[key] = collected_specs[key]
+        elif key in _CODE_OWNED_STANDARD_QUERIES:
+            try:
+                result = str(fetch(_CODE_OWNED_STANDARD_QUERIES[key]))
+            except Exception:
+                continue
+            if result.strip() and "no relevant guidelines" not in result.lower():
+                matched[key] = result
+    return matched
+
+
 def _poll_backoff_seconds(attempt: int) -> int:
     """Deterministic exponential back-off (no jitter) for CI-log polling:
     attempt 0→30, 1→60, 2→120, 3→240, then capped at 300s. Extracted as a pure
@@ -217,9 +267,11 @@ def medic_node(state: AgentState):
         )
 
     # 3. CONTEXT PREPARATION
-    # Smart standard injection: identify WHICH standard is relevant to the current error,
-    # then inject only that one from collected_specs (already loaded by architect/infra).
-    # This avoids context bloat from dumping all standards AND avoids redundant Pinecone queries.
+    # Smart standard injection: identify WHICH standard is relevant to the current error.
+    # LLM-owned-artifact standards come from collected_specs (loaded by architect/infra);
+    # CODE-OWNED-artifact standards (k8s/grafana/dockerfile/cicd — no longer retrieved at
+    # generation time) are fetched from Pinecone here, deterministically. Only the relevant
+    # one(s) are injected — no context bloat, no redundant queries.
     # dynamic-experience (past fixes) is never pre-loaded — query_vector_store stays available for it.
     _STANDARD_INDICATORS = {
         "arch_standard_python":   ["scripts/", "pandas", "chunk", "cloud_get", "to_parquet",
@@ -245,10 +297,10 @@ def medic_node(state: AgentState):
     _failed_text = " ".join(det for _, det in _validation_results.values() if det)
     error_context = (state.get("error_log", "") + " " + _failed_text).lower()
 
-    matched_standards = {}
-    for key, indicators in _STANDARD_INDICATORS.items():
-        if key in collected_specs and any(ind in error_context for ind in indicators):
-            matched_standards[key] = collected_specs[key]
+    matched_standards = _resolve_relevant_standards(
+        error_context, _STANDARD_INDICATORS, collected_specs,
+        fetch=lambda q: query_vector_store.invoke({"query": q}),
+    )
 
     if matched_standards:
         specs_block = "\n\n**RELEVANT ENGINEERING STANDARD(S) — use directly, do NOT re-query via query_vector_store:**\n"
