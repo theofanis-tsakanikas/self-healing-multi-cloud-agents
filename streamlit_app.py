@@ -558,7 +558,7 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
         os.environ["PROJECT_ID"] = project_id
 
         initial_state = {
-            "task": task, "messages": [], "generated_code": "", "error_log": "",
+            "task": task, "messages": [], "error_log": "",
             "project_id": project_id, "config_path": "",
             "target_infra": infra_conf.get("service_name", pipe_conf.get("cloud_provider", "unknown")),
             "written_files": [], "infra_provisioned": False, "collected_specs": {},
