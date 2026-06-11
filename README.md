@@ -33,8 +33,8 @@ flowchart TD
     U["Pipeline YAML<br/>or plain-English description"] --> S
     subgraph G["LangGraph state machine"]
         S["🧭 Supervisor<br/>deterministic router"]
-        A["📐 Architect<br/>ETL code · SQL DDL · dashboards"]
-        I["🏗️ Infra<br/>Terraform · K8s · Dockerfile · CI/CD"]
+        A["📐 Architect<br/>ETL code · SQL DDL"]
+        I["🏗️ Infra<br/>Terraform · artifact push"]
         M["🩺 Medic<br/>evidence-grounded diagnosis"]
         S --> A --> S
         S --> I --> S
@@ -49,9 +49,9 @@ flowchart TD
 
 **Supervisor** — a deterministic router (the LLM emits exactly one word). Routing invariants live in Python, not in prompt prose.
 
-**Architect** — generates the pipeline implementation: chunked ETL with real pandas business-rule logic (no stub `is_suspicious = False`), idempotency checks, typed casts, per-rule rejection metrics, Trino/Unity Catalog DDL, and the monitoring dashboard spec. Works phase-gated: Discovery → Schema → Implementation, one tool per phase.
+**Architect** — generates the two judgment artifacts: the pipeline implementation (chunked ETL with real pandas business-rule logic — no stub `is_suspicious = False` — idempotency checks, typed casts, per-rule rejection metrics) and the Trino/Unity Catalog DDL with schema-derived columns. Works phase-gated: Discovery → Schema → Implementation, one tool per phase.
 
-**Infra** — generates Terraform (per-cloud state backends), Kubernetes manifests, the Dockerfile, and the GitHub Actions deploy workflow, then pushes everything and triggers CI.
+**Infra** — generates the per-cloud pipeline Terraform, then pushes all artifacts and triggers CI. The Kubernetes manifests, Dockerfile and deploy workflow are rendered deterministically from config (see "Where the LLM works" below).
 
 **Medic** — watches the CI run with exponential-backoff polling, then diagnoses failures from a **structured validation summary built in Python** — never by free-form log "interpretation". Its `request_fix` tool *rejects* any diagnosis that doesn't quote a real error marker from the logs, which makes hallucinated fixes structurally impossible. Fixes are surgical patches to the named file only; clean files are off-limits.
 
@@ -66,7 +66,7 @@ flowchart TD
 ### Engineering decisions a reviewer should notice
 
 - **Standards-first generation.** Agents don't improvise conventions — they retrieve versioned engineering standards (`knowledge_base/*.md`, served via Pinecone RAG) covering Terraform, K8s, Spark/Delta, CI/CD, SQL, and dashboards. When output is wrong, the *standard* gets fixed, never the generated file.
-- **A deliberate LLM-vs-deterministic boundary.** The LLM owns judgment under variability (arbitrary source schemas, natural-language business rules, error diagnosis). Python owns everything mechanically determined: tool sequencing (`tool_choice="required"`, pre-computed args), validation gates, and guaranteed injections (e.g. the cloud-SDK import a script provably needs). No "prompt harder and hope".
+- **Where the LLM works vs. where code works — measured, not assumed.** Every artifact was scored by input variability: where the input is open (an arbitrary source schema, business rules in natural language, unpredictable CI failure logs), the LLM does the work — the pipeline script, the SQL DDL, the Terraform, and all diagnosis. Where the structure is fixed (`requirements.txt`, the Grafana/Lakeview dashboards, the Dockerfile, all six K8s manifests, the deploy workflow), deterministic code renders it from config (`agents/codegen.py`), golden-tested against the validated v1.0.0 artifacts. The LLM was *removed* from everything it used to merely copy — an agent that knows where NOT to use the LLM is the difference between an AI system and an expensive template engine. Orchestration is deterministic too: tool sequencing (`tool_choice="required"`, pre-computed args), validation gates, guaranteed injections. No "prompt harder and hope".
 - **Validation as a safety net, not a crutch.** `validate_generated_code` enforces policy (credential access only via the sanctioned resolver, no hardcoded regions, no template literals inside K8s manifests) before anything reaches CI.
 - **Cloud-agnostic by construction.** No default cloud anywhere — the provider is always read from config, and generated scripts keep the full three-cloud skeleton with only the active branch executing.
 
@@ -141,7 +141,7 @@ Each object-storage pipeline ships with a provisioned Grafana dashboard (record 
 ## Testing
 
 ```bash
-make test     # 156 hermetic unit tests — no cloud, no credentials, every external dependency mocked
+make test     # 190+ hermetic unit tests — no cloud, no credentials, every external dependency mocked
 ```
 
 CI (`tests.yml`) runs lint + the suite with a coverage floor on every push/PR. The deterministic core (routing, validators, state lifecycle, credential resolution) is unit-tested; the LLM-driven node bodies are validated by the end-to-end pipeline runs above.
