@@ -2,9 +2,14 @@
 id: grafana-standards
 applies_to: aws, azure, gcp (object-storage)
 primary_consumer: architect-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
-enforced_by: validate_generated_code (safety net) + agent prompts
+enforced_by: agents/codegen.py (deterministic render) + validate_generated_code (safety net)
 last_reviewed: 2026-06-11
 ---
+
+> **GENERATION: CODE-OWNED.** `dashboards/monitoring_specs.json` is rendered
+> deterministically by `agents/codegen.py:render_monitoring_specs` (golden-tested).
+> This document is the SPEC for that generator and the Medic's diagnostic
+> reference — changing a rule here requires changing the render in the same commit.
 
 # STANDARD: GRAFANA DASHBOARD GENERATION
 When generating `dashboards/monitoring_specs.json`, ensure the following:

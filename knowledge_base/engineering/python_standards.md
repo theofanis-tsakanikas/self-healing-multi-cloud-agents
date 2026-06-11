@@ -452,6 +452,10 @@ Hidden runtime dependencies (never imported directly):
 
 ## Requirements Standard
 
+> **GENERATION: CODE-OWNED.** `requirements.txt` is rendered deterministically by
+> `agents/codegen.py:render_requirements` — the architect never writes it. This
+> section is the SPEC for that generator.
+
 **File location:** `requirements.txt` at the **repository root** — never inside `scripts/` or any subdirectory.
 
 The file is the shared block PLUS the active cloud's block. Copy the matching cloud block **verbatim — omit NOTHING**. Each cloud needs THREE distinct things and dropping any one fails at runtime:

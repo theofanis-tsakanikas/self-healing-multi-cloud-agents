@@ -25,11 +25,11 @@ The following structured context defines your mission. You must strictly adhere 
 - **🧱 DATABRICKS BRANCH:** If the context's `PROJECT_METADATA.platform == "databricks"`, this is a Delta/Unity Catalog pipeline — **NOT** parquet/Trino/Grafana. Execute exactly **ONE** discovery query and SKIP the three below:
     - `query="STANDARD DATABRICKS PYSPARK DELTA: SparkSession read jdbc, dbutils.secrets credentials, business rules filter withColumn, write.format delta saveAsTable Unity Catalog partitionBy run_date, mandatory Delta audit table rows_processed rows_rejected duration, setup_unity_catalog.sql USING DELTA, Lakeview dashboard JSON observability over the audit table (datasets/pages/widgets, counters + line + bar)"` → retrieves **arch_standard_databricks**
     - Then go straight to schema discovery and code generation. Do NOT query for python/trino/grafana standards.
-    - **Databricks artifacts (generate EXACTLY these THREE, per `required_artifacts`):** (1) `scripts/<pipeline_id>.py` — the PySpark/Delta job, including the MANDATORY Delta audit-table write; (2) `sql/setup_unity_catalog.sql` — `USING DELTA`, both the data table and the `_audit` table; (3) `dashboards/<pipeline_id>_lakeview.json` — the Lakeview observability dashboard over the `_audit` table, emitted **verbatim** from `arch_standard_databricks`, substituting only `<catalog>`/`<schema>`/`<table_name>` (keep `queryLines`, never switch to `query`; no `$`-template vars). Generate **NO** Trino DDL, **NO** Grafana JSON, **NO** `requirements.txt`, **NO** K8s/Dockerfile. Credentials use `dbutils.secrets` — never `cloud_get()`/`os.getenv()`.
-- **MANDATORY (non-Databricks only):** Execute three (3) distinct tool calls with these exact query strings if the keys are missing from state:
+    - **Databricks artifacts (generate EXACTLY these TWO):** (1) `scripts/<pipeline_id>.py` — the PySpark/Delta job, including the MANDATORY Delta audit-table write; (2) `sql/setup_unity_catalog.sql` — `USING DELTA`, both the data table and the `_audit` table. The Lakeview dashboard JSON is CODE-GENERATED from config (it will already be in the written-files list — never write it). Generate **NO** Trino DDL, **NO** Grafana JSON, **NO** `requirements.txt`, **NO** K8s/Dockerfile. Credentials use `dbutils.secrets` — never `cloud_get()`/`os.getenv()`.
+- **MANDATORY (non-Databricks only):** Execute two (2) distinct tool calls with these exact query strings if the keys are missing from state:
     1. `query="STANDARD PYTHON DATA PIPELINES CRITICAL RULES: cloud_get mandatory credentials, storage_options to_parquet, create_engine extraction loop same try block, FLAG_AS_SUSPICIOUS is_suspicious quality_standards pandas, type casting float64 Int64 quantity columns, destination_uri os.getenv DESTINATION_URI, idempotency partition run_date, push_to_gateway prometheus_client, requirements.txt repo root"` → retrieves **arch_standard_python**
     2. `query="STANDARD TRINO DDL GENERATION setup_trino.sql: CREATE SCHEMA DROP TABLE CREATE TABLE 3-part catalog.schema.table, external_location PARQUET partitioned_by ARRAY run_date, data types VARCHAR DECIMAL INTEGER TIMESTAMP BOOLEAN, hive external table s3 gs abfss protocol"` → retrieves **arch_standard_trino**
-    3. `query="grafana dashboard json specifications. Panels, fields, alerting rules."` → retrieves **arch_standard_grafana**
+    (There is NO Grafana query: `dashboards/monitoring_specs.json` is CODE-GENERATED from config and already written.)
 - **THE RETRIEVED STANDARDS ARE THE SPEC:** Each `query_vector_store` result is captured verbatim under its key (`arch_standard_*`) and injected **in full** into your prompt at the implementation phase — there is no separate constant-extraction step. Treat the retrieved standards as the non-negotiable spec for every following step.
 
 ### 2. DISCOVERY & VALIDATION
@@ -73,24 +73,20 @@ Generate `scripts/*.py` following `arch_standard_python` exactly. The standard d
     - DDL columns derived exclusively from `read_data_schema` plus any columns added by business rules. Never invent or omit columns.
     - `external_location` is the URI from `LOGICAL_DESTINATION.uri` verbatim — do NOT append `project_id` or any session suffix.
 
-- **Monitoring JSON (`dashboards/monitoring_specs.json`):** Follow `arch_standard_grafana` exactly.
-    - `uid` and `title` derived from the pipeline name — never from `project_id`.
-    - Alerting: 60-minute Data Silence rule, `severity: critical`.
+- **Monitoring JSON (`dashboards/monitoring_specs.json`):** CODE-GENERATED from config — it is already in the written-files list before your implementation phase begins. NEVER write it.
 
 ### 6. DEPENDENCY MANAGEMENT
-- Scan your generated Python code and create `requirements.txt` at the **project root** (never inside `scripts/`).
-- Include only the packages for the active cloud provider. Follow `arch_standard_python` Requirements Standard.
+- `requirements.txt` is CODE-GENERATED from config (shared block + the active cloud's drivers + the source-DB driver) — already written before your implementation phase. NEVER write it.
 
 ---
 
 ## 🛠️ TOOL EXECUTION & PERSISTENCE
 
 ### Normal Mode (initial generation)
-- **MANDATORY:** Execute `write_project_file` for every artifact:
+- **MANDATORY:** Execute `write_project_file` for every artifact in your CURRENT PHASE missing list (the two judgment artifacts):
     1. The Python pipeline script.
     2. The Trino DDL SQL script.
-    3. The Monitoring JSON specification.
-    4. The `requirements.txt` file.
+    (`monitoring_specs.json` and `requirements.txt` are code-generated and never in your list.)
 - **VALIDATION (automatic — you do NOT call it):** `validate_generated_code` is NOT one of your tools; this node runs it automatically right after every `write_project_file`. If the **next message** reports validation errors for a file, fix that file before writing the next one — an artifact with unresolved errors is not complete.
 
 ### Fix Mode (healing_context present)

@@ -102,9 +102,10 @@ Special cases are handled deterministically: a 403 on log fetch is reported as a
 
 The single most important design decision, kept deliberate rather than accidental:
 
-- **LLM owns judgment under variability:** arbitrary source schemas, natural-language business rules → real pandas/Spark logic, log diagnosis.
-- **Python owns everything mechanically determined:** tool sequencing, validation gates, and *guaranteed injections* — when a correct output is provably required yet generation drops it intermittently, it is injected at write time (cloud-SDK imports, f-string brace repair, verbatim embedding of large artifacts into ConfigMaps, canonical dashboard JSON structure).
-- **Anti-pattern actively avoided:** an LLM step for a fully deterministic artifact with repair code underneath. If a deterministic generator exists, the LLM step is removed for that artifact.
+- **LLM owns judgment under variability:** arbitrary source schemas, natural-language business rules → real pandas/Spark logic, SQL DDL, Terraform, log diagnosis.
+- **Code owns everything mechanically determined** (`agents/codegen.py`, golden-tested against the validated v1.0.0 artifacts): `requirements.txt`, the Grafana dashboard JSON, the Lakeview dashboard, the Dockerfile, all six K8s manifests, and the per-cloud deploy workflow are rendered deterministically from config and pass the same validation gate — the LLM never emits them. Their standards remain in the knowledge base as the generators' spec and the Medic's diagnostic reference.
+- **Plus guaranteed injections** on the LLM-owned artifacts: when a correct output is provably required yet generation drops it intermittently, it is injected at write time (cloud-SDK imports, f-string brace repair).
+- **Anti-pattern actively avoided:** an LLM step for a fully deterministic artifact with repair code underneath — that is exactly the migration that produced `codegen.py`.
 
 Supporting layers:
 

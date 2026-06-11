@@ -4,7 +4,7 @@
 #
 # Generated agent OUTPUTS are excluded — they are never edited by hand (fixed
 # via standards/prompts and regenerated), so hooks must not "clean them up".
-exclude: '^(scripts/pipe_.*\.py|k8s/|sql/|dashboards/|terraform/|Dockerfile|requirements\.txt|\.github/workflows/pipe_.*\.yml)'
+exclude: '^(scripts/pipe_.*\.py|k8s/|sql/|dashboards/|terraform/|Dockerfile|requirements\.txt|\.github/workflows/pipe_.*\.yml|tests/goldens/)'
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

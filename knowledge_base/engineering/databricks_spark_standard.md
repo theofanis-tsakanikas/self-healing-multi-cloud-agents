@@ -204,7 +204,12 @@ Lakeview (AI/BI) dashboard** reads the Delta **`_audit` table** on the bootstrap
 warehouse** and renders the same metrics. The pipeline Terraform provisions it with
 `databricks_dashboard` reading this exact JSON via `file_path` (see `terraform_databricks.md`).
 
-This is a **mandatory third artifact** (alongside the script + the DDL). Emit it **verbatim**,
+> **GENERATION: CODE-OWNED.** This dashboard is rendered deterministically by
+> `agents/codegen.py:render_lakeview_dashboard` from `databricks_target` in config —
+> the architect no longer emits it at all. The skeleton below is the SPEC + the
+> Medic's reference.
+
+This used to be an LLM-emitted artifact. Historical instruction (now code-owned): emit it **verbatim**,
 substituting only `<catalog>` / `<schema>` / `<table_name>` with the values from
 `DELTA_DESTINATION.unity_catalog` (e.g. `multi_cloud_agent_workspace` / `raw` /
 `pipe_sales_lakehouse`) — the audit table is `<catalog>.<schema>.<table_name>_audit`. Do NOT

@@ -2,9 +2,16 @@
 id: k8s-deployment-rules
 applies_to: aws, azure, gcp (object-storage)
 primary_consumer: infra-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
-enforced_by: validate_generated_code (safety net) + agent prompts
+enforced_by: agents/codegen.py (deterministic render) + validate_generated_code (safety net)
 last_reviewed: 2026-06-11
 ---
+
+> **GENERATION: CODE-OWNED.** All six manifests are rendered deterministically by
+> `agents/codegen.py` (render_namespaces / render_trino_deployment /
+> render_grafana_deployment / render_prometheus_deployment / render_configmaps /
+> render_job — golden-tested in tests/test_codegen.py). This document is the SPEC
+> for those generators and the Medic's diagnostic reference — changing a rule here
+> requires changing the matching render in the same commit.
 
 # STANDARD: KUBERNETES DEPLOYMENT & ORCHESTRATION
 This standard defines the mandatory structure and security protocols for deploying the Data Fabric stack (Trino, Grafana, and Data Jobs).

@@ -164,7 +164,10 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
     if is_databricks:
         required_knowledge_keys = ["arch_standard_databricks"]
     else:
-        required_knowledge_keys = ["arch_standard_trino", "arch_standard_grafana", "arch_standard_python"]
+        # Grafana standard no longer retrieved: monitoring_specs.json is CODE-OWNED
+        # (agents/codegen.py). The LLM keeps the two judgment artifacts — the pipeline
+        # script (python standard) and the Trino DDL (trino standard).
+        required_knowledge_keys = ["arch_standard_trino", "arch_standard_python"]
     is_fix_mode = state.get("medic_fix_requested", False) or state.get("last_agent") == "medic"
     has_all_standards = all(key in collected_specs for key in required_knowledge_keys)
     schema_discovered = state.get("schema_discovered", False)
@@ -312,14 +315,11 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
         else:
             needs_python = any(a.endswith(".py") for a in missing_artifacts)
             needs_sql = any(a.endswith(".sql") for a in missing_artifacts)
-            needs_grafana = any(a.endswith(".json") for a in missing_artifacts)
 
             if needs_python and "arch_standard_python" in collected_specs:
                 system_prompt += f"\n### arch_standard_python\n{collected_specs['arch_standard_python']}\n"
             if needs_sql and "arch_standard_trino" in collected_specs:
                 system_prompt += f"\n### arch_standard_trino\n{collected_specs['arch_standard_trino']}\n"
-            if needs_grafana and "arch_standard_grafana" in collected_specs:
-                system_prompt += f"\n### arch_standard_grafana\n{collected_specs['arch_standard_grafana']}\n"
 
     # 6. PREPARE CONVERSATION
     recent_messages = safe_recent_messages(state["messages"])

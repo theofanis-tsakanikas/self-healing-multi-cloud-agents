@@ -24,7 +24,6 @@ from agents.constants import (
     DEFAULT_REQUIRED_DATABRICKS_TF_FILES,
     DEFAULT_REQUIRED_K8S_MANIFESTS,
     INFRA_PROMPT_FILE,
-    K8S_PINNED_IMAGES,
     PROMPTS_DIR,
     TEMPERATURE,
 )
@@ -189,10 +188,11 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     # Databricks needs ONLY IaC (databricks_job) + CI/CD (databricks-cli) standards —
     # no Kubernetes manifests, no Dockerfile. Forcing k8s/dockerfile discovery would make
     # the gate unsatisfiable with irrelevant standards. AWS/Azure/GCP keep the full set.
-    if is_databricks:
-        required_standards = ["infra_standard_iac", "infra_standard_cicd"]
-    else:
-        required_standards = ["infra_standard_iac", "infra_standard_k8s", "infra_standard_cicd", "infra_standard_dockerfile"]
+    # Only the IaC standard is LLM-consumed now: the K8s manifests, Dockerfile and
+    # deploy workflow are CODE-OWNED (agents/codegen.py renders them from config), so
+    # their standards are no longer retrieved for generation — they remain in the KB
+    # as the generator's spec and the Medic's diagnostic reference.
+    required_standards = ["infra_standard_iac"]
     has_all_standards = all(key in collected_specs for key in required_standards)
 
     selected_keys = []
@@ -281,86 +281,28 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             # Two sub-cases:
             #   B1 (healing_context empty): architect consumed it → fix already applied, just push.
             #   B2 (healing_context present): infra itself must fix first, THEN push.
-            #      Use patch_project_file (surgical) for targeted edits; generate_k8s_manifest
-            #      as fallback for structural rewrites. Never push before validation passes.
+            #      patch_project_file only — full regeneration of multi-object files always
+            #      risks losing objects not mentioned in the healing_context.
             if state.get("medic_fix_requested", False) and state.get("github_done", False):
                 if state.get("healing_context", "").strip():
-                    # patch_project_file only — generate_k8s_manifest is forbidden in fix mode.
-                    # Full rewrites of multi-object files (prometheus: 4 objects, configmaps: 5)
-                    # always risk losing objects not mentioned in the healing_context.
                     selected_keys = ["patch_project_file", "push_to_github"]
                 else:
                     selected_keys = ["push_to_github"]
 
-            elif not (k8s_ready and docker_ready and github_ready) or medic_triggered_fix:
-                # Compute exactly which files are missing so the LLM doesn't regenerate
-                # files that are already tracked — avoids the re-generation loop.
-                missing_orchestration = []
-                if not docker_ready:
-                    missing_orchestration.append("Dockerfile")
-                for f in k8s_required:
-                    written_lower = {w.lower() for w in written_files}
-                    if f.lower() not in written_lower:
-                        missing_orchestration.append(f)
-                if k8s_ready and docker_ready and not github_ready:
-                    missing_orchestration.append(".github/workflows/<project_id>_pipeline.yaml")
-
-                if cloud_provider == "azure":
-                    ecr_hint = (
-                        f"\nAzure Container Registry login server (tag images as <login_server>/<image>:<sha>): {ecr_repository_url}"
-                        if ecr_repository_url else
-                        "\nAzure Container Registry: use CLOUD_SETUP.acr_login_server from your context as the image registry host."
-                    )
-                elif cloud_provider == "gcp":
-                    ecr_hint = (
-                        f"\nGCP Artifact Registry (tag images as <registry>/<image>:<sha>): {ecr_repository_url}"
-                        if ecr_repository_url else
-                        "\nGCP Artifact Registry: assemble {artifact_registry_region}-docker.pkg.dev/<GCP_PROJECT_ID>/{artifact_registry_repo} from CLOUD_SETUP."
-                    )
-                else:
-                    ecr_hint = (
-                        f"\nECR Repository URL (use this exact value, never write <AWS_ACCOUNT_ID>): {ecr_repository_url}"
-                        if ecr_repository_url else
-                        "\nECR Repository URL: not yet available — extract it from the execute_terraform output in conversation history."
-                    )
-                # Single source of truth for the pinned versions: agents/constants.py
-                # K8S_PINNED_IMAGES (the same dict the validator enforces). Never re-literal here.
-                _pinned_images = " | ".join(K8S_PINNED_IMAGES.values())
-                orchestration_phase_instruction = (
-                    f"CURRENT OPERATIONAL PHASE: IMPLEMENTATION — ORCHESTRATION. "
-                    f"Generate ONLY these missing files: {missing_orchestration}. "
-                    "Do NOT regenerate files that already exist."
-                    f"{ecr_hint}"
-                    "\n\nMANDATORY K8S POLICY (enforced by auto-validation):"
-                    "\n• job.yaml: spec.backoffLimit=0 | envFrom secretRef '{project_id}-db-credentials' | env: PROJECT_ID, CLOUD_PROVIDER, TRINO_HOST, PUSHGATEWAY_URL"
-                    "\n• configmaps.yaml: ALL 5 ConfigMaps in ONE file separated by ---: trino-sql-config (analytics), hive-catalog-config (analytics), grafana-dash-config (monitoring), grafana-datasource-config (monitoring), prometheus-config (monitoring, scrape: pushgateway.monitoring.svc.cluster.local:9091)"
-                    f"\n• Pinned images: {_pinned_images}"
-                ).format(project_id=project_id or "pipeline")
-
-                # When healing_context is present the agent must patch existing files,
-                # not regenerate them. Generate tools are added only for files that are
-                # genuinely absent from written_files — never because medic_triggered_fix
-                # is True, since that flag alone would cause existing files to be rewritten
-                # (overwriting correct content) instead of surgically patched.
-                _has_healing = bool(state.get("healing_context", "").strip())
+            elif not (k8s_ready and docker_ready and github_ready):
+                # Orchestration artifacts are CODE-OWNED — if any is still missing here,
+                # deterministic generation FAILED validation (a generator bug). There is
+                # deliberately NO LLM fallback for these (an LLM copy from general
+                # knowledge is exactly the variance the migration removed): surface the
+                # codegen errors (already in error_log via validation_errors) so the
+                # Medic routes a surgical patch; the permanent fix is agents/codegen.py.
                 selected_keys = []
-                if not docker_ready or (medic_triggered_fix and not _has_healing):
-                    selected_keys.append("generate_dockerfile")
-                if not k8s_ready or (medic_triggered_fix and not _has_healing):
-                    selected_keys.append("generate_k8s_manifest")
-                # generate_github_action unlocks only after K8s manifests and Dockerfile
-                # are fully ready — the workflow references these artifacts.
-                if (k8s_ready and docker_ready and not github_ready) or (medic_triggered_fix and not _has_healing):
-                    selected_keys.append("generate_github_action")
-                # NOTE: validate_generated_code is NOT added to selected_keys —
-                # it runs automatically in Python after every generate_* call (see
-                # auto-validation block in the tool execution loop below).
+                logger.error(
+                    "🚫 Code-owned orchestration artifacts missing after codegen "
+                    f"(errors: {len(codegen_errors)}) — routing to Medic, no LLM fallback."
+                )
             else:
-                missing_orchestration = []
-                orchestration_phase_instruction = None
-                # Provide execution tools ONLY if they haven't succeeded yet (Action Lock)
-                # execute_docker_command is intentionally excluded — build/push is handled
-                # by the GitHub Actions workflow after push_to_github.
+                # Everything generated + validated — the only remaining action is the push.
                 if not state.get("github_done", False) or medic_triggered_fix:
                     selected_keys.append("push_to_github")
 
@@ -388,7 +330,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
 
     # 5. EARLY EXIT GATE
     # If all files exist, all actions are done, and standards are met, signal completion.
-    if not selected_keys and has_all_standards:
+    if not selected_keys and has_all_standards and not codegen_errors:
         logger.info("🎯 MISSION ACCOMPLISHED: Infrastructure node finalized.")
         return {
             "messages": [HumanMessage(content="INFRA_COMPLETE: Infrastructure and CI/CD are finalized.")],
@@ -471,8 +413,8 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         )
         if is_databricks:
             system_prompt += (
-                "🧱 DATABRICKS: issue EXACTLY TWO queries — this iac query + the CI/CD query. "
-                "Do NOT issue the K8s or Dockerfile queries (Databricks has neither).\n"
+                "🧱 DATABRICKS: this iac query is the ONLY query — the deploy workflow "
+                "is code-generated, so there is no CI/CD (or K8s/Dockerfile) query.\n"
             )
 
     # Inject only the standards relevant to the current sub-phase.
@@ -490,11 +432,8 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         elif "write_terraform_config" in selected_keys or \
              "execute_terraform" in selected_keys:
             relevant_keys = ["infra_standard_iac"]
-        elif any(k in selected_keys for k in [
-            "generate_dockerfile", "generate_k8s_manifest", "generate_github_action"
-        ]):
-            relevant_keys = ["infra_standard_k8s", "infra_standard_dockerfile", "infra_standard_cicd"]
         else:
+            # K8s/Dockerfile/workflow are code-generated — no standard injection needed.
             relevant_keys = []
 
         # ALL infra standards come from Pinecone via query_vector_store — same mechanism as
@@ -508,31 +447,6 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             for key in relevant_keys:
                 if key in collected_specs:
                     system_prompt += f"\n### {key}\n{collected_specs[key]}\n"
-
-    # Inject Architect artifacts for ConfigMap embedding.
-    # The infra agent has no tool to read files — inject SQL and JSON content directly
-    # so the LLM embeds the actual content instead of placeholders.
-    if not is_databricks and any(k in selected_keys for k in ["generate_k8s_manifest"]):
-        sql_path = "sql/setup_trino.sql"
-        json_path = "dashboards/monitoring_specs.json"
-        sql_content = read_file(sql_path) if os.path.exists(sql_path) else None
-        json_content = read_file(json_path) if os.path.exists(json_path) else None
-        if sql_content or json_content:
-            # The Trino DDL + Grafana dashboard JSON are injected VERBATIM from disk by
-            # generate_k8s_manifest. The LLM must NOT re-type them: re-typing a ~150-line JSON
-            # blows the output budget and TRUNCATES the later ConfigMaps (and can corrupt the
-            # JSON). It outputs a short placeholder token instead; the tool fills in the real file.
-            system_prompt += (
-                "\n\n## CONFIGMAP EMBEDS — OUTPUT THE PLACEHOLDER TOKEN, NOT THE CONTENT\n"
-                "In configmaps.yaml, for these two block-scalar values output ONLY the exact "
-                "one-line token shown — do NOT paste the file content (the deploy tool injects "
-                "the real, validated file verbatim, so you never re-type/truncate/corrupt them):\n"
-                "  trino-sql-config → data.setup_trino.sql: |\n    __EMBED_SETUP_TRINO_SQL__\n"
-                "  grafana-dash-config → data.monitoring_specs.json: |\n    __EMBED_MONITORING_SPECS_JSON__\n"
-                "Write the OTHER ConfigMap values (hive.properties, prometheus.yml, "
-                "datasource.yaml, dashboard-provider.yaml) IN FULL as usual. Keeping the two big "
-                "blobs as tokens keeps the file short so all FIVE ConfigMaps fit without truncation.\n"
-            )
 
     messages = [{"role": "system", "content": system_prompt}] + safe_recent_messages(state["messages"], limit=5)
 

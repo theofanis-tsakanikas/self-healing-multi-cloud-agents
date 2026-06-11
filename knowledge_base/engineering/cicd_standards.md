@@ -2,9 +2,14 @@
 id: cicd-standards
 applies_to: all
 primary_consumer: infra-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
-enforced_by: validate_generated_code (safety net) + agent prompts
+enforced_by: agents/codegen.py (deterministic render) + validate_generated_code (safety net)
 last_reviewed: 2026-06-11
 ---
+
+> **GENERATION: CODE-OWNED.** The deploy workflow is rendered deterministically by
+> `agents/codegen.py:render_workflow` (one render per cloud, golden-tested). This
+> document is the SPEC for those renders and the Medic's diagnostic reference —
+> changing a step here requires changing the matching render in the same commit.
 
 # STANDARD: GITHUB ACTIONS CI/CD PIPELINES (MULTI-CLOUD)
 This standard defines the mandatory, modular structure for GitHub Actions workflows. The pipeline is split into a provider-agnostic core and cloud-specific authentication modules.
