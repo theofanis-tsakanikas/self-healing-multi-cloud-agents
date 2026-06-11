@@ -110,9 +110,10 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
 
     config: LangGraph injects the RunnableConfig (with LangSmith callbacks) automatically
     when the function signature declares it. Imperative tool `.invoke()` calls (auto-validate)
-    intentionally do NOT pass it — they inherit the ambient trace context so they nest under
-    THIS node's run, like the LLM-driven tool calls do. Passing the node config explicitly was
-    surfacing auto-validate as a separate ROOT trace in LangSmith instead of a nested span.
+    rely on the ambient trace context (contextvars) and nest under THIS node's run, like the
+    LLM-driven tool calls do — verified for both graph.invoke and graph.stream. (The stray
+    ROOT tool traces once blamed on config-passing were actually the TEST SUITE invoking
+    tools directly with a developer .env that had tracing on — fixed in tests/conftest.py.)
     """
     logger.info("--- STARTING ARCHITECT NODE ---")
 
@@ -422,9 +423,8 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                             all_skipped_this_iter = False
 
                             # AUTO-VALIDATE immediately after every successful write.
-                            # Do NOT pass `config` to .invoke(): let it inherit the ambient trace
-                            # context so it nests under this node's run (like write_project_file),
-                            # instead of surfacing as a separate ROOT trace in LangSmith.
+                            # Inherits the ambient trace context so it nests under this
+                            # node's run (like write_project_file).
                             if "error" not in str(result).lower():
                                 import re as _re
                                 path_match = _re.search(

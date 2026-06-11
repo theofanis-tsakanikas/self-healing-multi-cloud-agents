@@ -90,9 +90,8 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     3. Action Lock: Permanently removes execution tools (Docker/Push) once SUCCESS is detected.
 
     config: LangGraph injects RunnableConfig (with LangSmith callbacks) automatically.
-    Imperative auto-validation .invoke() calls intentionally do NOT pass it — they inherit the
-    ambient trace context and nest under this node's run, instead of surfacing as separate ROOT
-    traces in LangSmith.
+    Imperative auto-validation .invoke() calls rely on the ambient trace context (contextvars)
+    and nest under this node's run — verified for both graph.invoke and graph.stream.
     """
     logger.info("--- STARTING INFRASTRUCTURE NODE ---")
     llm = get_llm(temperature=TEMPERATURE)

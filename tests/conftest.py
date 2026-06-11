@@ -18,6 +18,18 @@ os.environ.setdefault("PINECONE_API_KEY", "test-pinecone-key")
 os.environ.setdefault("PINECONE_INDEX_NAME", "test-index")
 os.environ.setdefault("AWS_DEFAULT_REGION", "eu-central-1")
 
+# ── 1b. LangSmith tracing OFF — hermetic tests must not post telemetry ──────────
+# agents/tools.py runs load_dotenv() at import, so a developer .env with
+# LANGCHAIN_TRACING_V2=true would make every direct tool .invoke() in this suite
+# surface as a ROOT trace in the team's LangSmith project (tests call tools with
+# no parent run — that's exactly where the stray validate_generated_code /
+# patch_project_file / request_fix root traces came from; real agent runs nest
+# fine). Direct assignment (not setdefault) wins over both
+# load_dotenv(override=False) AND an exported shell variable.
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+os.environ["LANGSMITH_TRACING"] = "false"
+os.environ["LANGCHAIN_API_KEY"] = "test-langsmith-key"
+
 # ── 2. Patch external SDK constructors at collection time ───────────────────────
 # agents/tools.py does `client = OpenAI()`, `OpenAIEmbeddings(...)`, `Pinecone(...)`
 # at module level. Patching the constructors here (before the first import of
