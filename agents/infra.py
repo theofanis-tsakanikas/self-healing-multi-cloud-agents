@@ -387,8 +387,8 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         phase_text = (
             "CURRENT OPERATIONAL PHASE: FIX MODE. "
             "The exact fix instructions are in the MANDATORY FIX section of your system prompt above — read them first. "
-            "Step 1: Apply the fix by rewriting ONLY the affected file using the appropriate generation tool "
-            "(generate_github_action for CI/CD errors, generate_k8s_manifest for Kubernetes errors, etc.). "
+            "Step 1: Apply the fix to ONLY the affected file with patch_project_file "
+            "(surgical replacements — works for terraform, K8s manifests, the Dockerfile and the workflow alike). "
             "Step 2: Immediately call push_to_github to deploy the fix. "
             "CRITICAL RULES: "
             "(1) query_vector_store is only needed if the MANDATORY FIX section above says so. "

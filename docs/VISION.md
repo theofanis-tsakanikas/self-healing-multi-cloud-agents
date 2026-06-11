@@ -119,6 +119,11 @@ And if a requirement changes, they start over.
 - All four platforms validated end-to-end on live infrastructure (AWS & Azure 2026-06-04, GCP 2026-06-06, Databricks 2026-06-08)
 
 ### ❌ Still To Build
+- Pipeline Terraform as per-cloud reusable modules (the generated tf becomes a thin
+  module call). Deliberately deferred: moving resources into modules changes their
+  state addresses, which requires a live `moved`-block / `terraform state mv`
+  migration against the three deployed states — must be done alongside a real run,
+  not as a code-only change.
 - MLflow experiment tracking integration (Databricks ML workloads)
 - NL authoring for Databricks (today its NL surface is the fixed demo + cost comparison; free-text builder covers the 3 object-storage clouds)
 - SaaS hardening: auth, multi-tenancy, billing
