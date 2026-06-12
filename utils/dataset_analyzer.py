@@ -28,6 +28,16 @@ _PII_NAME_PATTERNS = re.compile(
 _EMAIL_PATTERN  = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE_PATTERN  = re.compile(r"^\+?[\d\s\-().]{7,20}$")
 
+# ── Column-name hints for deterministic rule suggestions ──────────────────────
+_NONNEG_NAME = re.compile(
+    r"(amount|price|cost|qty|quantity|count|total|balance|salary|revenue|age)",
+    re.IGNORECASE,
+)
+_DATE_NAME = re.compile(
+    r"(date|time|timestamp|created|updated|dob|birth|_at$|_on$)",
+    re.IGNORECASE,
+)
+
 
 def _looks_like_email(series: pd.Series) -> bool:
     sample = series.dropna().astype(str).head(20)
@@ -166,67 +176,218 @@ def _detect_quality_issues(df: pd.DataFrame) -> list[dict]:
 
 # ── Suggested rules ───────────────────────────────────────────────────────────
 
+def _rule(
+    capability: str,
+    description: str,
+    target_criteria: str,
+    logic: str,
+    on_failure_action: str,
+    confidence: str,
+    severity: str,
+) -> dict:
+    """One suggested rule.
+
+    confidence = how strongly the DATA supports this rule (high|medium|low);
+    severity   = the impact if it is violated (high|medium|low).
+    Both let the UI rank suggestions — confident ones surface first.
+    """
+    return {
+        "capability":        capability,
+        "description":       description,
+        "target_criteria":   target_criteria,
+        "logic":             logic,
+        "on_failure_action": on_failure_action,
+        "confidence":        confidence,
+        "severity":          severity,
+    }
+
+
+_CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
 def _build_suggested_rules(
     df: pd.DataFrame,
     pii_fields: list[str],
     quality_issues: list[dict],
 ) -> dict:
-    standards = []
+    """Deterministic data-quality profiler (a mini Great-Expectations).
 
-    # Not-null rule for low-null columns (likely key fields)
+    Every rule is derived from MEASURABLE properties of the dataframe — null
+    rates, PII patterns, duplicates, ranges, cardinality, uniqueness, formats —
+    so the closed set of conditions is owned by code, never an LLM. Domain /
+    business rules (e.g. "discount must be <= 50%") need semantics the data does
+    not carry and belong to the NL/LLM path, not a hardcoded catalog here.
+    """
+    standards: list[dict] = []
+    n_rows = len(df)
+    numeric_cols = list(df.select_dtypes(include="number").columns)
+    object_cols = list(df.select_dtypes(include="object").columns)
+
+    # 1. Mandatory fields — low-null key columns.
     key_cols = [
         col for col in df.columns
         if df[col].isna().mean() < 0.01
         and df[col].dtype in ("int64", "int32", "object")
     ][:5]
     if key_cols:
-        standards.append({
-            "capability":      "mandatory_fields",
-            "description":     "Key columns must never be null.",
-            "target_criteria": f"Columns: {key_cols}",
-            "logic":           f"Reject rows where any of {key_cols} IS NULL.",
-            "on_failure_action": "REJECT_ROW",
-        })
+        standards.append(_rule(
+            "mandatory_fields",
+            "Key columns must never be null.",
+            f"Columns: {key_cols}",
+            f"Reject rows where any of {key_cols} IS NULL.",
+            "REJECT_ROW", "high", "high",
+        ))
 
-    # PII masking
+    # 2. PII masking.
     if pii_fields:
-        standards.append({
-            "capability":      "pii_protection",
-            "description":     "Personal data detected — must be masked before landing in data lake.",
-            "target_criteria": f"Columns: {pii_fields}",
-            "logic":           "Hash name fields (SHA-256); mask email fields (a***@domain.com).",
-            "on_failure_action": "ABORT_PIPELINE",
-        })
+        standards.append(_rule(
+            "pii_protection",
+            "Personal data detected — must be masked before landing in the data lake.",
+            f"Columns: {pii_fields}",
+            "Hash name fields (SHA-256); mask email fields (a***@domain.com).",
+            "ABORT_PIPELINE", "high", "high",
+        ))
 
-    # Duplicate check
+    # 3. Deduplication.
     if any(i["issue"] == "duplicate_rows" for i in quality_issues):
-        standards.append({
-            "capability":      "deduplication",
-            "description":     "Duplicate rows detected in source data.",
-            "target_criteria": "All columns",
-            "logic":           "Deduplicate on ingest — keep most recent record.",
-            "on_failure_action": "KEEP_MOST_RECENT",
-        })
+        standards.append(_rule(
+            "deduplication",
+            "Duplicate rows detected in source data.",
+            "All columns",
+            "Deduplicate on ingest — keep most recent record.",
+            "KEEP_MOST_RECENT", "high", "medium",
+        ))
 
-    # High null columns → coerce
+    # 4. High-null columns.
     high_null = [i["column"] for i in quality_issues if i["issue"] == "high_null_rate"]
     if high_null:
-        standards.append({
-            "capability":      "null_handling",
-            "description":     f"Columns with high null rate: {high_null}",
-            "target_criteria": f"Columns: {high_null}",
-            "logic":           "Flag rows but do not reject — mark as INCOMPLETE.",
-            "on_failure_action": "MARK_AS_INCOMPLETE",
-        })
+        worst = "high" if any(
+            i["issue"] == "high_null_rate" and i["severity"] == "high" for i in quality_issues
+        ) else "medium"
+        standards.append(_rule(
+            "null_handling",
+            f"Columns with high null rate: {high_null}",
+            f"Columns: {high_null}",
+            "Flag rows but do not reject — mark as INCOMPLETE.",
+            "MARK_AS_INCOMPLETE", "high", worst,
+        ))
 
-    # Freshness (always)
-    standards.append({
-        "capability":      "data_freshness",
-        "description":     "Ensure pipeline is processing recent data.",
-        "target_criteria": "Ingestion timestamp",
-        "logic":           "Abort if batch is older than 48 hours.",
-        "on_failure_action": "ABORT_PIPELINE",
-    })
+    # 5. Non-negative measures — numeric columns whose NAME implies >= 0 but that hold negatives.
+    for col in numeric_cols:
+        if _NONNEG_NAME.search(str(col)):
+            col_min = df[col].min()
+            if pd.notna(col_min) and col_min < 0:
+                neg = int((df[col] < 0).sum())
+                standards.append(_rule(
+                    "value_range",
+                    f"'{col}' looks like a non-negative measure but holds {neg} negative value(s).",
+                    f"Column: {col}",
+                    f"Reject rows where {col} < 0.",
+                    "REJECT_ROW", "high", "high",
+                ))
+
+    # 6. Unique-key candidate — a low-null column that is unique across every row.
+    for col in df.columns:
+        if n_rows > 1 and df[col].isna().mean() < 0.01 and df[col].nunique(dropna=True) == n_rows:
+            standards.append(_rule(
+                "uniqueness",
+                f"'{col}' is unique across all rows — likely a primary key.",
+                f"Column: {col}",
+                f"Enforce uniqueness on {col}; reject duplicate keys.",
+                "REJECT_ROW", "high", "high",
+            ))
+            break  # one primary-key suggestion is enough
+
+    # 7. Controlled vocabulary — low-cardinality categorical columns.
+    cat_added = 0
+    for col in object_cols:
+        if cat_added >= 2 or col in pii_fields:
+            continue
+        nunique = df[col].nunique(dropna=True)
+        if 1 < nunique <= 20 and n_rows >= 20 and (nunique / n_rows) < 0.05:
+            observed = sorted(df[col].dropna().astype(str).unique().tolist())[:20]
+            standards.append(_rule(
+                "allowed_values",
+                f"'{col}' has only {nunique} distinct values — a controlled vocabulary.",
+                f"Column: {col}",
+                f"Value of {col} must be one of: {observed}.",
+                "REJECT_ROW", "medium", "medium",
+            ))
+            cat_added += 1
+
+    # 8. Statistical outliers (1.5x IQR) on numeric measures.
+    out_added = 0
+    for col in numeric_cols:
+        if out_added >= 2:
+            break
+        s = df[col].dropna()
+        if len(s) >= 20:
+            q1, q3 = s.quantile(0.25), s.quantile(0.75)
+            iqr = q3 - q1
+            if iqr > 0:
+                lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+                n_out = int(((s < lo) | (s > hi)).sum())
+                if 0 < (n_out / len(s)) < 0.10:
+                    standards.append(_rule(
+                        "value_range",
+                        f"'{col}' has {n_out} statistical outlier(s) (1.5x IQR) — review extreme values.",
+                        f"Column: {col}",
+                        f"Flag rows where {col} is outside [{lo:.2f}, {hi:.2f}].",
+                        "MARK_AS_INCOMPLETE", "medium", "low",
+                    ))
+                    out_added += 1
+
+    # 9. Format consistency — leading/trailing whitespace.
+    ws_added = 0
+    for col in object_cols:
+        if ws_added >= 2:
+            break
+        s = df[col].dropna().astype(str)
+        if len(s) and (s != s.str.strip()).any():
+            standards.append(_rule(
+                "format_consistency",
+                f"'{col}' contains values with leading/trailing whitespace.",
+                f"Column: {col}",
+                f"Trim whitespace on {col} before landing; flag rows that needed cleaning.",
+                "MARK_AS_INCOMPLETE", "medium", "low",
+            ))
+            ws_added += 1
+
+    # 10. Date parseability — date-named text columns that do not fully parse.
+    for col in object_cols:
+        if _DATE_NAME.search(str(col)):
+            s = df[col].dropna().astype(str)
+            if len(s) >= 10:
+                try:
+                    fail = pd.to_datetime(s, errors="coerce").isna().mean()
+                except Exception:
+                    fail = 0.0
+                if 0 < fail < 0.5:
+                    standards.append(_rule(
+                        "type_format",
+                        f"'{col}' looks like a date but {fail * 100:.0f}% of values don't parse.",
+                        f"Column: {col}",
+                        f"Reject rows where {col} is not a valid date.",
+                        "REJECT_ROW", "medium", "medium",
+                    ))
+            break  # one date-format suggestion is enough
+
+    # 11. Freshness — ONLY when a temporal column exists (else it is irrelevant noise).
+    has_time_col = (
+        any(_DATE_NAME.search(str(c)) for c in df.columns)
+        or len(df.select_dtypes(include="datetime").columns) > 0
+    )
+    if has_time_col:
+        standards.append(_rule(
+            "data_freshness",
+            "Ensure the pipeline is processing recent data.",
+            "Ingestion timestamp",
+            "Abort if the batch is older than 48 hours.",
+            "ABORT_PIPELINE", "medium", "medium",
+        ))
+
+    # Most-confident suggestions first — the UI surfaces high-confidence rules on top.
+    standards.sort(key=lambda r: _CONFIDENCE_RANK.get(r.get("confidence", "low"), 2))
 
     return {
         "domain":             "auto_detected",
