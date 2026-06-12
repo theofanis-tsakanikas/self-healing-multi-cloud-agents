@@ -357,6 +357,10 @@ def medic_node(state: AgentState):
     fix_signature_parts = []  # error text of each request_fix this turn → loop-convergence signature
     healing_context = ""  # Populated when request_fix is called; written to state for next agent
     for i in range(5):
+        # Stop once the CI run is confirmed green (set deterministically below) — do NOT re-invoke
+        # the LLM, which could then hallucinate a request_fix on an already-verified run.
+        if verification_successful:
+            break
         response = llm_with_tools.invoke(messages)
         messages.append(response)
         new_messages_for_state.append(response)
@@ -384,6 +388,18 @@ def medic_node(state: AgentState):
                 "PENDING" in result_str.upper() or "PERMISSIONS_ERROR" in result_str.upper()
             ):
                 logs_still_pending = True
+
+            # CI green = verified, DETERMINISTICALLY (symmetric to the PENDING check above): the
+            # success outcome must NOT depend on the LLM emitting "VERIFIED" as plain text after a
+            # PENDING -> green poll dance (gpt-4o-mini often phrases it differently or re-polls,
+            # leaving mission_status unset -> MissionFailedError on a SUCCESSFUL deploy).
+            # fetch_github_action_logs returns this exact phrasing when no job failed.
+            if tool_name == "fetch_github_action_logs" and (
+                "no failed jobs found" in result_str.lower()
+                or "everything looks green" in result_str.lower()
+            ):
+                verification_successful = True
+                break  # green is conclusive — stop; the outer loop breaks before the next LLM call
 
             if tool_name == "request_fix" and '"REJECTED_BY_MEDIC"' in result_str:
                 # Only ACCEPTED fix requests set routing flags. The request_fix tool rejects
