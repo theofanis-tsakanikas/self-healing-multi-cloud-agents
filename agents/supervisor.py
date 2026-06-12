@@ -149,6 +149,18 @@ def supervisor_node(state: AgentState):
             )
             return {"next_step": "FINISH", "fix_loop_escalated": False}
 
+        # Deterministic success sign-off — the Medic sets mission_status="verified" in Python
+        # the instant the CI run is confirmed green; success no longer depends on the LLM
+        # emitting the word "verified" as plain text. The green tool output is literally
+        # "...Everything looks green!" (no "verified"), so the string check below would miss it
+        # and the run would fall through to the LLM fallback, looping medic→supervisor→medic to
+        # the recursion limit on a SUCCESSFUL deploy. Checked BEFORE any fix-target derivation:
+        # a verified run has no fix to route, and a stale request_fix still in message history
+        # must not pull us back into an agent.
+        if state.get("mission_status") == "verified":
+            logger.info("✅ Medic verified the deployment (mission_status=verified). Routing to FINISH.")
+            return {"next_step": "FINISH"}
+
         # Prefer the Medic's deterministic ownership target (derived from the FAILED-file
         # list at the Python layer) over re-parsing the request_fix message — the LLM has
         # named both agents for one .py error, which the message scan cannot disambiguate.

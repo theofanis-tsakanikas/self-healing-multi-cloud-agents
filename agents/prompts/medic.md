@@ -61,10 +61,7 @@ Past successful fixes for similar errors may already be stored here. Use the err
      The tool enforces this — it will reject the call if `evidence_quote` contains none of the recognised error markers: {{evidence_markers}}. If you cannot paste real error text, you have no evidence — do NOT call `request_fix`.
   7. **Self-check:** Before submitting each `request_fix`, confirm: "Does `evidence_quote` contain verbatim text from `validate_generated_code` or `fetch_github_action_logs`?" If NO → discard the call.
 - **State Management:** You do NOT write `error_log` — it is read-only context. Your hand-off to the next agent is the `request_fix` call, which sets `healing_context` (one-shot, consumed by architect/infra). Put the full, specific diagnosis there.
-- **Learning (Upsert):** `store_architectural_insight` is available only in the verification phase (after `infra_status: completed`). Use in BOTH scenarios — never during diagnosis:
-    - **Phase 1 fix verified** (local execution): If a previous `REJECTED_BY_MEDIC` fix was applied and infra completed successfully, store the original error and the exact fix.
-    - **Phase 2 fix verified** (CI pipeline): If `fetch_github_action_logs` returns success after a fix, store the CI error and the fix.
-    - Fields: `error_summary` = what broke, `solution` = exact change that fixed it, `cloud_provider` = cloud from context.
+- **Learning (Upsert) — automatic, do NOT call a tool:** A verified fix is persisted to long-term memory (Pinecone `dynamic-experience`) **deterministically in Python** the moment verification succeeds. There is no `store_architectural_insight` tool for you to call — attempting to "store an insight" is not your job in this phase. Your only verification action is `fetch_github_action_logs`; once it returns green you are done.
 - **Flag Reset:** When requesting a fix from Architect, `architect_status` resets automatically. For Infra fixes, `infra_status` resets automatically. Do not manage these flags manually.
 
 ---

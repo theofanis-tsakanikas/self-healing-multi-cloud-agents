@@ -194,16 +194,18 @@ def medic_node(state: AgentState):
     #   → The fix hasn't been applied yet — storing an insight now would pollute
     #     dynamic-experience with unverified solutions.
     # VERIFICATION phase (infra completed, CI logs available): adds fetch_github_action_logs
-    #   + store_architectural_insight so the LLM can confirm success and immediately
-    #   persist the validated fix as institutional knowledge.
+    #   so the LLM can confirm the CI outcome. Persisting the validated fix as institutional
+    #   knowledge is NOT an LLM tool — it is done deterministically in Python after a green
+    #   verification (see end of this function). Exposing store_architectural_insight to the
+    #   LLM caused a recursion loop: gpt-4o-mini mis-called it (wrong fields → pydantic error),
+    #   retried, and burned turns instead of finishing a successful run.
     tools = [request_fix, query_vector_store]
 
     if state.get("infra_status") == "completed":
         tools.append(fetch_github_action_logs)
-        tools.append(store_architectural_insight)
-        logger.info("🔓 VERIFICATION phase: GitHub Logs + store_architectural_insight UNLOCKED")
+        logger.info("🔓 VERIFICATION phase: GitHub Logs UNLOCKED (insight stored in Python on green)")
     else:
-        logger.info("🔒 DIAGNOSIS phase: store_architectural_insight locked until fix is verified")
+        logger.info("🔒 DIAGNOSIS phase: CI log fetch locked until infra completes")
 
     llm = get_llm(temperature=TEMPERATURE)
     llm_with_tools = llm.bind_tools(tools)
@@ -568,7 +570,7 @@ def medic_node(state: AgentState):
 
     # If logs are pending the CI run is still in progress, back off before re-routing.
     # attempt is persisted in state so the counter survives across medic re-entries.
-    if logs_still_pending and not reset_infra and not reset_architect:
+    if logs_still_pending and not verification_successful and not reset_infra and not reset_architect:
         attempt = state.get("ci_poll_attempt", 0)
 
         if _should_stop_polling(attempt):
@@ -609,15 +611,13 @@ def medic_node(state: AgentState):
             cloud = state.get("target_infra", "unknown")
             written = state.get("written_files", [])
 
-            insight_text = (
-                f"Pipeline '{pipeline_id}' on '{cloud}' verified successfully. "
-                f"Artifacts: {', '.join(written)}. "
-                f"No errors detected. CI/CD passed."
-            )
-
+            # The tool signature is (error_summary, solution, cloud_provider) — passing
+            # {"insight", "project_id"} raises 3 pydantic "Field required" errors and the
+            # insight is silently dropped by the except below. Map to the real fields.
             store_architectural_insight.invoke({
-                "insight": insight_text,
-                "project_id": pipeline_id,
+                "error_summary": f"Pipeline '{pipeline_id}' on '{cloud}' deployed and verified end-to-end.",
+                "solution": f"Verified artifacts: {', '.join(written) or 'n/a'}. CI/CD passed, no errors detected.",
+                "cloud_provider": cloud,
             })
             logger.info("💾 Architectural insight stored after successful verification.")
         except Exception as e:

@@ -100,6 +100,32 @@ class TestRuleCMedic:
         assert result["next_step"] == "FINISH"
         assert result["fix_loop_escalated"] is False
 
+    def test_medic_mission_verified_routes_to_finish_deterministically(self):
+        # Regression (recursion-loop bug, 2026-06-12): the deterministic green-CI
+        # verification sets mission_status="verified", but the LAST message is the tool's
+        # "...Everything looks green!" — which does NOT contain the string "verified". The
+        # supervisor must FINISH on mission_status, not fall through to the LLM fallback and
+        # loop medic→supervisor→medic to the recursion limit on a SUCCESSFUL deploy.
+        state = _make_state(
+            last_agent="medic",
+            mission_status="verified",
+            messages=[AIMessage(content="No failed jobs found in run 123. Everything looks green!")],
+            next_step="",
+        )
+        assert supervisor_node(state)["next_step"] == "FINISH"
+
+    def test_medic_verified_wins_over_stale_fix_target(self):
+        # The verified check runs BEFORE fix-target derivation, so a stale request_fix left in
+        # message history (or an explicit medic_fix_target) cannot pull a verified run back
+        # into an agent.
+        state = _make_state(
+            last_agent="medic",
+            mission_status="verified",
+            medic_fix_target="architect",
+            messages=[AIMessage(content="Everything looks green!")],
+        )
+        assert supervisor_node(state)["next_step"] == "FINISH"
+
     def test_medic_fix_target_architect_resets_status_and_consumes_target(self):
         state = _make_state(last_agent="medic", medic_fix_target="architect",
                             architect_status="completed")
