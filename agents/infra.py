@@ -79,6 +79,52 @@ def _is_infra_allowed_file(filename: str) -> bool:
         return False
     return True
 
+
+def _pin_terraform_backend(content: str, cloud: str, cloud_setup: dict) -> str:
+    """Deterministic guarantee: the terraform STATE backend is mechanically determined by the
+    bootstrap (CLOUD_SETUP.state_*), not a judgement call — but the LLM intermittently fills the
+    backend `bucket` with the DATA bucket (bucket_name) instead of the state bucket, which THIS
+    apply is supposed to CREATE → `terraform init` fails ("S3 bucket ... does not exist"). Pin the
+    backend values from config so the LLM cannot pick the wrong one. No-op without a backend block."""
+    backends = {
+        "aws": ("s3", {
+            "bucket":         cloud_setup.get("state_bucket"),
+            "key":            cloud_setup.get("state_key"),
+            "dynamodb_table": cloud_setup.get("lock_table"),
+            "region":         cloud_setup.get("region"),
+        }),
+        "azure": ("azurerm", {
+            "storage_account_name": cloud_setup.get("state_storage_account"),
+            "container_name":       cloud_setup.get("state_container"),
+            "key":                  cloud_setup.get("state_key"),
+        }),
+        "gcp": ("gcs", {
+            "bucket": cloud_setup.get("state_bucket"),
+            "prefix": cloud_setup.get("state_prefix"),
+        }),
+    }
+    if cloud not in backends:
+        return content
+    provider, kv = backends[cloud]
+    m = re.search(rf'backend\s+"{provider}"\s*\{{(.*?)\}}', content, re.DOTALL)
+    if not m:
+        return content
+    body = new_body = m.group(1)
+    for key, value in kv.items():
+        if not value:
+            continue
+        new_body = re.sub(
+            rf'(\b{re.escape(key)}\s*=\s*)"[^"]*"',
+            lambda mt, _v=value: mt.group(1) + f'"{_v}"',
+            new_body,
+            count=1,
+        )
+    if new_body == body:
+        return content
+    logger.info(f"🔒 Pinned terraform {provider} backend to the bootstrap state ({cloud}).")
+    return content[:m.start(1)] + new_body + content[m.end(1):]
+
+
 def infra_node(state: AgentState, config: RunnableConfig = None):
     """
     Infrastructure agent node managing Terraform, Containerization, and CI/CD.
@@ -579,6 +625,15 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                     new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
                     logger.warning("🚫 PUSH BLOCKED: outstanding validation errors in fix mode.")
                     continue
+
+                # Deterministic backend guarantee: pin the terraform STATE backend to the bootstrap
+                # state bucket/key/lock from config — the LLM must not point it at the data bucket
+                # (which this apply creates) → 'S3 bucket ... does not exist' on init.
+                if t_name == "write_terraform_config" and isinstance(t_args.get("content"), str):
+                    t_args["content"] = _pin_terraform_backend(
+                        t_args["content"], cloud_provider,
+                        pipeline_conf.get(f"{cloud_provider}_setup", {}) or {},
+                    )
 
                 result = full_tools_map[t_name].invoke(t_args)
                 result_str = str(result)

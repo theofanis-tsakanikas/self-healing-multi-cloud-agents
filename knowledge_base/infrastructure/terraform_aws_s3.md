@@ -66,10 +66,10 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "<concrete-bucket-name>"
-    key            = "terraform/<pipeline-name>/terraform.tfstate"
+    bucket         = "<state_bucket>"        # = CLOUD_SETUP.state_bucket — the bootstrap STATE bucket; NEVER the data bucket / var.bucket_name (the data bucket is CREATED by this apply and does not exist at init time)
+    key            = "<state_key>"           # = CLOUD_SETUP.state_key, copied verbatim — do NOT derive from pipeline-name
     region         = "<concrete-region>"
-    dynamodb_table = "terraform-state-lock"   # project convention — the lock table bootstrap creates
+    dynamodb_table = "<lock_table>"          # = CLOUD_SETUP.lock_table — the lock table bootstrap creates
   }
 }
 
