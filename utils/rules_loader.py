@@ -17,7 +17,7 @@ quality_standards:
     description: "..."
     target_criteria: "order_id column"
     logic: "Reject rows where order_id IS NULL"
-    on_failure_action: "REJECT_ROW"   # ABORT_PIPELINE | REJECT_ROW | NULLIFY_FIELD | COERCE | KEEP_MOST_RECENT | MARK_AS_INCOMPLETE
+    on_failure_action: "EXCLUDE_AND_LOG"   # DROP_RECORD | EXCLUDE_AND_LOG | DEFAULT_VALUE | FLAG_AS_SUSPICIOUS  (+ MASK_OR_HASH for PII, ABORT_PIPELINE for a pipeline gate)
 
 ── Simple customer format (auto-converted) ──────────────────────────────────
 domain: "my_sales"
@@ -30,7 +30,7 @@ rules:
     max: 1000000
     pattern: "^\\d+$"      # for regex
     max_hours: 48          # for freshness
-    action: REJECT_ROW     # optional override, default per check type
+    action: EXCLUDE_AND_LOG     # optional override (canonical enum), default per check type
 """
 from __future__ import annotations
 import json
@@ -43,15 +43,59 @@ from utils.llm_defaults import NL_MODEL
 
 _RULES_DIR = Path(__file__).resolve().parent.parent / "configs" / "business_rules"
 
-# Default on_failure_action per check type
+# Canonical business-rules enum — the vocabulary the Architect agent understands
+# (configs/business_rules/*.yaml). Row-level rules use one of these four; PII is a transform
+# (MASK_OR_HASH — never "delete the row") and freshness is a pipeline-level gate (ABORT_PIPELINE),
+# both kept distinct via `category` so they are not mis-read as row actions.
+_CANONICAL_ROW_ACTIONS = {"DROP_RECORD", "EXCLUDE_AND_LOG", "DEFAULT_VALUE", "FLAG_AS_SUSPICIOUS"}
+
+# Default on_failure_action per check type (canonical).
 _DEFAULT_ACTION = {
-    "not_null":  "REJECT_ROW",
-    "range":     "REJECT_ROW",
-    "pii_mask":  "ABORT_PIPELINE",
-    "regex":     "NULLIFY_FIELD",
-    "unique":    "KEEP_MOST_RECENT",
+    "not_null":  "EXCLUDE_AND_LOG",
+    "range":     "EXCLUDE_AND_LOG",
+    "pii_mask":  "MASK_OR_HASH",
+    "regex":     "DEFAULT_VALUE",
+    "unique":    "EXCLUDE_AND_LOG",
     "freshness": "ABORT_PIPELINE",
 }
+
+# Legacy / free-form action -> canonical (safety net for uploads and GPT output).
+_ACTION_ALIASES = {
+    "REJECT_ROW":         "EXCLUDE_AND_LOG",
+    "DROP_ROW":           "DROP_RECORD",
+    "NULLIFY_FIELD":      "DEFAULT_VALUE",
+    "COERCE":             "DEFAULT_VALUE",
+    "KEEP_MOST_RECENT":   "EXCLUDE_AND_LOG",
+    "MARK_AS_INCOMPLETE": "FLAG_AS_SUSPICIOUS",
+    "FLAG":               "FLAG_AS_SUSPICIOUS",
+}
+
+
+def _normalize_action(action: str) -> str:
+    """Map any legacy/free-form on_failure_action to the canonical enum the agent understands.
+    PII (MASK_OR_HASH) and pipeline gates (ABORT_PIPELINE) are not row-level and are kept as-is."""
+    a = (action or "").strip().upper()
+    if a in ("MASK_OR_HASH", "ABORT_PIPELINE") or a in _CANONICAL_ROW_ACTIONS:
+        return a
+    return _ACTION_ALIASES.get(a, "EXCLUDE_AND_LOG")
+
+
+def _category_for(action: str) -> str:
+    if action == "MASK_OR_HASH":
+        return "transform"
+    if action == "ABORT_PIPELINE":
+        return "pipeline_gate"
+    return "data_quality"
+
+
+def _normalize_rules(conf: dict) -> dict:
+    """Normalise every rule's on_failure_action to canonical and tag its category, so any
+    source (demo / upload / NL) plugs into the agent identically."""
+    for s in conf.get("quality_standards", []):
+        act = _normalize_action(s.get("on_failure_action", ""))
+        s["on_failure_action"] = act
+        s["category"] = _category_for(act)
+    return conf
 
 # ── 1. Demo rules ─────────────────────────────────────────────────────────────
 
@@ -64,7 +108,7 @@ def load_demo_rules(domain: str = "sales") -> dict:
     for path in candidates:
         if path.exists():
             with open(path) as f:
-                return yaml.safe_load(f)
+                return _normalize_rules(yaml.safe_load(f))
     # last resort: first file found
     files = sorted(_RULES_DIR.glob("*.yaml"))
     if files:
@@ -99,11 +143,11 @@ def parse_rules_file(content: bytes, filename: str) -> dict:
     # Already in internal format?
     if "quality_standards" in raw:
         _validate_internal(raw)
-        return raw
+        return _normalize_rules(raw)
 
     # Simple customer format — convert
     if "rules" in raw:
-        return _convert_simple(raw)
+        return _normalize_rules(_convert_simple(raw))
 
     raise ValueError(
         "Unrecognised format. File must contain either 'quality_standards' "
@@ -124,7 +168,7 @@ def _convert_simple(raw: dict) -> dict:
     standards = []
     for r in raw.get("rules", []):
         check  = r.get("check", "not_null")
-        action = r.get("action", _DEFAULT_ACTION.get(check, "REJECT_ROW")).upper()
+        action = r.get("action", _DEFAULT_ACTION.get(check, "EXCLUDE_AND_LOG")).upper()
         name   = r.get("name", check)
 
         if check == "not_null":
@@ -188,7 +232,7 @@ Return this exact schema — no markdown, no commentary:
       "description": "<what this rule enforces>",
       "target_criteria": "<which column(s) or condition>",
       "logic": "<exact check to perform>",
-      "on_failure_action": "<ABORT_PIPELINE|REJECT_ROW|NULLIFY_FIELD|COERCE|KEEP_MOST_RECENT|MARK_AS_INCOMPLETE>"
+      "on_failure_action": "<DROP_RECORD|EXCLUDE_AND_LOG|DEFAULT_VALUE|FLAG_AS_SUSPICIOUS — or MASK_OR_HASH for PII masking, ABORT_PIPELINE for a freshness/pipeline gate>"
     }
   ]
 }
@@ -200,7 +244,7 @@ data is mentioned, and a freshness check.
 
 
 def extract_rules_from_nl(description: str) -> dict:
-    """Use GPT-4o-mini to extract rules from a plain-English description."""
+    """Use the NL model (NL_MODEL) to extract rules from a plain-English description."""
     api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key:
         return _fallback_rules(description)
@@ -220,7 +264,7 @@ def extract_rules_from_nl(description: str) -> dict:
         )
         raw = json.loads(resp.choices[0].message.content)
         _validate_internal(raw)
-        return raw
+        return _normalize_rules(raw)
     except Exception:
         return _fallback_rules(description)
 
@@ -233,7 +277,7 @@ def _fallback_rules(description: str) -> dict:
             "description":     "Core identifiers must always be present.",
             "target_criteria": "Primary key columns (id, order_id, customer_id…)",
             "logic":           "Reject rows where primary key IS NULL.",
-            "on_failure_action": "REJECT_ROW",
+            "on_failure_action": "EXCLUDE_AND_LOG",
         },
         {
             "capability":      "data_freshness",
@@ -249,13 +293,13 @@ def _fallback_rules(description: str) -> dict:
             "description":     "Personal data must be masked before landing in the data lake.",
             "target_criteria": "Columns containing email, phone, name",
             "logic":           "Hash names (SHA-256); mask emails (a***@domain.com).",
-            "on_failure_action": "ABORT_PIPELINE",
+            "on_failure_action": "MASK_OR_HASH",
         })
-    return {
+    return _normalize_rules({
         "domain":             "custom",
         "domain_description": "Rules inferred from description (no OpenAI key available).",
         "quality_standards":  standards,
-    }
+    })
 
 
 # ── Template download ─────────────────────────────────────────────────────────
