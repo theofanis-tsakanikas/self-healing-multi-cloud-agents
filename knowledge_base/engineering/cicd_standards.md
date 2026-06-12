@@ -117,7 +117,7 @@ name: Deploy Pipeline
 
 on:
   push:
-    paths: ['Dockerfile', 'scripts/**', 'k8s/**', 'sql/**', 'dashboards/**', 'requirements.txt']
+    paths: ['Dockerfile', 'scripts/pipe_*.py', 'k8s/**', 'sql/**', 'dashboards/**', 'requirements.txt']
 
 jobs:
   deploy:
