@@ -1,0 +1,107 @@
+name: Deploy Pipeline
+
+on:
+  push:
+    paths:
+      - 'Dockerfile'
+      - 'scripts/pipe_*.py'
+      - 'k8s/**'
+      - 'sql/**'
+      - 'dashboards/**'
+      - 'requirements.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push Image
+        run: |
+          docker build -t 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} -f Dockerfile .
+          docker push 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}
+          docker tag 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
+          docker push 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
+
+      - name: Update Kubeconfig
+        run: aws eks update-kubeconfig --region ${{ vars.AWS_DEFAULT_REGION }} --name multi-cloud-agent-cluster
+
+      - name: Set Image Tag in Job Manifest
+        run: |
+          sed -i 's|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo.*|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}|' k8s/job.yaml
+
+      - name: Create Grafana Admin Secret
+        env:
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+        run: |
+          kubectl apply -f k8s/00_namespaces.yaml
+          kubectl get secret grafana-admin -n monitoring >/dev/null 2>&1 || \
+            kubectl create secret generic grafana-admin -n monitoring \
+              --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD:-$(openssl rand -base64 24)}"
+
+      - name: Deploy Shared Services to Kubernetes
+        run: |
+          kubectl apply -f k8s/00_namespaces.yaml
+          kubectl apply -f k8s/configmaps.yaml
+          kubectl apply -f k8s/prometheus_deployment.yaml
+          kubectl apply -f k8s/trino_deployment.yaml
+          kubectl apply -f k8s/grafana_deployment.yaml
+          kubectl rollout restart deployment/trino -n analytics
+          kubectl rollout restart deployment/grafana -n monitoring
+          kubectl rollout status deployment/trino -n analytics --timeout=120s
+          kubectl rollout status deployment/grafana -n monitoring --timeout=120s
+
+      - name: Create DB Credentials Secret
+        run: |
+          kubectl create secret generic pipe-eu-sales-to-s3-db-credentials -n analytics \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Pipeline Job to Kubernetes
+        run: |
+          kubectl delete job -l component=pipeline-job -n analytics --ignore-not-found=true
+          kubectl apply -f k8s/job.yaml
+
+      - name: Check Deployment Status
+        run: |
+          kubectl get pods -n analytics
+          kubectl get pods -n monitoring
+          for i in $(seq 1 60); do
+            SUCCEEDED=$(kubectl get job -l component=pipeline-job -n analytics -o jsonpath='{.items[0].status.succeeded}' 2>/dev/null)
+            FAILED=$(kubectl get job -l component=pipeline-job -n analytics -o jsonpath='{.items[0].status.failed}' 2>/dev/null)
+            if [ "${SUCCEEDED:-0}" = "1" ]; then
+              echo "Job completed successfully"; break
+            fi
+            if [ "${FAILED:-0}" -gt 0 ]; then
+              echo "Job failed. Fetching logs..."
+              echo "=== init-trino logs ==="
+              kubectl logs -l component=pipeline-job -n analytics -c init-trino --tail=50 2>/dev/null || echo "(init-trino logs unavailable)"
+              echo "=== pipeline logs ==="
+              kubectl logs -l component=pipeline-job -n analytics -c pipeline --tail=100 2>/dev/null || echo "(pipeline logs unavailable)"
+              exit 1
+            fi
+            if [ "$i" = "60" ]; then
+              echo "Timeout waiting for job"
+              echo "=== init-trino logs ==="
+              kubectl logs -l component=pipeline-job -n analytics -c init-trino --tail=50 2>/dev/null || echo "(init-trino logs unavailable)"
+              echo "=== pipeline logs ==="
+              kubectl logs -l component=pipeline-job -n analytics -c pipeline --tail=100 2>/dev/null || echo "(pipeline logs unavailable)"
+              exit 1
+            fi
+            echo "Waiting for job... ($i/60)"; sleep 10
+          done
+
+      - run: echo "Deployment Complete"
