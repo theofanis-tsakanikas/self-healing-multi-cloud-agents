@@ -18,9 +18,9 @@ data:
         is_suspicious BOOLEAN,
         run_date DATE
     ) WITH (
-        format = 'PARQUET',
+        format            = 'PARQUET',
         external_location = 's3://eu-sales-insights-data/processed/',
-        partitioned_by = ARRAY['run_date']
+        partitioned_by    = ARRAY['run_date']
     );
 ---
 apiVersion: v1

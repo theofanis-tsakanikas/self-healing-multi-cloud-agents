@@ -13,17 +13,11 @@ from utils.cloud_config import cloud_get  # SSM → bootstrap_outputs → env fa
 
 _CLOUD = os.getenv("CLOUD_PROVIDER", "aws")
 
-if _CLOUD == "aws":
-    import boto3
-elif _CLOUD == "gcp":
-    from google.cloud import storage
-elif _CLOUD == "azure":
-    from azure.storage.blob import BlobServiceClient
-
 logging.basicConfig(level=logging.INFO)
 
+
 def run():
-    logging.info("Pipeline starting: pipe_eu_sales_to_s3")
+    logging.info("Pipeline starting: pipe_eu_sales_to_s3")  # ← MUST be the very first line
 
     # ── 1. IDEMPOTENCY CHECK ──────────────────────────────────────────────────
     run_date = datetime.date.today().isoformat()
@@ -34,18 +28,21 @@ def run():
     prefix = parsed.path.lstrip('/')
 
     if _CLOUD == "aws":
+        import boto3
         s3 = boto3.client('s3')
         response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
         if response.get('KeyCount', 0) > 0:
             logging.info(f"Partition run_date={run_date} already populated. Skipping.")
             return
     elif _CLOUD == "gcp":
+        from google.cloud import storage
         client = storage.Client()
         blobs = list(client.list_blobs(bucket, prefix=prefix, max_results=1))
         if blobs:
             logging.info("Destination already populated. Skipping.")
             return
     elif _CLOUD == "azure":
+        from azure.storage.blob import BlobServiceClient
         container_name = bucket.split('@')[0]
         client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))
         container = client.get_container_client(container_name)
@@ -59,48 +56,55 @@ def run():
         host = cloud_get("aws", "db_host", db_type="postgres")
         port = cloud_get("aws", "db_port", db_type="postgres") or "5432"
         user = cloud_get("aws", "db_user", db_type="postgres")
-        pw = cloud_get("aws", "db_password", db_type="postgres")
-        db = cloud_get("aws", "db_name", db_type="postgres")
+        pw   = cloud_get("aws", "db_password", db_type="postgres")
+        db   = cloud_get("aws", "db_name", db_type="postgres")
         connection_string = (
-            f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
+            f"postgresql+psycopg2://{user}:{pw}"
+            f"@{host}:{port}/{db}"
         )
     elif _CLOUD == "gcp":
         host = cloud_get("gcp", "db_host", db_type="mysql")
         port = cloud_get("gcp", "db_port", db_type="mysql") or "3306"
         user = cloud_get("gcp", "db_user", db_type="mysql")
-        pw = cloud_get("gcp", "db_password", db_type="mysql")
-        db = cloud_get("gcp", "db_name", db_type="mysql")
+        pw   = cloud_get("gcp", "db_password", db_type="mysql")
+        db   = cloud_get("gcp", "db_name", db_type="mysql")
         connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
     elif _CLOUD == "azure":
         host = cloud_get("azure", "db_host", db_type="postgres")
         port = cloud_get("azure", "db_port", db_type="postgres") or "5432"
         user = cloud_get("azure", "db_user", db_type="postgres")
-        pw = cloud_get("azure", "db_password", db_type="postgres")
-        db = cloud_get("azure", "db_name", db_type="postgres")
+        pw   = cloud_get("azure", "db_password", db_type="postgres")
+        db   = cloud_get("azure", "db_name", db_type="postgres")
         connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
 
     # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
-    rejected_by_reason = {}    # rule_name → cumulative dropped rows
+    rejected_by_reason = {}    # rule_name → cumulative dropped rows (one entry per row-removing rule)
     query = "SELECT * FROM raw_eu_sales"  # source table from context
 
     try:
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
-            # 3a. Date conversion
+
+            # 3a. Date conversion — ONLY when the discovered schema actually HAS a date/
+            #     timestamp column that a business rule compares against.
             chunk['order_date'] = pd.to_datetime(chunk['order_date'], errors='coerce')
 
-            # 3b. Business rules
+            # 3b. Business rules — translate ALL quality_standards from pipeline config.
+            #     Each row-removing rule takes its OWN FRESH `_before = len(chunk)` immediately
+            #     before ITS filter and accumulates the delta under its own quality_standards
+            #     rule name.
+
             # monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
-            chunk['unit_price'] = pd.to_numeric(chunk['unit_price'], errors='coerce')
+            chunk['unit_price'] = pd.to_numeric(chunk['unit_price'], errors='coerce')  # dirty/non-numeric → NaN
             _before = len(chunk)
-            chunk = chunk[chunk['unit_price'] > 0.0]
+            chunk = chunk[chunk['unit_price'] > 0.0]    # NaN (coerced dirty) and <=0 dropped → counted as rejected
             rejected_by_reason['monetary_integrity'] = \
                 rejected_by_reason.get('monetary_integrity', 0) + (_before - len(chunk))
 
             # temporal_validity: target_criteria 'date'/'timestamp' → order_date → EXCLUDE_AND_LOG
-            _before = len(chunk)
+            _before = len(chunk)                       # FRESH reading
             _future = chunk['order_date'] > pd.Timestamp.now()
             if _future.any():
                 logging.warning(f"Excluded {_future.sum()} future-dated rows (temporal_validity).")
@@ -109,7 +113,7 @@ def run():
                 rejected_by_reason.get('temporal_validity', 0) + (_before - len(chunk))
 
             # completeness_enforcement: target_criteria 'identifier'/'order_id' → order_id → DROP_RECORD
-            _before = len(chunk)
+            _before = len(chunk)                       # FRESH reading
             chunk = chunk.dropna(subset=['order_id'])
             rejected_by_reason['completeness_enforcement'] = \
                 rejected_by_reason.get('completeness_enforcement', 0) + (_before - len(chunk))
@@ -117,16 +121,17 @@ def run():
             # currency_standardization: target_criteria 'currency' → currency column → DEFAULT_VALUE 'EUR'
             chunk['currency'] = chunk['currency'].where(chunk['currency'].isin(['EUR', 'GBP']), other='EUR')
 
-            # volume_sanity_check + quantity_validity: both target 'quantity' → FLAG_AS_SUSPICIOUS
+            # volume_sanity_check + quantity_validity: both target 'quantity' → FLAG_AS_SUSPICIOUS, combine with |
+            chunk['quantity'] = pd.to_numeric(chunk['quantity'], errors='coerce')
             chunk['is_suspicious'] = (chunk['quantity'] >= 1000) | (chunk['quantity'] <= 0)
 
-            # 3c. Type casting
+            # 3c. Type casting — cast float64 → Int64 for integer/count/quantity columns
             int_cols = [c for c in chunk.select_dtypes(include='float64').columns
                         if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
             for col in int_cols:
                 chunk[col] = chunk[col].astype('Int64')
 
-            # 3d. Write
+            # 3d. Write — storage_options is MANDATORY, do not omit it.
             chunk.to_parquet(
                 f"{partition_uri}part_{i}.parquet",
                 engine="pyarrow",
@@ -142,21 +147,30 @@ def run():
         raise
 
     rejected_rows = sum(rejected_by_reason.values())
-    duration_seconds = time.time() - start_time
+    duration_seconds = time.time() - start_time   # for pipeline_duration_seconds metric
     logging.info(f"Pipeline completed. Rows: {total_rows}, rejected: {rejected_rows}, duration: {duration_seconds:.1f}s")
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
-    schema, table = "hive.sales_eu", "pipe_eu_sales_to_s3"
+    schema, table = "sales_eu", "pipe_eu_sales_to_s3"  # from CATALOG_AND_MONITORING.trino_metadata
     conn = trino_connect(host=trino_host, port=8080, user="pipeline")
     cursor = conn.cursor()
-    cursor.execute(f"CALL hive.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
-    cursor.fetchall()
+    for _attempt in range(5):
+        try:
+            cursor.execute(f"CALL hive.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
+            cursor.fetchall()
+            break
+        except Exception as _e:
+            if "not found" in str(_e).lower() and _attempt < 4:
+                logging.warning(f"Trino table not visible yet (attempt {_attempt + 1}/5) — retrying in 3s.")
+                time.sleep(3)
+                continue
+            raise
     logging.info(f"Trino partition run_date={run_date} registered.")
 
     # ── 5. METRICS EMISSION ───────────────────────────────────────────────────
     pushgateway_url = os.getenv("PUSHGATEWAY_URL", "http://pushgateway.monitoring.svc.cluster.local:9091")
-    project_id = os.getenv("PROJECT_ID", "unknown")
+    project_id     = os.getenv("PROJECT_ID", "unknown")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")
 
     registry = CollectorRegistry()
