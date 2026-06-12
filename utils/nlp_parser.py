@@ -24,6 +24,7 @@ from pydantic import BaseModel, field_validator, ValidationError
 from openai import OpenAI
 from dotenv import load_dotenv
 from agents.constants import CONFIGS_DIR
+from utils.llm_defaults import NL_MODEL
 
 load_dotenv()
 client = OpenAI()
@@ -363,7 +364,7 @@ def _handle_business_rules(raw_rules: list, domain: str) -> list:
     def _parse_rules_via_openai(content: str, system_msg: str) -> list:
         """Send content to OpenAI and parse the returned JSON rules array."""
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=NL_MODEL,
             temperature=0,
             messages=[
                 {"role": "system", "content": system_msg},
@@ -672,7 +673,7 @@ Rules:
 
 def _extract_intent(description: str) -> dict:
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=NL_MODEL,
         temperature=0,
         messages=[
             {"role": "system", "content": _EXTRACTION_PROMPT},
@@ -793,7 +794,7 @@ def suggest_rules_for_domain(domain: str) -> list:
     DEFAULT_VALUE), reason.
     """
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=NL_MODEL,
         temperature=0,
         messages=[
             {
@@ -823,7 +824,7 @@ def parse_rules_from_content(content: str) -> list:
     ``suggest_rules_for_domain``.
     """
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=NL_MODEL,
         temperature=0,
         messages=[
             {

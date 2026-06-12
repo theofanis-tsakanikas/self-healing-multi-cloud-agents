@@ -8,6 +8,7 @@ import json
 import os
 
 from utils.cost_estimator import estimate_monthly_cost
+from utils.llm_defaults import NL_MODEL
 
 _SYSTEM = """\
 You are an expert cloud data architect. A user will describe a data pipeline need
@@ -70,7 +71,7 @@ def _call_gpt(description: str, api_key: str) -> str:
     from openai import OpenAI
     client = OpenAI(api_key=api_key)
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=NL_MODEL,
         messages=[
             {"role": "system", "content": _SYSTEM},
             {"role": "user",   "content": description},

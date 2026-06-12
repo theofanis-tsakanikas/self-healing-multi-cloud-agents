@@ -39,6 +39,8 @@ from pathlib import Path
 
 import yaml
 
+from utils.llm_defaults import NL_MODEL
+
 _RULES_DIR = Path(__file__).resolve().parent.parent / "configs" / "business_rules"
 
 # Default on_failure_action per check type
@@ -207,7 +209,7 @@ def extract_rules_from_nl(description: str) -> dict:
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=NL_MODEL,
             messages=[
                 {"role": "system", "content": _NL_SYSTEM},
                 {"role": "user",   "content": description},
