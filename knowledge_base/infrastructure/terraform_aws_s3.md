@@ -88,14 +88,10 @@ To avoid `AccessControlListNotSupported` and deprecation warnings, follow the "R
 - **NO NESTED BLOCKS:** Do not use legacy nested blocks like `versioning { }`, `acl = "private"`, or `server_side_encryption_configuration { }`.
 - **Bucket name MUST use `var.bucket_name`** — never hardcode a string literal.
 - **Resource name is FIXED: always `data_bucket`** — never rename it. Renaming causes Terraform to plan a destroy+create cycle on a bucket that already exists, resulting in a 409 error.
-- **`prevent_destroy = true` is MANDATORY** to guard against accidental destruction:
 ```hcl
 resource "aws_s3_bucket" "data_bucket" {
   bucket = var.bucket_name
   tags   = { Project = var.project_id }
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 ```
 
