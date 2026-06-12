@@ -150,14 +150,14 @@ def _owner_of_file(path: str) -> str:
     return "infra"
 
 
-_AUTOVAL_FAIL_RE = re.compile(r"AUTO-VALIDATION FAILED — fix these errors and rewrite '([^']+)'")
+_AUTOVAL_FAIL_RE = re.compile(r"AUTO-VALIDATION FAILED — fix these errors in '([^']+)'")
 
 
 def _latest_autovalidation_failure(messages: list) -> str:
     """Return the file most recently flagged FAILED by the architect's auto-validation.
 
     The architect runs validate_generated_code in Python (NOT as an LLM tool call) and
-    appends "AUTO-VALIDATION FAILED — fix these errors and rewrite '<file>'" to the
+    appends "AUTO-VALIDATION FAILED — fix these errors in '<file>'" to the
     write_project_file ToolMessage. So these failures never appear in
     _extract_validation_summary (which only sees validate_generated_code tool calls).
     Scanning the messages for that marker is the reliable way to recover the failed

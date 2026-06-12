@@ -92,14 +92,14 @@ class TestOwnerOfFile:
 class TestLatestAutovalidationFailure:
     def test_recovers_filename_from_marker(self):
         msgs = [HumanMessage(content=(
-            "AUTO-VALIDATION FAILED — fix these errors and rewrite "
+            "AUTO-VALIDATION FAILED — fix these errors in "
             "'scripts/pipe_crm_us_to_azure.py':\nSTORAGE: ..."))]
         assert _latest_autovalidation_failure(msgs) == "scripts/pipe_crm_us_to_azure.py"
 
     def test_returns_most_recent_when_multiple(self):
         msgs = [
-            HumanMessage(content="AUTO-VALIDATION FAILED — fix these errors and rewrite 'a.py':"),
-            HumanMessage(content="AUTO-VALIDATION FAILED — fix these errors and rewrite 'b.py':"),
+            HumanMessage(content="AUTO-VALIDATION FAILED — fix these errors in 'a.py':"),
+            HumanMessage(content="AUTO-VALIDATION FAILED — fix these errors in 'b.py':"),
         ]
         assert _latest_autovalidation_failure(msgs) == "b.py"
 

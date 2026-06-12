@@ -451,7 +451,7 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
                                     logger.warning(f"⚠️ AUTO-VALIDATION FAILED: {actual_path}")
                                     result = (
                                         f"{result}\n\n"
-                                        f"AUTO-VALIDATION FAILED — fix these errors and rewrite '{filename}':\n"
+                                        f"AUTO-VALIDATION FAILED — fix these errors in '{filename}':\n"
                                         f"{validation_result}"
                                     )
                                 else:
