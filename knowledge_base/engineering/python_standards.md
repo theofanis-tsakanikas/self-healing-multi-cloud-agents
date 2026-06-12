@@ -387,8 +387,22 @@ def run():
     # with the literal and then writing CALL hive.system leaves it unused → ruff F841.
     conn = trino_connect(host=trino_host, port=8080, user="pipeline")
     cursor = conn.cursor()
-    cursor.execute(f"CALL hive.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
-    cursor.fetchall()
+    # Retry the partition registration. A freshly-started Trino coordinator (the init container
+    # creates this table only seconds before the pipeline runs) may not yet see it in its Glue
+    # catalog and raises "Table ... not found" TRANSIENTLY — the table IS in Glue and becomes
+    # visible within a few seconds. Retry rather than crash: a crash here aborts BEFORE the
+    # metrics emission below, leaving EVERY Grafana panel empty for an otherwise-successful run.
+    for _attempt in range(5):
+        try:
+            cursor.execute(f"CALL hive.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
+            cursor.fetchall()
+            break
+        except Exception as _e:
+            if "not found" in str(_e).lower() and _attempt < 4:
+                logging.warning(f"Trino table not visible yet (attempt {_attempt + 1}/5) — retrying in 3s.")
+                time.sleep(3)
+                continue
+            raise
     logging.info(f"Trino partition run_date={run_date} registered.")
 
     # ── 5. METRICS EMISSION ───────────────────────────────────────────────────
