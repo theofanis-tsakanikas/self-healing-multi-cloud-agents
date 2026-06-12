@@ -9,7 +9,7 @@ CREATE TABLE hive.sales_eu.pipe_eu_sales_to_s3 (
     is_suspicious BOOLEAN,
     run_date DATE
 ) WITH (
-    format            = 'PARQUET',
+    format = 'PARQUET',
     external_location = 's3://eu-sales-insights-data/processed/',
-    partitioned_by    = ARRAY['run_date']
+    partitioned_by = ARRAY['run_date']
 );
