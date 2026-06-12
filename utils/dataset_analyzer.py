@@ -176,6 +176,13 @@ def _detect_quality_issues(df: pd.DataFrame) -> list[dict]:
 
 # ── Suggested rules ───────────────────────────────────────────────────────────
 
+# Canonical business-rules enum (configs/business_rules/*.yaml) — the vocabulary the Architect
+# agent understands. Row-level data-quality suggestions emit ONE of these so an accepted
+# suggestion plugs straight into the pipeline:
+#   DROP_RECORD · EXCLUDE_AND_LOG · DEFAULT_VALUE · FLAG_AS_SUSPICIOUS
+# PII (a transform: mask/hash) and freshness (a pipeline-level gate) are NOT row-level failures —
+# they keep a descriptive action + a `category` marker so they are never mis-read as canonical
+# row rules (forcing PII into DROP_RECORD would mean "delete rows with PII" — wrong).
 def _rule(
     capability: str,
     description: str,
@@ -184,12 +191,15 @@ def _rule(
     on_failure_action: str,
     confidence: str,
     severity: str,
+    category: str = "data_quality",
 ) -> dict:
     """One suggested rule.
 
+    category   = data_quality (row-level, canonical action) | transform (PII) |
+                 pipeline_gate (e.g. freshness) — lets a consumer route each correctly.
     confidence = how strongly the DATA supports this rule (high|medium|low);
     severity   = the impact if it is violated (high|medium|low).
-    Both let the UI rank suggestions — confident ones surface first.
+    confidence + severity let the UI rank suggestions — confident ones surface first.
     """
     return {
         "capability":        capability,
@@ -199,6 +209,7 @@ def _rule(
         "on_failure_action": on_failure_action,
         "confidence":        confidence,
         "severity":          severity,
+        "category":          category,
     }
 
 
@@ -235,7 +246,7 @@ def _build_suggested_rules(
             "Key columns must never be null.",
             f"Columns: {key_cols}",
             f"Reject rows where any of {key_cols} IS NULL.",
-            "REJECT_ROW", "high", "high",
+            "EXCLUDE_AND_LOG", "high", "high",
         ))
 
     # 2. PII masking.
@@ -245,7 +256,7 @@ def _build_suggested_rules(
             "Personal data detected — must be masked before landing in the data lake.",
             f"Columns: {pii_fields}",
             "Hash name fields (SHA-256); mask email fields (a***@domain.com).",
-            "ABORT_PIPELINE", "high", "high",
+            "MASK_OR_HASH", "high", "high", "transform",
         ))
 
     # 3. Deduplication.
@@ -255,7 +266,7 @@ def _build_suggested_rules(
             "Duplicate rows detected in source data.",
             "All columns",
             "Deduplicate on ingest — keep most recent record.",
-            "KEEP_MOST_RECENT", "high", "medium",
+            "EXCLUDE_AND_LOG", "high", "medium",
         ))
 
     # 4. High-null columns.
@@ -269,7 +280,7 @@ def _build_suggested_rules(
             f"Columns with high null rate: {high_null}",
             f"Columns: {high_null}",
             "Flag rows but do not reject — mark as INCOMPLETE.",
-            "MARK_AS_INCOMPLETE", "high", worst,
+            "FLAG_AS_SUSPICIOUS", "high", worst,
         ))
 
     # 5. Non-negative measures — numeric columns whose NAME implies >= 0 but that hold negatives.
@@ -283,7 +294,7 @@ def _build_suggested_rules(
                     f"'{col}' looks like a non-negative measure but holds {neg} negative value(s).",
                     f"Column: {col}",
                     f"Reject rows where {col} < 0.",
-                    "REJECT_ROW", "high", "high",
+                    "EXCLUDE_AND_LOG", "high", "high",
                 ))
 
     # 6. Unique-key candidate — a low-null column that is unique across every row.
@@ -294,7 +305,7 @@ def _build_suggested_rules(
                 f"'{col}' is unique across all rows — likely a primary key.",
                 f"Column: {col}",
                 f"Enforce uniqueness on {col}; reject duplicate keys.",
-                "REJECT_ROW", "high", "high",
+                "EXCLUDE_AND_LOG", "high", "high",
             ))
             break  # one primary-key suggestion is enough
 
@@ -311,7 +322,7 @@ def _build_suggested_rules(
                 f"'{col}' has only {nunique} distinct values — a controlled vocabulary.",
                 f"Column: {col}",
                 f"Value of {col} must be one of: {observed}.",
-                "REJECT_ROW", "medium", "medium",
+                "EXCLUDE_AND_LOG", "medium", "medium",
             ))
             cat_added += 1
 
@@ -333,7 +344,7 @@ def _build_suggested_rules(
                         f"'{col}' has {n_out} statistical outlier(s) (1.5x IQR) — review extreme values.",
                         f"Column: {col}",
                         f"Flag rows where {col} is outside [{lo:.2f}, {hi:.2f}].",
-                        "MARK_AS_INCOMPLETE", "medium", "low",
+                        "FLAG_AS_SUSPICIOUS", "medium", "low",
                     ))
                     out_added += 1
 
@@ -349,7 +360,7 @@ def _build_suggested_rules(
                 f"'{col}' contains values with leading/trailing whitespace.",
                 f"Column: {col}",
                 f"Trim whitespace on {col} before landing; flag rows that needed cleaning.",
-                "MARK_AS_INCOMPLETE", "medium", "low",
+                "DEFAULT_VALUE", "medium", "low",
             ))
             ws_added += 1
 
@@ -368,7 +379,7 @@ def _build_suggested_rules(
                         f"'{col}' looks like a date but {fail * 100:.0f}% of values don't parse.",
                         f"Column: {col}",
                         f"Reject rows where {col} is not a valid date.",
-                        "REJECT_ROW", "medium", "medium",
+                        "EXCLUDE_AND_LOG", "medium", "medium",
                     ))
             break  # one date-format suggestion is enough
 
@@ -383,7 +394,7 @@ def _build_suggested_rules(
             "Ensure the pipeline is processing recent data.",
             "Ingestion timestamp",
             "Abort if the batch is older than 48 hours.",
-            "ABORT_PIPELINE", "medium", "medium",
+            "ABORT_PIPELINE", "medium", "medium", "pipeline_gate",
         ))
 
     # Most-confident suggestions first — the UI surfaces high-confidence rules on top.
