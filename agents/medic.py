@@ -368,8 +368,10 @@ def medic_node(state: AgentState):
         new_messages_for_state.append(response)
 
         if not response.tool_calls:
-            if "VERIFIED" in response.content.upper() or "COMPLIANT" in response.content.upper():
-                verification_successful = True
+            # The LLM declaring "VERIFIED"/"COMPLIANT" in prose is NOT evidence — that is exactly
+            # the hallucination to avoid (e.g. after a 404 / run-not-found it says "verified" and a
+            # FAILED deploy is marked green → false success). Verification comes ONLY from the
+            # deterministic green-CI fetch below. No tool call → nothing more to do; stop.
             break
 
         for tool_call in response.tool_calls:
@@ -386,8 +388,15 @@ def medic_node(state: AgentState):
             result = tool_func.invoke(tool_args)
             result_str = str(result)
 
+            # PENDING / not-yet-resolvable → back off and retry (NOT a failure, NOT success). A
+            # "run not found" 404 right after a push is usually the deploy run not registered yet;
+            # treat it as pending so we retry, and if it never resolves the poll limit ends the run
+            # as ci_unverified (fail-closed) — never a false green.
             if tool_name == "fetch_github_action_logs" and (
-                "PENDING" in result_str.upper() or "PERMISSIONS_ERROR" in result_str.upper()
+                "PENDING" in result_str.upper()
+                or "PERMISSIONS_ERROR" in result_str.upper()
+                or "could not list workflow runs" in result_str.lower()
+                or "error resolving run" in result_str.lower()
             ):
                 logs_still_pending = True
 

@@ -92,6 +92,19 @@ class TestRuleCMedic:
         )
         assert supervisor_node(state)["next_step"] == "FINISH"
 
+    def test_loose_verified_prose_is_not_success(self):
+        # Regression (false-success bug, 2026-06-13): "could not be verified" CONTAINS "verified",
+        # and an LLM may hallucinate "verified" in prose after a 404. Without a deterministic
+        # mission_status="verified", the supervisor must NOT mark a FAILED deploy as success.
+        state = _make_state(
+            last_agent="medic",
+            messages=[AIMessage(content="The deploy could not be verified — 404 run not found.")],
+            next_step="",
+        )
+        result = supervisor_node(state)  # falls through to the LLM fallback (mocked → not FINISH)
+        assert result.get("next_step") != "FINISH"
+        assert result.get("mission_status") != "verified"
+
     def test_fix_loop_escalated_routes_to_finish_and_clears(self):
         state = _make_state(last_agent="medic", fix_loop_escalated=True,
                             medic_fix_target="architect")

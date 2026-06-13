@@ -187,11 +187,12 @@ def supervisor_node(state: AgentState):
             logger.info("Medic signaled pending logs. Re-routing to MEDIC.")
             return {"next_step": "medic"}
 
-        # Final Sign-off
-        if "verified" in normalized_last or "alignment_ok" in normalized_last:
-            logger.info("✅ Mission accomplished. System signaling FINISH.")
-            # mission_status set here too (authoritative confirm) — medic already set it,
-            # but the entry points fail anything that is not explicitly "verified".
+        # Final Sign-off — the explicit Phase-1 ALIGNMENT_OK token ONLY. NOT a loose "verified"
+        # substring: that also matches "could not be verified" / an LLM hallucinating "verified"
+        # in prose after a 404, which marked a FAILED deploy as success. Real green-CI success is
+        # the deterministic mission_status=="verified" check at the top of this block.
+        if "alignment_ok" in normalized_last:
+            logger.info("✅ Mission accomplished (ALIGNMENT_OK). System signaling FINISH.")
             return {"next_step": "FINISH", "mission_status": "verified"}
 
     # 4. LLM FALLBACK (Enhanced with State Context)
