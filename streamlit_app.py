@@ -498,6 +498,33 @@ def _render_agent_graphviz(node_statuses: dict, last_edge) -> str:
     ])
 
 
+def _render_agent_log_html(agent_messages: dict) -> str:
+    """Latest output per agent (file saves, validation, patches, diagnoses) — the detail behind
+    the routing trace. Fed by the `agent_message` updates from _run_agent."""
+    import html as _html
+    _LABELS = {
+        "supervisor": "🎯 Supervisor", "architect": "🏗️ Architect",
+        "infra": "⚙️ Infra", "medic": "🏥 Medic",
+    }
+    pre_style = (
+        "color:#7dd3fc;font-size:0.78rem;white-space:pre-wrap;"
+        "background:rgba(6,12,26,0.8);border-radius:6px;padding:0.55rem;"
+        "margin:0.2rem 0 0.6rem;overflow:auto;max-height:220px;"
+    )
+    rows = []
+    for key, label in _LABELS.items():
+        raw = (agent_messages.get(key) or "").strip()
+        if not raw:
+            continue
+        rows.append(
+            f'<p style="color:#94a3b8;font-size:0.82rem;margin:0.5rem 0 0.1rem;font-weight:600;">'
+            f'{label}</p><pre style="{pre_style}">{_html.escape(raw)}</pre>'
+        )
+    return "".join(rows) if rows else (
+        '<p style="color:#334155;font-size:0.8rem;">No agent output yet.</p>'
+    )
+
+
 # ---------------------------------------------------------------------------
 # Agent runner (background thread)
 # ---------------------------------------------------------------------------
@@ -2380,6 +2407,12 @@ if st.session_state.get("run_status") == "running":
         _tab_log, _tab_graph = st.tabs(["📋 Activity log", "🕸️ Agent graph"])
         with _tab_log:
             log_area   = st.empty()
+            st.markdown(
+                '<p style="color:#475569;font-size:0.72rem;text-transform:uppercase;'
+                'letter-spacing:0.08em;margin:0.7rem 0 0;">📝 Latest output per agent</p>',
+                unsafe_allow_html=True,
+            )
+            _agent_log_ph = st.empty()
             files_area = st.empty()
         with _tab_graph:
             st.caption(
@@ -2427,6 +2460,9 @@ if st.session_state.get("run_status") == "running":
 
             # ── Refresh UI placeholders ───────────────────────────────────
             log_area.code("\n".join(log_lines[-80:]), language=None)
+            _agent_log_ph.markdown(
+                _render_agent_log_html(_agent_messages), unsafe_allow_html=True
+            )
             if written_files:
                 files_area.markdown(
                     "<p style='color:#64748b; font-size:0.85rem;'>📁 "
@@ -2463,6 +2499,9 @@ if st.session_state.get("run_status") == "running":
                 st.session_state.final_status = upd
 
         log_area.code("\n".join(log_lines), language=None)
+        _agent_log_ph.markdown(
+            _render_agent_log_html(_agent_messages), unsafe_allow_html=True
+        )
 
         final = st.session_state.get("final_status", {})
         if final.get("status") == "DONE":
