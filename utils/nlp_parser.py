@@ -846,6 +846,46 @@ def parse_rules_from_content(content: str) -> list:
     return json.loads(raw)
 
 
+def synthesize_rule(description: str, target_column: str = "", action: str = "") -> dict:
+    """
+    Turn ONE plain-words rule description into a canonical rule dict (rule_id, target_column,
+    condition (pandas), action, reason) via the LLM — so a manually-added words-only rule is
+    filled the SAME way a free-text rules FILE is (parse_rules_from_content). Any target_column
+    / action the user already chose is honored; the original words are kept as `reason`.
+    """
+    hints = []
+    if target_column:
+        hints.append(f"Use target_column = '{target_column}'.")
+    if action:
+        hints.append(f"Use action = '{action}'.")
+    resp = client.chat.completions.create(
+        model=NL_MODEL,
+        temperature=0,
+        messages=[
+            {"role": "system", "content": (
+                "Convert this single business-rule description into ONE JSON object only "
+                "(no markdown): {rule_id (snake_case), target_column, condition (a pandas "
+                "boolean expression, e.g. df['col'] > 0 or df['col'].notna()), action (one of "
+                "DROP_RECORD / EXCLUDE_AND_LOG / FLAG_AS_SUSPICIOUS / DEFAULT_VALUE), reason}. "
+                + " ".join(hints)
+            )},
+            {"role": "user", "content": description},
+        ],
+    )
+    raw = resp.choices[0].message.content.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    rule = json.loads(raw)
+    # Keep the user's plain words + any explicit choices they made.
+    if not rule.get("reason"):
+        rule["reason"] = description
+    if target_column:
+        rule["target_column"] = target_column
+    if action:
+        rule["action"] = action
+    return rule
+
+
 def _build_databricks_bundle(
     intent: "PipelineIntent",
     slug: str,

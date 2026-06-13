@@ -1657,7 +1657,8 @@ with tab_nl:
                                 key=f"{prefix}_col")
             st.markdown(
                 '<p style="color:#475569;font-size:0.75rem;margin:0.2rem 0 0.1rem;">'
-                "Condition — pandas expression, e.g. df['col'].notna()</p>",
+                "Condition — pandas expression, e.g. df['col'].notna(). "
+                "Or leave it empty and just write the Description below — we'll derive it.</p>",
                 unsafe_allow_html=True,
             )
             _rk = st.text_input("Condition", value=existing.get("condition", ""),
@@ -1675,6 +1676,19 @@ with tab_nl:
                                 key=f"{prefix}_reason")
             return {"rule_id": _ri, "target_column": _rc,
                     "condition": _rk, "action": _ra, "reason": _rr}
+
+        def _finalize_rule(rule: dict) -> dict:
+            # A manually-entered rule with plain words but NO pandas condition is filled the
+            # SAME way a free-text rules file is — derive the condition from the description via
+            # the LLM. If the user already typed a condition, keep it exactly as-is.
+            if rule.get("condition", "").strip() or not rule.get("reason", "").strip():
+                return rule
+            try:
+                from utils.nlp_parser import synthesize_rule
+                return synthesize_rule(rule["reason"], rule.get("target_column", ""),
+                                       rule.get("action", ""))
+            except Exception:
+                return rule  # fall back to as-entered; the architect still reads the description
 
         # ─────────────────────────────────────────────────────────────────────
         # EDITABLE rules — shown whenever there ARE rules, from ANY source: extracted from
@@ -1707,7 +1721,8 @@ with tab_nl:
                     with _ef1:
                         if st.button("💾 Save", key=f"nl_wizard_rule_save_{_ri_i}",
                                      type="primary"):
-                            st.session_state.nl_rules[_ri_i] = _edited
+                            with st.spinner("Finalising rule…"):
+                                st.session_state.nl_rules[_ri_i] = _finalize_rule(_edited)
                             st.session_state.nl_wizard_editing_idx = None
                             st.rerun()
                     with _ef2:
@@ -1769,7 +1784,8 @@ with tab_nl:
                 _an1, _an2, _ = st.columns([1, 1, 3])
                 with _an1:
                     if st.button("💾 Add", key="nl_wizard_rule_add_save", type="primary"):
-                        st.session_state.nl_rules.append(_new_r)
+                        with st.spinner("Finalising rule…"):
+                            st.session_state.nl_rules.append(_finalize_rule(_new_r))
                         st.session_state.nl_wizard_adding_rule = False
                         st.rerun()
                 with _an2:
