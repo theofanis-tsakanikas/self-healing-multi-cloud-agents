@@ -33,7 +33,10 @@ _FAKE_OUTPUTS = {
 
 
 def _aws_setup(outputs):
-    with patch.object(nlp, "_load_bootstrap_outputs", return_value=outputs):
+    # _build_from_answers writes the 4 generated config files to disk as a side effect;
+    # stub it out so the test never pollutes the repo (configs/pipelines/, etc.).
+    with patch.object(nlp, "_load_bootstrap_outputs", return_value=outputs), \
+         patch.object(nlp, "_save_generated_configs"):
         pipeline_conf, *_ = nlp._build_from_answers(_ANSWERS, [])
     return pipeline_conf["aws_setup"]
 
