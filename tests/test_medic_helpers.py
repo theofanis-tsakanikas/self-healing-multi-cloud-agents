@@ -9,7 +9,30 @@ from agents.medic import (
     _extract_validation_summary,
     _owner_of_file,
     _latest_autovalidation_failure,
+    _extract_ci_failed_file,
 )
+
+
+class TestExtractCiFailedFile:
+    def test_python_traceback_app_path(self):
+        log = ('Traceback (most recent call last):\n'
+               '  File "/app/scripts/pipe_etl_to_s3.py", line 95, in run\n'
+               '    _future = chunk[\'order_date\'] > pd.Timestamp.now()\n'
+               'TypeError: Invalid comparison between dtype=str and Timestamp\n')
+        msgs = [ToolMessage(content=log, tool_call_id="c1")]
+        assert _extract_ci_failed_file(msgs) == "scripts/pipe_etl_to_s3.py"
+
+    def test_library_frames_ignored(self):
+        log = ('  File "/usr/local/lib/python3.12/site-packages/pandas/core/x.py", line 1\n'
+               '  File "/app/scripts/pipe_x.py", line 95, in run\n')
+        assert _extract_ci_failed_file([ToolMessage(content=log, tool_call_id="c1")]) == "scripts/pipe_x.py"
+
+    def test_sql_file_matched(self):
+        log = 'init-trino failed in sql/setup_trino.sql at CREATE TABLE'
+        assert _extract_ci_failed_file([ToolMessage(content=log, tool_call_id="c1")]) == "sql/setup_trino.sql"
+
+    def test_no_project_file_returns_empty(self):
+        assert _extract_ci_failed_file([ToolMessage(content="generic error", tool_call_id="c1")]) == ""
 
 
 def _ai_validate_call(filename, call_id):

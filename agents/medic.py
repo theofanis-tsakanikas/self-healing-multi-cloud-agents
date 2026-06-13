@@ -174,6 +174,25 @@ def _latest_autovalidation_failure(messages: list) -> str:
     return latest
 
 
+_CI_FILE_RE = re.compile(r'(?:/app/)?(scripts/[\w./\-]+\.py|sql/[\w./\-]+\.sql)')
+
+
+def _extract_ci_failed_file(messages: list) -> str:
+    """For a CI-LOG runtime failure (no validate_generated_code result), find the failing PROJECT
+    artifact in the CI traceback — e.g. `File "/app/scripts/pipe_x.py"` → `scripts/pipe_x.py` — so
+    the architect can target it. Without a filename in healing_context the architect rejects its
+    own patch ("not the fix target") and the fix loops. Scans the most recent messages (the fetch
+    output). Library frames (`/usr/local/lib/.../pandas/...`) don't match. Returns "" if none."""
+    for msg in reversed(messages[-12:]):
+        content = getattr(msg, "content", "") or ""
+        if not isinstance(content, str):
+            content = str(content)
+        hits = _CI_FILE_RE.findall(content)
+        if hits:
+            return hits[-1]   # the deepest/last project frame in the traceback
+    return ""
+
+
 def _accumulate_healing_context(existing: str, new_chunk: str) -> str:
     """Append a new fix chunk to the running healing_context WITHOUT overwriting.
     Multiple request_fix calls in one medic turn must ALL reach the target agent, so
@@ -505,6 +524,16 @@ def medic_node(state: AgentState):
                     "Target file(s) to fix: " + ", ".join(_failed_files) + "\n\n" + healing_context
                 )
                 logger.info("🩹 Injected FAILED filename(s) into healing_context for patch targeting.")
+        else:
+            # CI-LOG failure (a runtime error surfaced by fetch_github_action_logs) — there is no
+            # validate_generated_code result to map to a file. Pull the failing artifact straight
+            # from the CI traceback so the architect can target it; otherwise healing_context names
+            # no file, the architect rejects its own patch ("not the fix target"), and the fix loops.
+            _ci_file = _extract_ci_failed_file(state["messages"])
+            if (_ci_file and healing_context
+                    and Path(_ci_file).stem.lower() not in healing_context.lower()):
+                healing_context = "Target file to fix: " + _ci_file + "\n\n" + healing_context
+                logger.info(f"🩹 Injected CI-log failing file '{_ci_file}' into healing_context.")
 
     # 4. FINAL STATE PREPARATION
     output_state = {
