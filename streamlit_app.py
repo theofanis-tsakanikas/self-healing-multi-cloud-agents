@@ -1632,7 +1632,11 @@ with tab_nl:
         _domain    = st.session_state.nl_answers.get("data_domain", "other")
 
         if not st.session_state.nl_rules_initialized:
-            st.session_state.nl_rules               = list(_raw_rules)
+            # Seed from the NL-extracted rules ONLY if we don't already hold rules. Re-entering
+            # via step-3 "Edit rules" resets this flag, but must NOT wipe rules that came from a
+            # file or domain suggestions (or edits made to them) — _raw_rules is empty for those.
+            if not st.session_state.nl_rules:
+                st.session_state.nl_rules = list(_raw_rules)
             st.session_state.nl_rules_initialized   = True
             st.session_state.nl_wizard_editing_idx  = None
             st.session_state.nl_wizard_adding_rule  = False
@@ -1668,15 +1672,18 @@ with tab_nl:
                     "condition": _rk, "action": _ra, "reason": _rr}
 
         # ─────────────────────────────────────────────────────────────────────
-        # CASE A — GPT extracted rules
+        # EDITABLE rules — shown whenever there ARE rules, from ANY source: extracted from
+        # the NL description, loaded from a file, or domain suggestions. The picker below
+        # (CASE B) only appears while nl_rules is still empty; once a source populates it,
+        # the rules land HERE for full review / edit / add / remove before Continue.
         # ─────────────────────────────────────────────────────────────────────
-        if _raw_rules:
+        if st.session_state.nl_rules:
             _rules      = st.session_state.nl_rules
             _edit_idx   = st.session_state.nl_wizard_editing_idx
 
             st.markdown(
                 f'<p style="color:#4ade80;font-size:0.82rem;margin-bottom:0.5rem;">'
-                f'✓ {len(_raw_rules)} rule(s) extracted — review below.</p>',
+                f'✓ {len(_rules)} rule(s) — review, edit, add or remove below.</p>',
                 unsafe_allow_html=True,
             )
 
@@ -1775,12 +1782,14 @@ with tab_nl:
                     st.rerun()
 
         # ─────────────────────────────────────────────────────────────────────
-        # CASE B — No rules detected
+        # No rules YET — pick a source (domain suggestions / file / none). Whatever the
+        # source, the rules land in the editable list above for review/edit/add/remove.
         # ─────────────────────────────────────────────────────────────────────
         else:
             st.markdown(
                 '<p style="color:#fbbf24;font-size:0.85rem;margin-bottom:0.8rem;">'
-                '⚠️ No business rules detected in your description.</p>',
+                'No business rules yet — add them from a source below '
+                '(you can edit, add or remove them afterwards).</p>',
                 unsafe_allow_html=True,
             )
 
@@ -1832,9 +1841,8 @@ with tab_nl:
                         st.session_state.nl_rules = [
                             _sr for _sr, _k in zip(_suggestions, _keep_mask) if _k
                         ]
-                        _dest = st.session_state.pop("nl_back_to_step", None) or 3
-                        st.session_state.nl_step = _dest
-                        st.rerun()
+                        st.session_state.nl_wizard_suggested_rules = []
+                        st.rerun()  # stay on step 2 → the editor above now renders them (editable)
 
             elif _rule_mode == "📁 Load from file (.md / .yaml / .json)":
                 _up_rules = st.file_uploader(
@@ -1872,10 +1880,9 @@ with tab_nl:
                         )
                     if st.button("Use these rules →", key="nl_wizard_loaded_use",
                                  type="primary"):
-                        st.session_state.nl_rules = _loaded
-                        _dest = st.session_state.pop("nl_back_to_step", None) or 3
-                        st.session_state.nl_step = _dest
-                        st.rerun()
+                        st.session_state.nl_rules = list(_loaded)
+                        st.session_state.nl_wizard_loaded_rules = []
+                        st.rerun()  # stay on step 2 → the editor above now renders them (editable)
 
             st.markdown("<hr style='margin:1.2rem 0;'>", unsafe_allow_html=True)
             if st.button("← Back", key="nl_wizard_step2b_back", type="secondary"):
