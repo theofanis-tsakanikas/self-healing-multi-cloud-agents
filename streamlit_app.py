@@ -493,6 +493,43 @@ def _render_pipeline_graph(node_statuses: dict) -> str:
     )
 
 
+def _render_agent_graphviz(node_statuses: dict, last_edge) -> str:
+    """Hub-and-spoke DOT graph of the REAL topology — the Supervisor routes to Architect / Infra /
+    Medic and each returns to it (it is NOT a linear pipeline). The currently-active node and the
+    edge just traversed are highlighted; completed nodes are muted-green. For st.graphviz_chart."""
+    _NSTYLE = {
+        "active":    'color="#38bdf8" fillcolor="#0c2942" fontcolor="#e0f2fe" penwidth=3',
+        "completed": 'color="#4ade80" fillcolor="#04210f" fontcolor="#86efac" penwidth=2',
+        "failed":    'color="#f87171" fillcolor="#2a0f0f" fontcolor="#fca5a5" penwidth=2.5',
+        "pending":   'color="#334155" fillcolor="#0b1220" fontcolor="#64748b" penwidth=1.5',
+    }
+    _LBL = {"supervisor": "Supervisor", "architect": "Architect",
+            "infra": "Infra", "medic": "Medic"}
+
+    def _node(key):
+        s = node_statuses.get(key, "pending")
+        return f'  {key} [label="{_LBL[key]}" {_NSTYLE.get(s, _NSTYLE["pending"])}];'
+
+    def _edge(a, b):
+        hot = last_edge is not None and {a, b} == set(last_edge)
+        attrs = 'color="#38bdf8" penwidth=3' if hot else 'color="#2a3850" penwidth=1.4'
+        return f'  {a} -> {b} [dir=both {attrs}];'
+
+    return "\n".join([
+        "digraph {",
+        '  bgcolor="transparent"; rankdir=TB; nodesep=0.55; ranksep=0.75;',
+        '  node [shape=box style="rounded,filled" fontname="Helvetica" fontsize=12 margin="0.22,0.14"];',
+        '  edge [arrowsize=0.7];',
+        _node("supervisor"),
+        "  { rank=same; architect; infra; medic; }",
+        _node("architect"), _node("infra"), _node("medic"),
+        _edge("supervisor", "architect"),
+        _edge("supervisor", "infra"),
+        _edge("supervisor", "medic"),
+        "}",
+    ])
+
+
 def _render_agent_log_html(agent_messages: dict) -> str:
     import html as _html
     _LABELS = {
@@ -2395,21 +2432,6 @@ if st.session_state.get("run_status") == "running":
     state_q: queue.Queue  = st.session_state.state_q
     thread: threading.Thread = st.session_state.agent_thread
 
-    # ── Sidebar: Agent Pipeline section ──────────────────────────────────
-    with st.sidebar:
-        st.markdown("---")
-        st.markdown(
-            '<p class="sb-title" style="margin:0 0 0.4rem;">🔄 Agent Pipeline</p>',
-            unsafe_allow_html=True,
-        )
-        _sb_graph_ph = st.empty()
-
-        st.markdown(
-            '<p class="sb-title" style="margin:0.75rem 0 0.3rem;">📋 Agent Log</p>',
-            unsafe_allow_html=True,
-        )
-        _sb_log_ph = st.empty()
-
     # ── Execution metrics row (dynamic, updated every poll cycle) ─────────
     _exec_cols = st.columns(4)
     _time_ph   = _exec_cols[0].empty()
@@ -2424,12 +2446,21 @@ if st.session_state.get("run_status") == "running":
                            {k: "" for k, _ in _PIPELINE_NODES}))
     _healing_cycles = st.session_state.get("healing_cycles", 0)
     _run_start_time = st.session_state.get("run_start_time", time.time())
+    _last_edge = None  # (from, to) of the transition just taken — highlighted in the graph
 
     st.divider()
 
     with st.status("Agent is running…", expanded=True) as status_box:
-        log_area   = st.empty()
-        files_area = st.empty()
+        _tab_log, _tab_graph = st.tabs(["📋 Activity log", "🕸️ Agent graph"])
+        with _tab_log:
+            log_area   = st.empty()
+            files_area = st.empty()
+        with _tab_graph:
+            st.caption(
+                "Hub-and-spoke: the **Supervisor** routes to Architect / Infra / Medic and each "
+                "returns to it. The active node + the edge just taken are highlighted."
+            )
+            graph_ph = st.empty()
 
         log_lines: list[str] = []
         written_files: list[str] = []
@@ -2454,6 +2485,8 @@ if st.session_state.get("run_status") == "running":
                         _node_statuses[completed] = "completed"
                     if next_active and next_active in _node_statuses:
                         _node_statuses[next_active] = "active"
+                    if completed and next_active:
+                        _last_edge = (completed, next_active)
                     st.session_state.node_statuses = dict(_node_statuses)
                 # Agent messages
                 if "agent_message" in upd:
@@ -2476,12 +2509,10 @@ if st.session_state.get("run_status") == "running":
                     unsafe_allow_html=True,
                 )
 
-            # Sidebar graph + log
-            _sb_graph_ph.markdown(
-                _render_pipeline_graph(_node_statuses), unsafe_allow_html=True
-            )
-            _sb_log_ph.markdown(
-                _render_agent_log_html(_agent_messages), unsafe_allow_html=True
+            # Agent graph (center tab) — hub topology, active node + edge highlighted
+            graph_ph.graphviz_chart(
+                _render_agent_graphviz(_node_statuses, _last_edge),
+                use_container_width=True,
             )
 
             # Execution metrics
@@ -2523,12 +2554,10 @@ if st.session_state.get("run_status") == "running":
                 if _node_statuses[k] == "active":
                     _node_statuses[k] = "failed"
 
-        # Final refresh of sidebar and execution metrics
-        _sb_graph_ph.markdown(
-            _render_pipeline_graph(_node_statuses), unsafe_allow_html=True
-        )
-        _sb_log_ph.markdown(
-            _render_agent_log_html(_agent_messages), unsafe_allow_html=True
+        # Final graph refresh
+        graph_ph.graphviz_chart(
+            _render_agent_graphviz(_node_statuses, _last_edge),
+            use_container_width=True,
         )
         elapsed = int(time.time() - _run_start_time)
         _time_ph.metric("⏱️ Elapsed", f"{elapsed}s")
