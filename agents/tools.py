@@ -306,6 +306,20 @@ def validate_generated_code(filename: str) -> str:
                 "Business Rules section."
             )
 
+        # A column compared to a date/Timestamp (e.g. order_date > pd.Timestamp.now()) must first be
+        # coerced with pd.to_datetime(col, errors='coerce'): a VARCHAR source column arrives as a
+        # pandas string and `str > Timestamp` raises TypeError ('Invalid comparison between
+        # dtype=str and Timestamp'), crashing the whole pipeline. Flag a temporal comparison with no
+        # pd.to_datetime coercion anywhere in the script.
+        if re.search(r"[<>]=?\s*pd\.Timestamp", py_content) and "pd.to_datetime" not in py_content:
+            errors.append(
+                "BUSINESS RULES: a temporal comparison (e.g. `> pd.Timestamp.now()`) without "
+                "`pd.to_datetime(chunk[col], errors='coerce')` first — a string/VARCHAR source column "
+                "raises TypeError 'Invalid comparison between dtype=str and Timestamp' and crashes the "
+                "pipeline. Coerce the date column with pd.to_datetime (dirty → NaT, dropped as a "
+                "rejected row) BEFORE comparing. See python_standards.md Business Rules section."
+            )
+
         # Cloud guard: cloud_get() for a specific cloud must be inside the matching
         # if _CLOUD == "..." block. An unguarded call hardcodes a provider and breaks
         # the script on all other clouds — a fundamental cloud-agnostic violation.

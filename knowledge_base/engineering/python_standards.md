@@ -104,6 +104,8 @@ The config expresses rules in business language. The architect resolves them to 
 
 **Numeric comparison columns — coerce, NEVER `.astype(float)`:** any column compared numerically (`> 0`, `>= 0`, `<`, range checks) may carry dirty/non-numeric values from the source (e.g. `'not_a_number'`, empty strings). Coerce it with `pd.to_numeric(chunk[col], errors='coerce')` (assign it back) **before** the comparison — dirty values become `NaN`, which the comparison then drops as a normal rejected row, and the surviving column is real numeric for the typed parquet write. **NEVER use `chunk[col].astype(float)`**: it raises `ValueError: could not convert string to float` on the FIRST bad value and crashes the ENTIRE pipeline instead of rejecting that one row. (`.astype('Int64')` for the final integer cast is unrelated and still required — see Storage.)
 
+**Temporal/date comparison columns — coerce with `pd.to_datetime` FIRST:** any column compared to a date/`Timestamp` (`> pd.Timestamp.now()`, date-range checks) may arrive as a **STRING** from the source (a VARCHAR/text column → pandas `large_string`). `str > Timestamp` raises `TypeError: Invalid comparison between dtype=str and Timestamp` and crashes the ENTIRE pipeline. Coerce it **before** the comparison with `chunk[col] = pd.to_datetime(chunk[col], errors='coerce')` (assign it back) — unparseable/dirty values become `NaT` (dropped as a normal rejected row, never matched as "future"), and the column is real datetime. EXACTLY like `pd.to_numeric` for numeric columns. (The eu_sales source column happened to be a real DATE type so it survived without this — **do NOT rely on that; ALWAYS coerce.**)
+
 **Worked example** — EU Sales pipeline (6 rules → 5 matched columns). **CRITICAL: each row-removing rule MUST take a FRESH `_before = len(chunk)` immediately before ITS OWN filter.** A single shared `_before` captured once at the top is the most common bug — it makes every rule report the *cumulative* drop so far (`_before - len(chunk)`), so the deltas double-count and `sum(by_reason)` explodes far above the real total. The fresh-per-rule reading is what guarantees the invariant `sum(rejected_by_reason.values()) == rejected_rows`.
 ```python
 # monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
@@ -114,6 +116,7 @@ rejected_by_reason['monetary_integrity'] = \
     rejected_by_reason.get('monetary_integrity', 0) + (_before - len(chunk))
 
 # temporal_validity: target_criteria 'date'/'timestamp' → order_date → EXCLUDE_AND_LOG
+chunk['order_date'] = pd.to_datetime(chunk['order_date'], errors='coerce')  # str/VARCHAR/dirty → NaT
 _before = len(chunk)                       # FRESH reading — NOT the value from the rule above
 _future = chunk['order_date'] > pd.Timestamp.now()
 if _future.any():

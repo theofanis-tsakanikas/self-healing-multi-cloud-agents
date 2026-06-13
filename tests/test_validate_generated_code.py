@@ -79,6 +79,17 @@ class TestPythonCloudGuardAndRules:
         out = _validate(tmp_path, "p.py", "chunk[col] = chunk[col].astype('Int64')\n")
         assert "astype(float)" not in out
 
+    def test_temporal_compare_without_to_datetime_flagged(self, tmp_path):
+        out = _validate(tmp_path, "p.py",
+                        "_future = chunk['order_date'] > pd.Timestamp.now()\n")
+        assert "BUSINESS RULES" in out and "Timestamp" in out
+
+    def test_temporal_compare_with_to_datetime_is_clean(self, tmp_path):
+        out = _validate(tmp_path, "p.py",
+                        "chunk['order_date'] = pd.to_datetime(chunk['order_date'], errors='coerce')\n"
+                        "_future = chunk['order_date'] > pd.Timestamp.now()\n")
+        assert "Invalid comparison" not in out
+
 
 # ── JSON: Grafana dashboard (incl. the $project_id template-var rule) ────────────
 _GOOD_DASHBOARD = """
