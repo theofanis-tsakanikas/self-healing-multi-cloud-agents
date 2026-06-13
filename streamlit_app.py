@@ -1666,7 +1666,12 @@ with tab_nl:
                   if existing.get("action") in _ACTION_OPTS else 0
             _ra = st.radio("Action", _ACTION_OPTS, index=_ai, horizontal=True,
                            key=f"{prefix}_action")
-            _rr = st.text_input("Reason", value=existing.get("reason", ""),
+            st.markdown(
+                '<p style="color:#475569;font-size:0.75rem;margin:0.4rem 0 0.1rem;">'
+                "Description — plain words (the agent reads this alongside the condition)</p>",
+                unsafe_allow_html=True,
+            )
+            _rr = st.text_input("Description", value=existing.get("reason", ""),
                                 key=f"{prefix}_reason")
             return {"rule_id": _ri, "target_column": _rc,
                     "condition": _rk, "action": _ra, "reason": _rr}
@@ -1718,12 +1723,20 @@ with tab_nl:
                         _card1, _card2, _card3 = st.columns([4, 2, 1])
                         with _card1:
                             _ac = _ACTION_COLORS.get(_ri_r.get("action", ""), "#94a3b8")
+                            # The plain-words rationale (your file's `description`, mapped to
+                            # `reason`) — shown so the rule isn't just column/action/condition.
+                            _reason_html = (
+                                f'<p style="margin:0.25rem 0 0;color:#cbd5e1;font-size:0.78rem;'
+                                f'font-style:italic;">📝 {_ri_r.get("reason","")}</p>'
+                                if _ri_r.get("reason") else ''
+                            )
                             st.markdown(
                                 f'<p style="margin:0;color:#94a3b8;font-size:0.8rem;">'
                                 f'<b style="color:#e2e8f0;">column:</b> {_ri_r.get("target_column","")}'
                                 f' &nbsp;|&nbsp; '
                                 f'<span style="color:{_ac};font-weight:600;">{_ri_r.get("action","")}</span>'
                                 f'</p>'
+                                f'{_reason_html}'
                                 f'<p style="margin:0.2rem 0 0;color:#475569;font-size:0.75rem;">'
                                 f'<code style="color:#7dd3fc;">{_ri_r.get("condition","")}</code></p>',
                                 unsafe_allow_html=True,
