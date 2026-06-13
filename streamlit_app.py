@@ -663,6 +663,36 @@ def _start_run(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
     t.start()
     st.session_state.agent_thread = t
 
+
+# Minimum bootstrap-output keys a cloud needs before an NL-authored pipeline can deploy.
+# Without these, _build_from_answers fills REQUIRES_BOOTSTRAP_OUTPUTS sentinels and the run
+# fails deep inside terraform with a cryptic error. We surface a clear message up front.
+_BOOTSTRAP_REQUIRED_KEYS = {
+    "aws":   ("state_bucket", "aws_account_id", "pipeline_irsa_role_name"),
+    "azure": ("state_storage_account", "acr_login_server"),
+    "gcp":   ("state_bucket", "artifact_registry_url", "project_id"),
+}
+
+
+def _bootstrap_ready(cloud: str) -> tuple[bool, str]:
+    """True when .bootstrap_outputs.json carries what an NL deploy needs for `cloud`."""
+    try:
+        from utils.nlp_parser import _load_bootstrap_outputs
+        outputs = _load_bootstrap_outputs().get(cloud, {})
+    except Exception as e:
+        return False, f"Could not read .bootstrap_outputs.json: {e}"
+    missing = [k for k in _BOOTSTRAP_REQUIRED_KEYS.get(cloud, ()) if not outputs.get(k)]
+    if missing:
+        return False, (
+            f"The **{cloud.upper()}** baseline is not wired for a runtime deploy "
+            f"(missing bootstrap outputs: {', '.join(missing)}).\n\n"
+            f"Run the one-time bridge after bootstrapping:\n"
+            f"`python scripts/export_bootstrap_outputs.py {cloud}`\n\n"
+            f"(or `make bootstrap-{cloud}`, which now exports automatically)."
+        )
+    return True, ""
+
+
 # ---------------------------------------------------------------------------
 # HEADER
 # ---------------------------------------------------------------------------
@@ -1310,6 +1340,42 @@ with tab_upload:
             st.session_state["rules_conf_nl"] = rules
             st.session_state["rules_conf_ex"] = rules
 
+            # ── Make this sample the pipeline's real source ────
+            # The pipeline extracts from a DB table, not the uploaded file. To deploy a
+            # brand-new pipeline on YOUR data, load this sample into the source database as
+            # raw_<slug>; then in the wizard set source table = raw_<slug>.
+            with st.expander("🔌 Make this your pipeline's source (load into the source DB)", expanded=False):
+                _sd1, _sd2 = st.columns([2, 1])
+                with _sd1:
+                    _seed_slug = st.text_input("Pipeline slug", placeholder="e.g. my_sales",
+                                               key="upload_seed_slug")
+                with _sd2:
+                    _seed_db = st.radio("Source DB", ["postgres", "mysql"], horizontal=True,
+                                        key="upload_seed_db")
+                if st.button("⬆️ Load sample into source DB", key="upload_seed_btn",
+                             type="primary", disabled=not _seed_slug.strip()):
+                    with st.spinner("Loading sample into the source database…"):
+                        try:
+                            from scripts.seed_chaos import seed_dataframe_to_source
+                            uploaded_ds.seek(0)
+                            _nm = uploaded_ds.name.lower()
+                            if _nm.endswith(".parquet"):
+                                _df = pd.read_parquet(uploaded_ds)
+                            elif _nm.endswith(".jsonl"):
+                                _df = pd.read_json(uploaded_ds, lines=True)
+                            elif _nm.endswith(".json"):
+                                _df = pd.read_json(uploaded_ds)
+                            else:
+                                _df = pd.read_csv(uploaded_ds)
+                            _tbl = seed_dataframe_to_source(_df, _seed_slug.strip(), _seed_db)
+                            st.session_state["nl_seed_table"] = _tbl
+                            st.success(
+                                f"✓ Seeded `{_tbl}` ({len(_df)} rows). In the wizard use "
+                                f"**source table `{_tbl}`**, DB **{_seed_db}**, cloud **AWS**."
+                            )
+                        except Exception as _se:
+                            st.error(f"Could not seed the source DB: {_se}")
+
             # ── Cost chart preview ─────────────────────────────
             st.markdown("##### 💰 Estimated monthly cost based on your data volume")
             _render_cost_charts(size_gb=max(round(ds["size_gb_day"] * 30), 1), key="upload")
@@ -1887,6 +1953,15 @@ with tab_nl:
             '🚀 Building and launching your pipeline…</p>',
             unsafe_allow_html=True,
         )
+        _deploy_cloud = st.session_state.nl_answers.get("target_cloud", "")
+        _ready, _why = _bootstrap_ready(_deploy_cloud)
+        if not _ready:
+            st.error("🚫 " + _why)
+            if st.button("← Back to summary", key="nl_wizard_step4_notready_back",
+                         type="secondary"):
+                st.session_state.nl_step = 3
+                st.rerun()
+            st.stop()
         with st.spinner("Building pipeline configuration…"):
             try:
                 from utils.nlp_parser import _build_from_answers
@@ -1954,6 +2029,10 @@ with tab_nl:
             type="primary",
             disabled=not _adv_cloud,
         ) and _adv_cloud:
+            _arch_ready, _arch_why = _bootstrap_ready(_adv_cloud)
+            if not _arch_ready:
+                st.error("🚫 " + _arch_why)
+                st.stop()
             if st.session_state.get("nl_answers"):
                 with st.spinner(f"Building config for {_adv_cloud.upper()}…"):
                     from utils.nlp_parser import _build_from_answers

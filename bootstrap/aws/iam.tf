@@ -253,3 +253,81 @@ resource "aws_iam_role_policy" "irsa_eu_sales" {
     ]
   })
 }
+
+# ── IRSA: shared role for NL/Streamlit-authored pipelines ─────────────────────
+# The bootstrap pre-creates a dedicated IRSA role per VALIDATED pipeline (eu_sales
+# above). A pipeline authored at runtime through the NL/Streamlit surface has a
+# brand-new ServiceAccount + bucket that no pre-created role trusts, so it could
+# never read SSM creds (cloud_get -> None) or write S3. This SHARED role closes that
+# gap: its trust is a StringLike wildcard over the analytics SA naming convention
+# (`<slug>-insights-sa`) and its policy is scoped to the `*-insights-data` bucket
+# convention + the project SSM namespace + Glue. The NL build points each authored
+# pipeline's SA annotation at this role (see _build_from_answers -> pipeline_irsa_role_name).
+# Demo trade-off (documented in SECURITY.md): broader than the per-pipeline roles —
+# any analytics `*-insights-sa` may assume it, scoped to the bucket naming convention.
+resource "aws_iam_role" "irsa_pipelines" {
+  name = "multi-cloud-pipelines-irsa"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Principal = {
+        Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${local.oidc_issuer_host}"
+      }
+      Condition = {
+        StringLike = {
+          "${local.oidc_issuer_host}:sub" = "system:serviceaccount:analytics:*-insights-sa"
+        }
+        StringEquals = {
+          "${local.oidc_issuer_host}:aud" = "sts.amazonaws.com"
+        }
+      }
+    }]
+  })
+
+  tags = {
+    Project   = "multi-cloud-agent"
+    ManagedBy = "terraform-bootstrap"
+  }
+}
+
+resource "aws_iam_role_policy" "irsa_pipelines" {
+  name = "pipelines-s3-glue-ssm"
+  role = aws_iam_role.irsa_pipelines.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
+        Resource = [
+          "arn:aws:s3:::*-insights-data",
+          "arn:aws:s3:::*-insights-data/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "glue:GetDatabases", "glue:GetDatabase", "glue:CreateDatabase",
+          "glue:GetTables", "glue:GetTable", "glue:CreateTable",
+          "glue:UpdateTable", "glue:DeleteTable",
+          "glue:GetPartitions", "glue:GetPartition", "glue:BatchGetPartition",
+          "glue:BatchCreatePartition", "glue:BatchDeletePartition", "glue:UpdatePartition",
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+        ]
+        Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/multi-cloud-self-healing-agent/*"
+      }
+    ]
+  })
+}

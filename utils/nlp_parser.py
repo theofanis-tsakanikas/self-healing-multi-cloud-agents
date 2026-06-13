@@ -900,7 +900,8 @@ def _build_from_answers(
 
     # Per-cloud bootstrap-output keys copied verbatim into cloud_setup (only when present).
     _BOOTSTRAP_KEYS = {
-        "aws":   ("aws_account_id", "state_bucket", "lock_table", "eks_oidc_issuer"),
+        "aws":   ("aws_account_id", "state_bucket", "lock_table", "eks_oidc_issuer",
+                  "pipeline_irsa_role_name", "pipeline_irsa_role_arn", "oidc_provider_arn"),
         "azure": ("acr_login_server", "aks_cluster_name", "aks_oidc_issuer_url",
                   "state_storage_account", "state_container", "resource_group_name"),
         "gcp":   ("project_id", "region", "artifact_registry_url", "state_bucket"),
@@ -908,6 +909,16 @@ def _build_from_answers(
     for k in _BOOTSTRAP_KEYS.get(cloud, ()):
         if v := cloud_outputs.get(k):
             cloud_setup[k] = v
+
+    # AWS: a runtime-authored pipeline has no pre-created IRSA role of its own, so point
+    # its ServiceAccount at the SHARED pipelines IRSA role (bootstrap, trust = StringLike
+    # `system:serviceaccount:analytics:*-insights-sa`). _resource_names() set iam_role_name
+    # to a per-slug `<slug>-insights-role` that does NOT exist — override it with the real
+    # shared role so cloud_get() can read SSM and the pod can write S3. The SA name stays
+    # `<slug>-insights-sa`, which matches the wildcard trust. (No-op for the validated YAML
+    # path: that never calls _build_from_answers — it carries its own bootstrap role.)
+    if cloud == "aws" and cloud_setup.get("pipeline_irsa_role_name"):
+        cloud_setup["iam_role_name"] = cloud_setup["pipeline_irsa_role_name"]
 
     pipeline_conf = {
         "pipeline_id": pipeline_id,

@@ -10,18 +10,24 @@ bootstrap-aws: ## Provision baseline AWS infrastructure (EKS + RDS + S3 + ECR)
 	@echo "Provisioning AWS baseline infrastructure..."
 	terraform -chdir=bootstrap/aws init
 	terraform -chdir=bootstrap/aws apply
+	@echo "Exporting bootstrap outputs -> .bootstrap_outputs.json (bridge for the NL/Streamlit deploy path)..."
+	$(PYTHON) scripts/export_bootstrap_outputs.py aws
 
 .PHONY: bootstrap-azure
 bootstrap-azure: ## Provision baseline Azure infrastructure (AKS + PostgreSQL + ACR)
 	@echo "Provisioning Azure baseline infrastructure..."
 	terraform -chdir=bootstrap/azure init
 	terraform -chdir=bootstrap/azure apply
+	@echo "Exporting bootstrap outputs -> .bootstrap_outputs.json (bridge for the NL/Streamlit deploy path)..."
+	$(PYTHON) scripts/export_bootstrap_outputs.py azure
 
 .PHONY: bootstrap-gcp
 bootstrap-gcp: ## Provision baseline GCP infrastructure (GKE + Cloud SQL + AR)
 	@echo "Provisioning GCP baseline infrastructure..."
 	terraform -chdir=bootstrap/gcp init
 	terraform -chdir=bootstrap/gcp apply
+	@echo "Exporting bootstrap outputs -> .bootstrap_outputs.json (bridge for the NL/Streamlit deploy path)..."
+	$(PYTHON) scripts/export_bootstrap_outputs.py gcp
 
 .PHONY: bootstrap-databricks
 bootstrap-databricks: ## Provision baseline Databricks infrastructure (workspace + Unity Catalog + jobs cluster + SQL warehouse + source RDS)

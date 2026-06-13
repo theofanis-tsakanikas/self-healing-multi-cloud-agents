@@ -64,3 +64,9 @@ Metrics are demo telemetry; a Pushgateway restart drops them (documented in the 
 
 - **Why:** RAG over the org's own engineering standards is the core mechanism; the content is classification-level *internal*, not *secret*.
 - **Production:** a self-hosted or VPC-peered vector store (e.g. pgvector, OpenSearch), or a Pinecone tier with CMEK/private networking; keep secrets out of standards as a hard rule either way (enforced here by gitleaks in CI and by the credential-access policy in generated code).
+
+### 8. NL/Streamlit-authored pipelines share one IRSA role on AWS
+Each **validated** pipeline gets its own dedicated IRSA role at bootstrap (least-privilege, scoped to its exact ServiceAccount + bucket). A pipeline authored at runtime through the NL/Streamlit surface has a brand-new ServiceAccount + bucket that no pre-created role trusts, so it assumes a **shared** role (`multi-cloud-pipelines-irsa`) whose trust is a `StringLike` wildcard over the `system:serviceaccount:analytics:*-insights-sa` convention and whose policy is scoped to the `*-insights-data` bucket convention + Glue + the project SSM namespace.
+
+- **Why:** runtime-created IAM roles per authored pipeline would require the deploy credentials to carry `iam:CreateRole`/`AttachRolePolicy`, plus a per-pipeline `terraform apply` of an IAM role — broader deploy-time privilege for a demo surface.
+- **Production:** the infra agent provisions a per-pipeline IRSA role (trust scoped to that one SA, policy scoped to that one bucket) as part of the pipeline's own Terraform, and the deploy identity is granted narrowly-scoped IAM-management permissions.

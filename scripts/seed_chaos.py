@@ -151,6 +151,27 @@ def build_engine(db_type, target):
 
     raise ValueError(f"Unsupported DB type: {db_type}")
 
+
+def seed_dataframe_to_source(df: pd.DataFrame, slug: str, db_type: str = "postgres") -> str:
+    """
+    Load a user-supplied sample ("bring your own data" via the NL/Streamlit surface) into
+    the source database as `raw_<slug>`, so a runtime-authored pipeline whose source_table
+    is `raw_<slug>` has a real table to extract at deploy time. Reuses build_engine's
+    per-cloud connection — a brand-new slug is not in CREDENTIAL_MAP, so it falls through
+    to the explicit-db_type path and lands on the shared source DB (e.g. the AWS RDS that
+    SSM /…/rds_host points at). Returns the table name written.
+    """
+    if df is None or df.empty:
+        raise ValueError("Empty dataset — nothing to seed into the source database.")
+    engine = build_engine(db_type, slug)
+    table_name = f"raw_{slug}"
+    with engine.connect():  # fail fast on a bad connection before to_sql
+        logger.info(f"Connection OK ({db_type}); writing sample to '{table_name}'…")
+    df.to_sql(name=table_name, con=engine, if_exists="replace", index=False)
+    logger.info(f"✅ Seeded {len(df)} rows into source table '{table_name}'")
+    return table_name
+
+
 def seed_chaos(target_arg, db_type, n_rows):
     available_targets = ["eu_sales", "us_crm", "global_marketing"]
     targets_to_run = available_targets if target_arg == "all" else [target_arg]

@@ -27,6 +27,26 @@ output "irsa_role_arn" {
   value       = aws_iam_role.irsa_eu_sales.arn
 }
 
+output "aws_account_id" {
+  description = "Account ID — used for the IRSA role ARN in NL-authored pipelines (00_namespaces.yaml)"
+  value       = data.aws_caller_identity.current.account_id
+}
+
+output "oidc_provider_arn" {
+  description = "EKS OIDC provider ARN — IRSA trust for NL-authored pipelines"
+  value       = aws_iam_openid_connect_provider.eks.arn
+}
+
+output "pipeline_irsa_role_name" {
+  description = "Shared IRSA role for NL/Streamlit-authored pipelines — annotate <slug>-insights-sa with it"
+  value       = aws_iam_role.irsa_pipelines.name
+}
+
+output "pipeline_irsa_role_arn" {
+  description = "Shared IRSA role ARN for NL/Streamlit-authored pipelines"
+  value       = aws_iam_role.irsa_pipelines.arn
+}
+
 output "rds_host" {
   description = "Written to SSM: /multi-cloud-self-healing-agent/aws/rds_host"
   value       = aws_db_instance.eu_sales_raw.address
