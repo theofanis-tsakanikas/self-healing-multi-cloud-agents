@@ -18,6 +18,7 @@ import time
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
@@ -461,41 +462,73 @@ _PIPELINE_NODES = [
     ("infra",      "⚙️ INFRA"),
     ("medic",      "🏥 MEDIC"),
 ]
-def _render_agent_graphviz(node_statuses: dict, last_edge) -> str:
-    """Hub-and-spoke DOT graph of the REAL topology — the Supervisor routes to Architect / Infra /
-    Medic and each returns to it (it is NOT a linear pipeline). The currently-active node and the
-    edge just traversed are highlighted; completed nodes are muted-green. For st.graphviz_chart."""
-    _NSTYLE = {
-        "active":    'color="#38bdf8" fillcolor="#0c2942" fontcolor="#e0f2fe" penwidth=3',
-        "completed": 'color="#4ade80" fillcolor="#04210f" fontcolor="#86efac" penwidth=2',
-        "failed":    'color="#f87171" fillcolor="#2a0f0f" fontcolor="#fca5a5" penwidth=2.5',
-        "pending":   'color="#334155" fillcolor="#0b1220" fontcolor="#64748b" penwidth=1.5',
+def _render_agent_svg(node_statuses: dict, last_edge) -> str:
+    """Animated hub-and-spoke graph of the REAL topology — the Supervisor routes to Architect /
+    Infra / Medic and each returns to it (NOT a linear pipeline). The node running NOW pulses with a
+    marching-ants ring and the active edge animates in the travel direction; finished nodes are solid
+    green, failed red, idle dark. Rendered via st.components.html (an iframe, so the CSS animations
+    survive — st.markdown would sanitise them). Re-render ONLY on state change so it doesn't restart."""
+    import math
+    # (cx, cy, w, h)
+    _POS = {
+        "supervisor": (300, 56, 176, 66),
+        "architect":  (104, 250, 150, 60),
+        "infra":      (300, 250, 150, 60),
+        "medic":      (496, 250, 150, 60),
     }
-    _LBL = {"supervisor": "Supervisor", "architect": "Architect",
-            "infra": "Infra", "medic": "Medic"}
+    _LBL = {"supervisor": "Supervisor", "architect": "Architect", "infra": "Infra", "medic": "Medic"}
+    _CLS = {"active": "n-active", "completed": "n-done", "failed": "n-failed", "pending": "n-pending"}
 
-    def _node(key):
-        s = node_statuses.get(key, "pending")
-        return f'  {key} [label="{_LBL[key]}" {_NSTYLE.get(s, _NSTYLE["pending"])}];'
+    def _short(sx, sy, dx, dy, gap):
+        L = math.hypot(dx - sx, dy - sy) or 1
+        return dx - (dx - sx) / L * gap, dy - (dy - sy) / L * gap
 
-    def _edge(a, b):
+    def _line(a, b):
         hot = last_edge is not None and {a, b} == set(last_edge)
-        attrs = 'color="#38bdf8" penwidth=3' if hot else 'color="#2a3850" penwidth=1.4'
-        return f'  {a} -> {b} [dir=both {attrs}];'
+        src, dst = (last_edge if hot else (a, b))
+        sx, sy = _POS[src][:2]
+        dx, dy = _POS[dst][:2]
+        sx, sy = _short(dx, dy, sx, sy, 38)   # pull start off the src box
+        dx, dy = _short(_POS[src][0], _POS[src][1], dx, dy, 38)  # and end off the dst box
+        cls = "e-active" if hot else "e"
+        mk = ' marker-end="url(#arrow)"' if hot else ''
+        return f'<line x1="{sx:.0f}" y1="{sy:.0f}" x2="{dx:.0f}" y2="{dy:.0f}" class="{cls}"{mk}/>'
 
-    return "\n".join([
-        "digraph {",
-        '  bgcolor="transparent"; rankdir=TB; nodesep=0.55; ranksep=0.75;',
-        '  node [shape=box style="rounded,filled" fontname="Helvetica" fontsize=12 margin="0.22,0.14"];',
-        '  edge [arrowsize=0.7];',
-        _node("supervisor"),
-        "  { rank=same; architect; infra; medic; }",
-        _node("architect"), _node("infra"), _node("medic"),
-        _edge("supervisor", "architect"),
-        _edge("supervisor", "infra"),
-        _edge("supervisor", "medic"),
-        "}",
-    ])
+    def _box(key):
+        cx, cy, w, h = _POS[key]
+        cls = _CLS.get(node_statuses.get(key, "pending"), "n-pending")
+        return (
+            f'<rect x="{cx-w/2:.0f}" y="{cy-h/2:.0f}" width="{w}" height="{h}" rx="13" class="{cls}"/>'
+            f'<text x="{cx}" y="{cy+6}" text-anchor="middle" class="lbl">{_LBL[key]}</text>'
+        )
+
+    svg = (
+        '<svg viewBox="0 0 600 312" width="100%" style="max-height:330px;display:block;margin:auto;" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="6" refY="3" '
+        'orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#38bdf8"/></marker></defs>'
+        + _line("supervisor", "architect") + _line("supervisor", "infra")
+        + _line("supervisor", "medic")
+        + _box("supervisor") + _box("architect") + _box("infra") + _box("medic")
+        + '</svg>'
+    )
+    return (
+        "<style>"
+        "body{margin:0;background:transparent;}"
+        "@keyframes march{to{stroke-dashoffset:-28;}}"
+        "@keyframes pulse{0%,100%{stroke-width:2.5;}50%{stroke-width:5;}}"
+        ".e{stroke:#2a3850;stroke-width:1.6;}"
+        ".e-active{stroke:#38bdf8;stroke-width:3;stroke-dasharray:9 5;animation:march .55s linear infinite;}"
+        "rect{fill:#0b1220;}"
+        ".n-pending{stroke:#334155;stroke-width:1.5;}"
+        ".n-done{fill:#04210f;stroke:#4ade80;stroke-width:2;}"
+        ".n-failed{fill:#2a0f0f;stroke:#f87171;stroke-width:2.5;}"
+        ".n-active{fill:#0c2942;stroke:#38bdf8;stroke-dasharray:11 6;"
+        "animation:march .7s linear infinite,pulse 1.3s ease-in-out infinite;"
+        "filter:drop-shadow(0 0 7px rgba(56,189,248,.7));}"
+        ".lbl{fill:#e2e8f0;font-family:Helvetica,Arial,sans-serif;font-size:17px;font-weight:600;}"
+        "</style>" + svg
+    )
 
 
 def _render_agent_log_html(agent_messages: dict) -> str:
@@ -2400,6 +2433,7 @@ if st.session_state.get("run_status") == "running":
     _healing_cycles = st.session_state.get("healing_cycles", 0)
     _run_start_time = st.session_state.get("run_start_time", time.time())
     _last_edge = None  # (from, to) of the transition just taken — highlighted in the graph
+    _graph_sig = None  # last-rendered graph state — re-render the animated SVG only when it changes
 
     st.divider()
 
@@ -2471,11 +2505,13 @@ if st.session_state.get("run_status") == "running":
                     unsafe_allow_html=True,
                 )
 
-            # Agent graph (center tab) — hub topology, active node + edge highlighted
-            graph_ph.graphviz_chart(
-                _render_agent_graphviz(_node_statuses, _last_edge),
-                use_container_width=True,
-            )
+            # Agent graph (center tab) — animated hub. Re-render ONLY on state change so the CSS
+            # animation isn't restarted every poll (the iframe persists between changes).
+            _gsig = (tuple(sorted(_node_statuses.items())), _last_edge)
+            if _gsig != _graph_sig:
+                _graph_sig = _gsig
+                with graph_ph.container():
+                    components.html(_render_agent_svg(_node_statuses, _last_edge), height=350)
 
             # Execution metrics
             elapsed = int(time.time() - _run_start_time)
@@ -2520,10 +2556,8 @@ if st.session_state.get("run_status") == "running":
                     _node_statuses[k] = "failed"
 
         # Final graph refresh
-        graph_ph.graphviz_chart(
-            _render_agent_graphviz(_node_statuses, _last_edge),
-            use_container_width=True,
-        )
+        with graph_ph.container():
+            components.html(_render_agent_svg(_node_statuses, _last_edge), height=350)
         elapsed = int(time.time() - _run_start_time)
         _time_ph.metric("⏱️ Elapsed", f"{elapsed}s")
         _cycles_ph.metric("🔄 Healing Cycles", _healing_cycles)
