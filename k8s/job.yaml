@@ -1,20 +1,20 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pipe-eu-sales-to-s3-job
+  name: pipe-extract-transform-load-post-ad-to-s3-job
   namespace: analytics
   labels:
-    project_id: pipe_eu_sales_to_s3
+    project_id: pipe_extract_transform_load_post_ad_to_s3
     component: pipeline-job
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        project_id: pipe_eu_sales_to_s3
+        project_id: pipe_extract_transform_load_post_ad_to_s3
         component: pipeline-job
     spec:
-      serviceAccountName: eu-sales-insights-sa
+      serviceAccountName: extract-transform-load-post-ad-insights-sa
       restartPolicy: Never
       initContainers:
       - name: init-trino
@@ -35,18 +35,18 @@ spec:
         image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
         env:
         - name: PROJECT_ID
-          value: "pipe_eu_sales_to_s3"
+          value: "pipe_extract_transform_load_post_ad_to_s3"
         - name: CLOUD_PROVIDER
           value: "aws"
         - name: DESTINATION_URI
-          value: "s3://eu-sales-insights-data/processed/"
+          value: "s3://extract-transform-load-post-ad-insights-data/processed/"
         - name: TRINO_HOST
           value: "trino.analytics.svc.cluster.local"
         - name: PUSHGATEWAY_URL
           value: "http://pushgateway.monitoring.svc.cluster.local:9091"
         envFrom:
         - secretRef:
-            name: pipe-eu-sales-to-s3-db-credentials
+            name: pipe-extract-transform-load-post-ad-to-s3-db-credentials
         resources:
           requests:
             memory: "1Gi"

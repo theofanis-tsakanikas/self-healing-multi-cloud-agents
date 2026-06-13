@@ -1,6 +1,6 @@
 {
-  "uid": "eu-sales-data-observability",
-  "title": "EU Sales Data Observability",
+  "uid": "extract-transform-load-post-ad-data-observability",
+  "title": "Extract Transform Load Post Ad Data Observability",
   "schemaVersion": 37,
   "version": 1,
   "refresh": "5m",
@@ -10,7 +10,7 @@
   },
   "tags": [
     "data-pipeline",
-    "eu-sales",
+    "extract-transform-load-post-ad",
     "aws"
   ],
   "templating": {
