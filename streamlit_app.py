@@ -1169,8 +1169,21 @@ def _render_cost_panel(selected_cloud: str | None = None):
             col = colors.get(c, "#38bdf8")
             is_cheapest  = c == cheapest
             is_selected  = c == selected_cloud
-            border_color = "#4ade80" if is_cheapest else (col if is_selected else "rgba(56,189,248,0.18)")
-            badge = " ✓ cheapest" if is_cheapest else (" ← selected" if is_selected else "")
+            # "selected" uses a distinct NEUTRAL bright 2px ring so it NEVER collides with the
+            # cheapest GREEN — a cloud's own brand colour can itself be green (GCP). cheapest stays
+            # green; both can be true at once → thicker ring + both badges.
+            if is_selected:
+                border_css = "2px solid #f1f5f9"
+            elif is_cheapest:
+                border_css = "1px solid #4ade80"
+            else:
+                border_css = "1px solid rgba(56,189,248,0.18)"
+            _badges = []
+            if is_selected:
+                _badges.append('<span style="color:#f1f5f9;">← selected</span>')
+            if is_cheapest:
+                _badges.append('<span style="color:#4ade80;">✓ cheapest</span>')
+            badge_html = " · ".join(_badges)
 
             with cols[i]:
                 rows_html = "".join(
@@ -1182,13 +1195,13 @@ def _render_cost_panel(selected_cloud: str | None = None):
                     for k, v in est["items"].items()
                 )
                 st.markdown(
-                    f'<div style="background:rgba(10,18,40,0.7);border:1px solid {border_color};'
+                    f'<div style="background:rgba(10,18,40,0.7);border:{border_css};'
                     f'border-radius:12px;padding:0.85rem 1rem;">'
                     f'<p style="margin:0 0 0.1rem;font-size:0.72rem;color:#475569;'
                     f'text-transform:uppercase;letter-spacing:0.08em;">{flags.get(c, c.upper())}</p>'
                     f'<p style="margin:0 0 0.6rem;font-size:1.5rem;font-weight:700;color:{col};">'
                     f'${est["total"]:.0f}<span style="font-size:0.8rem;color:#64748b;">/mo</span>'
-                    f'<span style="font-size:0.72rem;color:#4ade80;margin-left:0.4rem;">{badge}</span></p>'
+                    f'<span style="font-size:0.72rem;margin-left:0.4rem;">{badge_html}</span></p>'
                     f'{rows_html}'
                     f'</div>',
                     unsafe_allow_html=True,
@@ -1196,7 +1209,7 @@ def _render_cost_panel(selected_cloud: str | None = None):
         st.markdown(
             '<p style="color:#334155;font-size:0.72rem;margin-top:0.6rem;">'
             '* List prices (~2026-06) · representative regions · fixed bootstrap footprint · '
-            '50 GB storage · Databricks is usage-billed (see cost_estimator disclaimer)</p>',
+            '50 GB storage · Databricks compute is usage-billed (assumes ~2h/day jobs + 1h/day SQL)</p>',
             unsafe_allow_html=True,
         )
 
