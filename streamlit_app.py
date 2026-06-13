@@ -670,7 +670,7 @@ def _start_run(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
 _BOOTSTRAP_REQUIRED_KEYS = {
     "aws":   ("state_bucket", "aws_account_id", "pipeline_irsa_role_name"),
     "azure": ("state_storage_account", "acr_login_server", "pipeline_managed_identity_name"),
-    "gcp":   ("state_bucket", "artifact_registry_url", "project_id"),
+    "gcp":   ("state_bucket", "artifact_registry_url", "project_id", "pipeline_service_account_email"),
 }
 
 

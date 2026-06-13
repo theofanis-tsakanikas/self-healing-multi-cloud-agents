@@ -116,6 +116,11 @@ def _normalize_gcp(raw: dict) -> dict:
         out["gke_cluster_name"] = v
     if v := raw.get("marketing_service_account_email"):
         out["service_account_email"] = v
+    # NL/Streamlit-authored pipelines: the shared SA they impersonate via Workload Identity.
+    if v := raw.get("pipeline_service_account_email"):
+        out["pipeline_service_account_email"] = v
+    if v := raw.get("pipeline_service_account_id"):
+        out["pipeline_service_account_id"] = v
     if v := raw.get("tfstate_bucket_name"):
         out["state_bucket"] = v
     if v := raw.get("project_id"):

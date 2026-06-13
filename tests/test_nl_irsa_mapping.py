@@ -94,3 +94,41 @@ def test_nl_azure_without_bootstrap_output_keeps_per_slug():
     setup = _azure_setup(outputs)
     assert setup["managed_identity_name"] == "my-sales-insights-identity"
     assert setup["k8s_service_account_name"] == "my-sales-insights-sa"
+
+
+_GCP_ANSWERS = {**_ANSWERS, "target_cloud": "gcp", "source_db_type": "mysql"}
+
+_GCP_OUTPUTS = {
+    "gcp": {
+        "project_id": "mc-agent-prod",
+        "region": "europe-west1",
+        "artifact_registry_url": "europe-west1-docker.pkg.dev/mc-agent-prod/repo",
+        "state_bucket": "mc-agent-tfstate",
+        "pipeline_service_account_email": "pipelines-insights-sa@mc-agent-prod.iam.gserviceaccount.com",
+        "pipeline_service_account_id": "pipelines-insights-sa",
+    }
+}
+
+
+def _gcp_setup(outputs):
+    with patch.object(nlp, "_load_bootstrap_outputs", return_value=outputs), \
+         patch.object(nlp, "_save_generated_configs"):
+        pipeline_conf, *_ = nlp._build_from_answers(_GCP_ANSWERS, [])
+    return pipeline_conf["gcp_setup"]
+
+
+def test_nl_gcp_sa_uses_fixed_shared_service_account():
+    setup = _gcp_setup(_GCP_OUTPUTS)
+    # GCP WI binding members are exact (no wildcard) → one fixed KSA + the shared SA.
+    assert setup["service_account_id"] == "pipelines-insights-sa"
+    assert setup["service_account_email"] == (
+        "pipelines-insights-sa@mc-agent-prod.iam.gserviceaccount.com"
+    )
+    assert setup["k8s_service_account_name"] == "pipelines-insights-sa"
+
+
+def test_nl_gcp_without_bootstrap_output_keeps_per_slug():
+    outputs = {"gcp": {k: v for k, v in _GCP_OUTPUTS["gcp"].items()
+                       if k != "pipeline_service_account_id"}}
+    setup = _gcp_setup(outputs)
+    assert setup["k8s_service_account_name"] == "my-sales-insights-sa"

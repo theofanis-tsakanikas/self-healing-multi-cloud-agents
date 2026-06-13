@@ -32,6 +32,38 @@ resource "google_service_account_iam_member" "workload_identity_binding" {
   depends_on = [google_container_cluster.main]
 }
 
+# ── Shared SA for NL/Streamlit-authored pipelines ─────────────────────────────
+# The bootstrap pre-creates a dedicated SA per VALIDATED pipeline (marketing above). A
+# pipeline authored at runtime through the NL/Streamlit surface has a brand-new
+# ServiceAccount + bucket that no pre-created SA's Workload Identity binding trusts, so it
+# could never reach GCS. This SHARED SA closes that gap. Like Azure (and unlike AWS IRSA), a
+# GCP Workload Identity binding member is EXACT (no wildcard), so every NL-authored pipeline
+# uses a FIXED shared KSA (`pipelines-insights-sa`) that this one binding trusts. The
+# per-pipeline Terraform binds this SA to its own bucket; project-level objectAdmin below
+# already covers any `*-insights-data` bucket. (See _build_from_answers -> pipeline_service_account_*.)
+# Demo trade-off (SECURITY.md): all NL pipelines share one SA + KSA name.
+resource "google_service_account" "pipelines_shared" {
+  account_id   = "pipelines-insights-sa"
+  display_name = "Shared NL/Streamlit-authored Pipelines SA"
+  project      = var.project_id
+
+  depends_on = [google_project_service.iam]
+}
+
+resource "google_project_iam_member" "pipelines_shared_storage_admin" {
+  project = var.project_id
+  role    = "roles/storage.objectAdmin"
+  member  = "serviceAccount:${google_service_account.pipelines_shared.email}"
+}
+
+resource "google_service_account_iam_member" "pipelines_shared_workload_identity" {
+  service_account_id = google_service_account.pipelines_shared.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[analytics/pipelines-insights-sa]"
+
+  depends_on = [google_container_cluster.main]
+}
+
 # ── GitHub Actions Workload Identity Federation (optional) ───────────────────
 # Allows GitHub Actions to authenticate with GCP using OIDC (no JSON key needed).
 # Only created if pipeline_github_repo is set.

@@ -905,7 +905,8 @@ def _build_from_answers(
         "azure": ("acr_login_server", "aks_cluster_name", "aks_oidc_issuer_url",
                   "state_storage_account", "state_container", "resource_group_name",
                   "pipeline_managed_identity_name", "pipeline_managed_identity_client_id"),
-        "gcp":   ("project_id", "region", "artifact_registry_url", "state_bucket"),
+        "gcp":   ("project_id", "region", "artifact_registry_url", "state_bucket",
+                  "pipeline_service_account_email", "pipeline_service_account_id"),
     }
     for k in _BOOTSTRAP_KEYS.get(cloud, ()):
         if v := cloud_outputs.get(k):
@@ -931,6 +932,17 @@ def _build_from_answers(
     # validated YAML path: us_crm never calls _build_from_answers.)
     if cloud == "azure" and cloud_setup.get("pipeline_managed_identity_name"):
         cloud_setup["managed_identity_name"] = cloud_setup["pipeline_managed_identity_name"]
+        cloud_setup["k8s_service_account_name"] = "pipelines-insights-sa"
+
+    # GCP: same as Azure. The GCP service account + GKE Workload Identity binding are
+    # bootstrap-owned; a runtime-authored pipeline has neither. Point it at the SHARED SA (its
+    # per-pipeline Terraform binds that SA to its own bucket; project-level objectAdmin already
+    # covers it). A GCP WI binding member is EXACT (no wildcard), so every NL-authored GCP
+    # pipeline uses the one FIXED KSA the shared binding trusts — override the per-slug SA id,
+    # email and KSA. (No-op for the validated YAML path: global_marketing never calls this.)
+    if cloud == "gcp" and cloud_setup.get("pipeline_service_account_id"):
+        cloud_setup["service_account_id"] = cloud_setup["pipeline_service_account_id"]
+        cloud_setup["service_account_email"] = cloud_setup["pipeline_service_account_email"]
         cloud_setup["k8s_service_account_name"] = "pipelines-insights-sa"
 
     pipeline_conf = {

@@ -22,6 +22,16 @@ output "marketing_service_account_email" {
   value       = google_service_account.marketing_pipeline.email
 }
 
+output "pipeline_service_account_email" {
+  description = "Shared SA for NL/Streamlit-authored pipelines — annotate pipelines-insights-sa with it"
+  value       = google_service_account.pipelines_shared.email
+}
+
+output "pipeline_service_account_id" {
+  description = "Shared SA account_id for NL/Streamlit-authored pipelines (var.service_account_id)"
+  value       = google_service_account.pipelines_shared.account_id
+}
+
 output "workload_identity_provider" {
   description = "Set as GCP_WORKLOAD_IDENTITY_PROVIDER in GitHub Secrets (if using OIDC)"
   value       = var.pipeline_github_repo != "" ? google_iam_workload_identity_pool_provider.github[0].name : "not configured"
