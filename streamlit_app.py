@@ -761,6 +761,16 @@ st.markdown("""
       border:1px solid rgba(192,132,252,0.3); border-radius:8px;
       padding:0.25rem 0.8rem; font-size:0.8rem; font-weight:600; letter-spacing:0.05em;
     ">🔮 Trino Federation</span>
+    <span style="
+      background:rgba(251,191,36,0.12); color:#fbbf24;
+      border:1px solid rgba(251,191,36,0.3); border-radius:8px;
+      padding:0.25rem 0.8rem; font-size:0.8rem; font-weight:600; letter-spacing:0.05em;
+    ">📊 Grafana Dashboards</span>
+    <span style="
+      background:rgba(255,54,33,0.10); color:#ff6b57;
+      border:1px solid rgba(255,54,33,0.28); border-radius:8px;
+      padding:0.25rem 0.8rem; font-size:0.8rem; font-weight:600; letter-spacing:0.05em;
+    ">🧱 Databricks Lakehouse · deep-dive</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
