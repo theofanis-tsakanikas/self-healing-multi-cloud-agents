@@ -669,7 +669,7 @@ def _start_run(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
 # fails deep inside terraform with a cryptic error. We surface a clear message up front.
 _BOOTSTRAP_REQUIRED_KEYS = {
     "aws":   ("state_bucket", "aws_account_id", "pipeline_irsa_role_name"),
-    "azure": ("state_storage_account", "acr_login_server"),
+    "azure": ("state_storage_account", "acr_login_server", "pipeline_managed_identity_name"),
     "gcp":   ("state_bucket", "artifact_registry_url", "project_id"),
 }
 
@@ -1350,8 +1350,8 @@ with tab_upload:
                     _seed_slug = st.text_input("Pipeline slug", placeholder="e.g. my_sales",
                                                key="upload_seed_slug")
                 with _sd2:
-                    _seed_db = st.radio("Source DB", ["postgres", "mysql"], horizontal=True,
-                                        key="upload_seed_db")
+                    _seed_cloud = st.radio("Target cloud", ["aws", "azure", "gcp"],
+                                           horizontal=True, key="upload_seed_cloud")
                 if st.button("⬆️ Load sample into source DB", key="upload_seed_btn",
                              type="primary", disabled=not _seed_slug.strip()):
                     with st.spinner("Loading sample into the source database…"):
@@ -1367,11 +1367,13 @@ with tab_upload:
                                 _df = pd.read_json(uploaded_ds)
                             else:
                                 _df = pd.read_csv(uploaded_ds)
-                            _tbl = seed_dataframe_to_source(_df, _seed_slug.strip(), _seed_db)
+                            _tbl = seed_dataframe_to_source(_df, _seed_slug.strip(), _seed_cloud)
                             st.session_state["nl_seed_table"] = _tbl
+                            _db_label = "mysql" if _seed_cloud == "gcp" else "postgres"
                             st.success(
                                 f"✓ Seeded `{_tbl}` ({len(_df)} rows). In the wizard use "
-                                f"**source table `{_tbl}`**, DB **{_seed_db}**, cloud **AWS**."
+                                f"**source table `{_tbl}`**, DB **{_db_label}**, "
+                                f"cloud **{_seed_cloud.upper()}**."
                             )
                         except Exception as _se:
                             st.error(f"Could not seed the source DB: {_se}")

@@ -56,3 +56,41 @@ def test_nl_aws_without_bootstrap_output_keeps_per_slug_role():
                        if k != "pipeline_irsa_role_name"}}
     setup = _aws_setup(outputs)
     assert setup["iam_role_name"] == "my-sales-insights-role"
+
+
+_AZURE_ANSWERS = {**_ANSWERS, "target_cloud": "azure"}
+
+_AZURE_OUTPUTS = {
+    "azure": {
+        "acr_login_server": "mcagent.azurecr.io",
+        "aks_cluster_name": "mc-agent-aks",
+        "aks_oidc_issuer_url": "https://oidc.prod-aks.azure.com/abc/",
+        "state_storage_account": "mcagenttfstate",
+        "state_container": "tfstate",
+        "resource_group_name": "multi-cloud-agent-rg",
+        "pipeline_managed_identity_name": "multi-cloud-pipelines-identity",
+        "pipeline_managed_identity_client_id": "00000000-0000-0000-0000-000000000000",
+    }
+}
+
+
+def _azure_setup(outputs):
+    with patch.object(nlp, "_load_bootstrap_outputs", return_value=outputs), \
+         patch.object(nlp, "_save_generated_configs"):
+        pipeline_conf, *_ = nlp._build_from_answers(_AZURE_ANSWERS, [])
+    return pipeline_conf["azure_setup"]
+
+
+def test_nl_azure_sa_uses_fixed_shared_identity():
+    setup = _azure_setup(_AZURE_OUTPUTS)
+    # Azure federated subjects are exact (no wildcard) → one fixed SA + the shared identity.
+    assert setup["managed_identity_name"] == "multi-cloud-pipelines-identity"
+    assert setup["k8s_service_account_name"] == "pipelines-insights-sa"
+
+
+def test_nl_azure_without_bootstrap_output_keeps_per_slug():
+    outputs = {"azure": {k: v for k, v in _AZURE_OUTPUTS["azure"].items()
+                         if k != "pipeline_managed_identity_name"}}
+    setup = _azure_setup(outputs)
+    assert setup["managed_identity_name"] == "my-sales-insights-identity"
+    assert setup["k8s_service_account_name"] == "my-sales-insights-sa"

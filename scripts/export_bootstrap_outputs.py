@@ -70,6 +70,11 @@ def _normalize_aws(raw: dict) -> dict:
         out["eks_oidc_issuer"] = v
     if v := raw.get("irsa_role_arn"):
         out["irsa_role_arn"] = v
+    # NL/Streamlit-authored pipelines: account id + the shared IRSA role they assume.
+    for k in ("aws_account_id", "oidc_provider_arn",
+              "pipeline_irsa_role_name", "pipeline_irsa_role_arn"):
+        if v := raw.get(k):
+            out[k] = v
     for k in ("rds_host", "rds_port", "rds_db_name", "rds_username"):
         if v := raw.get(k):
             out[k] = v
@@ -86,6 +91,11 @@ def _normalize_azure(raw: dict) -> dict:
         out["aks_oidc_issuer_url"] = v
     if v := raw.get("crm_managed_identity_client_id"):
         out["managed_identity_client_id"] = v
+    # NL/Streamlit-authored pipelines: the shared managed identity they federate to.
+    if v := raw.get("pipeline_managed_identity_name"):
+        out["pipeline_managed_identity_name"] = v
+    if v := raw.get("pipeline_managed_identity_client_id"):
+        out["pipeline_managed_identity_client_id"] = v
     if v := raw.get("tfstate_storage_account"):
         out["state_storage_account"] = v
     if v := raw.get("tfstate_container_name"):

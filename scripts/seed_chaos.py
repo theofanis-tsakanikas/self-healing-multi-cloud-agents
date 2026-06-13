@@ -152,23 +152,32 @@ def build_engine(db_type, target):
     raise ValueError(f"Unsupported DB type: {db_type}")
 
 
-def seed_dataframe_to_source(df: pd.DataFrame, slug: str, db_type: str = "postgres") -> str:
+# Each NL cloud reads from the SAME source DB as its validated pipeline (the agent resolves
+# creds via that pipeline's SSM/env wiring), so seed a user sample onto that cloud's source
+# DB by reusing the validated target's connection in build_engine.
+_CLOUD_SOURCE_TARGET = {"aws": "eu_sales", "azure": "us_crm", "gcp": "global_marketing"}
+
+
+def seed_dataframe_to_source(df: pd.DataFrame, slug: str, cloud: str = "aws") -> str:
     """
-    Load a user-supplied sample ("bring your own data" via the NL/Streamlit surface) into
-    the source database as `raw_<slug>`, so a runtime-authored pipeline whose source_table
-    is `raw_<slug>` has a real table to extract at deploy time. Reuses build_engine's
-    per-cloud connection — a brand-new slug is not in CREDENTIAL_MAP, so it falls through
-    to the explicit-db_type path and lands on the shared source DB (e.g. the AWS RDS that
-    SSM /…/rds_host points at). Returns the table name written.
+    Load a user-supplied sample ("bring your own data" via the NL/Streamlit surface) into the
+    cloud's source database as `raw_<slug>`, so a runtime-authored pipeline whose source_table
+    is `raw_<slug>` has a real table to extract at deploy time. Reuses build_engine's per-cloud
+    connection via the cloud's validated source target (AWS→eu_sales RDS, Azure→us_crm
+    PostgreSQL, GCP→global_marketing MySQL). Returns the table name written.
     """
     if df is None or df.empty:
         raise ValueError("Empty dataset — nothing to seed into the source database.")
-    engine = build_engine(db_type, slug)
+    target = _CLOUD_SOURCE_TARGET.get(cloud)
+    if target is None:
+        raise ValueError(f"Unsupported cloud for seeding: {cloud!r} (aws|azure|gcp).")
+    db_type = "mysql" if cloud == "gcp" else "postgres"
+    engine = build_engine(db_type, target)
     table_name = f"raw_{slug}"
     with engine.connect():  # fail fast on a bad connection before to_sql
-        logger.info(f"Connection OK ({db_type}); writing sample to '{table_name}'…")
+        logger.info(f"Connection OK ({cloud}/{db_type}); writing sample to '{table_name}'…")
     df.to_sql(name=table_name, con=engine, if_exists="replace", index=False)
-    logger.info(f"✅ Seeded {len(df)} rows into source table '{table_name}'")
+    logger.info(f"✅ Seeded {len(df)} rows into source table '{table_name}' ({cloud})")
     return table_name
 
 

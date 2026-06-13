@@ -35,6 +35,16 @@ output "crm_managed_identity_principal_id" {
   value = azurerm_user_assigned_identity.crm_pipeline.principal_id
 }
 
+output "pipeline_managed_identity_name" {
+  description = "Shared managed identity for NL/Streamlit-authored pipelines — set as managed_identity_name"
+  value       = azurerm_user_assigned_identity.pipelines_shared.name
+}
+
+output "pipeline_managed_identity_client_id" {
+  description = "Annotate <slug>-pipelines SA (pipelines-insights-sa) with this client ID"
+  value       = azurerm_user_assigned_identity.pipelines_shared.client_id
+}
+
 output "db_host" {
   description = "Set as CRM_DB_HOST in GitHub Secrets"
   value       = azurerm_postgresql_flexible_server.main.fqdn

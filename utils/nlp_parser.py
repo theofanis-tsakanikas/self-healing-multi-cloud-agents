@@ -903,7 +903,8 @@ def _build_from_answers(
         "aws":   ("aws_account_id", "state_bucket", "lock_table", "eks_oidc_issuer",
                   "pipeline_irsa_role_name", "pipeline_irsa_role_arn", "oidc_provider_arn"),
         "azure": ("acr_login_server", "aks_cluster_name", "aks_oidc_issuer_url",
-                  "state_storage_account", "state_container", "resource_group_name"),
+                  "state_storage_account", "state_container", "resource_group_name",
+                  "pipeline_managed_identity_name", "pipeline_managed_identity_client_id"),
         "gcp":   ("project_id", "region", "artifact_registry_url", "state_bucket"),
     }
     for k in _BOOTSTRAP_KEYS.get(cloud, ()):
@@ -919,6 +920,18 @@ def _build_from_answers(
     # path: that never calls _build_from_answers — it carries its own bootstrap role.)
     if cloud == "aws" and cloud_setup.get("pipeline_irsa_role_name"):
         cloud_setup["iam_role_name"] = cloud_setup["pipeline_irsa_role_name"]
+
+    # Azure: same gap, different mechanism. The managed identity + AKS federated credential
+    # are bootstrap-owned; a runtime-authored pipeline has neither. Point it at the SHARED
+    # identity (its per-pipeline Terraform binds that identity to its own storage account via
+    # azurerm_role_assignment, and outputs its client_id for the SA annotation). Because an
+    # Azure federated-credential subject must be EXACT (no wildcard, unlike AWS IRSA), every
+    # NL-authored Azure pipeline must use the one FIXED ServiceAccount name the shared
+    # credential trusts — override the per-slug `<slug>-insights-sa` with it. (No-op for the
+    # validated YAML path: us_crm never calls _build_from_answers.)
+    if cloud == "azure" and cloud_setup.get("pipeline_managed_identity_name"):
+        cloud_setup["managed_identity_name"] = cloud_setup["pipeline_managed_identity_name"]
+        cloud_setup["k8s_service_account_name"] = "pipelines-insights-sa"
 
     pipeline_conf = {
         "pipeline_id": pipeline_id,
