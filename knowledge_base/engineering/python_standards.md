@@ -373,20 +373,18 @@ def run():
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
     trino_host = os.getenv("TRINO_HOST", "trino.analytics.svc.cluster.local")
-    schema, table = "<schema>", "<table>"  # from CATALOG_AND_MONITORING.trino_metadata
-    # `schema` is the BARE schema name — the MIDDLE segment of the fully-qualified
-    # trino target `hive.<schema>.<table>`. NEVER catalog-prefix it: the catalog is
-    # supplied separately by `hive.system.` below, so prefixing duplicates it and the
-    # CALL fails at runtime with "schema not found".
-    #   ❌ schema = "hive.marketing_global"   → CALL ...('hive.marketing_global', ...) → crash
-    #   ✅ schema = "marketing_global"         → CALL ...('marketing_global', ...)
-    # If the objective text shows the target as `hive.<schema>.<table>`, split it and use
-    # only the middle segment here — do NOT copy the qualified literal verbatim.
-    # The catalog is ALWAYS "hive" (the hive-catalog-config ConfigMap key is hive.properties
-    # on every cloud). Use the literal "hive" — do NOT assign a `catalog` variable: filling it
-    # with the literal and then writing CALL hive.system leaves it unused → ruff F841.
     conn = trino_connect(host=trino_host, port=8080, user="pipeline")
     cursor = conn.cursor()
+    # Fill the bare schema and table names as STRING LITERALS directly in the CALL below —
+    # exactly as the catalog "hive" is a literal. Do NOT assign `schema`/`table` (or `catalog`)
+    # variables: the model tends to fill the real value into BOTH the assignment AND the string,
+    # leaving the variable unused (ruff F841) and the f-string placeholder-less (ruff F541). Use
+    # a PLAIN string (no f-prefix) with the literals inlined.
+    # The schema is the BARE middle segment of `hive.<schema>.<table>` — NEVER catalog-prefix it
+    # (the catalog comes from `hive.system.` below; prefixing duplicates it → "schema not found"):
+    #   ❌ CALL hive.system.sync_partition_metadata('hive.marketing_global', 'orders', 'ADD')  → crash
+    #   ✅ CALL hive.system.sync_partition_metadata('marketing_global', 'orders', 'ADD')
+    # If the objective shows the target as `hive.<schema>.<table>`, use only the middle segment.
     # Retry the partition registration. A freshly-started Trino coordinator (the init container
     # creates this table only seconds before the pipeline runs) may not yet see it in its Glue
     # catalog and raises "Table ... not found" TRANSIENTLY — the table IS in Glue and becomes
@@ -394,7 +392,7 @@ def run():
     # metrics emission below, leaving EVERY Grafana panel empty for an otherwise-successful run.
     for _attempt in range(5):
         try:
-            cursor.execute(f"CALL hive.system.sync_partition_metadata('{schema}', '{table}', 'ADD')")
+            cursor.execute("CALL hive.system.sync_partition_metadata('<schema>', '<table>', 'ADD')")
             cursor.fetchall()
             break
         except Exception as _e:
