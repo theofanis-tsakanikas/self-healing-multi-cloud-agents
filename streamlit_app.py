@@ -1450,6 +1450,9 @@ with tab_nl:
         "nl_summary_ok": False,
         "nl_back_to_step": None,
         "nl_rules_initialized": False,
+        # Rules sub-step view: "picker" (choose source) → "editor" (review/edit). One "← Back"
+        # walks editor→picker, then picker→Fields. None = auto-decide on entry.
+        "nl_rules_view": None,
         "nl_wizard_editing_idx": None,
         "nl_wizard_adding_rule": False,
         "nl_wizard_suggested_rules": [],
@@ -1612,6 +1615,7 @@ with tab_nl:
                         "owner_team":    _owner_v.strip() or "analytics_team",
                     }
                     _dest = st.session_state.pop("nl_back_to_step", None) or 2
+                    st.session_state.nl_rules_view = None  # auto-decide editor/picker on entry
                     st.session_state.nl_step = _dest
                     st.rerun()
         with _s1c2:
@@ -1642,6 +1646,11 @@ with tab_nl:
             st.session_state.nl_wizard_adding_rule  = False
             st.session_state.nl_wizard_suggested_rules = []
             st.session_state.nl_wizard_loaded_rules = []
+
+        # Auto-decide the sub-step view on entry: straight to the editor if we already have
+        # rules (e.g. extracted from the NL description), otherwise the source picker.
+        if st.session_state.nl_rules_view is None:
+            st.session_state.nl_rules_view = "editor" if st.session_state.nl_rules else "picker"
 
         _ACTION_OPTS = ["DROP_RECORD", "EXCLUDE_AND_LOG", "FLAG_AS_SUSPICIOUS", "DEFAULT_VALUE"]
         _ACTION_COLORS = {
@@ -1691,12 +1700,11 @@ with tab_nl:
                 return rule  # fall back to as-entered; the architect still reads the description
 
         # ─────────────────────────────────────────────────────────────────────
-        # EDITABLE rules — shown whenever there ARE rules, from ANY source: extracted from
-        # the NL description, loaded from a file, or domain suggestions. The picker below
-        # (CASE B) only appears while nl_rules is still empty; once a source populates it,
-        # the rules land HERE for full review / edit / add / remove before Continue.
+        # EDITABLE rules (view == "editor"). Rules reach here from ANY source — extracted from
+        # the NL description, loaded from a file, or domain suggestions. "← Back" steps to the
+        # source picker (view == "picker"), keeping the rules; a second "← Back" there → Fields.
         # ─────────────────────────────────────────────────────────────────────
-        if st.session_state.nl_rules:
+        if st.session_state.nl_rules_view == "editor" and st.session_state.nl_rules:
             _rules      = st.session_state.nl_rules
             _edit_idx   = st.session_state.nl_wizard_editing_idx
 
@@ -1799,41 +1807,47 @@ with tab_nl:
                     st.rerun()
 
             st.markdown("<hr style='margin:1.2rem 0;'>", unsafe_allow_html=True)
-            _s2a1, _s2a2, _s2a3, _ = st.columns([1, 1, 1.5, 1.5])
+            _s2a1, _s2a2, _ = st.columns([1, 1, 3])
             with _s2a1:
                 if st.button("Continue →", key="nl_wizard_step2_continue", type="primary"):
                     _dest = st.session_state.pop("nl_back_to_step", None) or 3
                     st.session_state.nl_step = _dest
                     st.rerun()
             with _s2a2:
+                # ONE hierarchical "← Back": from the editor it steps to the source picker
+                # (keeping the rules) so you can change how you got them; from the picker it
+                # goes to Fields (handled below).
                 if st.button("← Back", key="nl_wizard_step2_back", type="secondary"):
-                    st.session_state.nl_step = 1
-                    st.rerun()
-            with _s2a3:
-                # Clear the rules and return to the source picker (file / suggest / none) — so you
-                # can re-upload a different file, or drop the file approach and (via ← Back to the
-                # Describe step) write the rules in natural language instead.
-                if st.button("↺ Change rules source", key="nl_wizard_step2_changesrc",
-                             type="secondary"):
-                    st.session_state.nl_rules = []
-                    st.session_state.nl_wizard_loaded_rules = []
-                    st.session_state.nl_wizard_suggested_rules = []
+                    st.session_state.nl_rules_view = "picker"
                     st.session_state.nl_wizard_editing_idx = None
                     st.session_state.nl_wizard_adding_rule = False
-                    st.session_state.pop("nl_wizard_rule_mode_radio", None)
-                    st.rerun()  # nl_rules now empty → the source picker renders again
+                    st.rerun()
 
         # ─────────────────────────────────────────────────────────────────────
         # No rules YET — pick a source (domain suggestions / file / none). Whatever the
         # source, the rules land in the editable list above for review/edit/add/remove.
         # ─────────────────────────────────────────────────────────────────────
         else:
-            st.markdown(
-                '<p style="color:#fbbf24;font-size:0.85rem;margin-bottom:0.8rem;">'
-                'No business rules yet — add them from a source below '
-                '(you can edit, add or remove them afterwards).</p>',
-                unsafe_allow_html=True,
-            )
+            if st.session_state.nl_rules:
+                # Stepped back here from the editor (rules already exist). Offer a forward path
+                # that KEEPS them, next to re-picking a source (which replaces them).
+                st.markdown(
+                    f'<p style="color:#94a3b8;font-size:0.85rem;margin-bottom:0.5rem;">'
+                    f'You have {len(st.session_state.nl_rules)} rule(s). Keep & edit them, or '
+                    f'pick a different source below (this replaces them).</p>',
+                    unsafe_allow_html=True,
+                )
+                if st.button("✏️ Keep & edit my rules", key="nl_wizard_keep_rules",
+                             type="primary"):
+                    st.session_state.nl_rules_view = "editor"
+                    st.rerun()
+            else:
+                st.markdown(
+                    '<p style="color:#fbbf24;font-size:0.85rem;margin-bottom:0.8rem;">'
+                    'No business rules yet — add them from a source below '
+                    '(you can edit, add or remove them afterwards).</p>',
+                    unsafe_allow_html=True,
+                )
 
             _rule_mode = st.radio(
                 "How to handle rules?",
@@ -1884,7 +1898,8 @@ with tab_nl:
                             _sr for _sr, _k in zip(_suggestions, _keep_mask) if _k
                         ]
                         st.session_state.nl_wizard_suggested_rules = []
-                        st.rerun()  # stay on step 2 → the editor above now renders them (editable)
+                        st.session_state.nl_rules_view = "editor"
+                        st.rerun()  # → the editor renders them (editable)
 
             elif _rule_mode == "📁 Load from file (.md / .yaml / .json)":
                 _up_rules = st.file_uploader(
@@ -1924,7 +1939,8 @@ with tab_nl:
                                  type="primary"):
                         st.session_state.nl_rules = list(_loaded)
                         st.session_state.nl_wizard_loaded_rules = []
-                        st.rerun()  # stay on step 2 → the editor above now renders them (editable)
+                        st.session_state.nl_rules_view = "editor"
+                        st.rerun()  # → the editor renders them (editable)
 
             st.markdown("<hr style='margin:1.2rem 0;'>", unsafe_allow_html=True)
             if st.button("← Back", key="nl_wizard_step2b_back", type="secondary"):
@@ -2022,6 +2038,7 @@ with tab_nl:
                          type="secondary"):
                 st.session_state.nl_back_to_step    = 3
                 st.session_state.nl_rules_initialized = False
+                st.session_state.nl_rules_view = None  # auto-decide editor/picker on entry
                 st.session_state.pop("nl_wizard_rule_mode_radio", None)
                 st.session_state.nl_step = 2
                 st.rerun()
