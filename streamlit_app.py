@@ -461,38 +461,6 @@ _PIPELINE_NODES = [
     ("infra",      "⚙️ INFRA"),
     ("medic",      "🏥 MEDIC"),
 ]
-_NODE_STATUS_STYLE = {
-    "pending":   ("⬜", "#475569", "rgba(71,85,105,0.15)"),
-    "active":    ("🔄", "#38bdf8", "rgba(56,189,248,0.15)"),
-    "completed": ("✅", "#4ade80", "rgba(74,222,128,0.12)"),
-    "failed":    ("❌", "#f87171", "rgba(248,113,113,0.12)"),
-}
-
-
-def _render_pipeline_graph(node_statuses: dict) -> str:
-    parts = []
-    for i, (key, label) in enumerate(_PIPELINE_NODES):
-        status = node_statuses.get(key, "pending")
-        icon, border, bg = _NODE_STATUS_STYLE.get(status, _NODE_STATUS_STYLE["pending"])
-        parts.append(
-            f'<div style="background:{bg};border:1px solid {border};border-radius:8px;'
-            f'padding:0.4rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">'
-            f'<span>{icon}</span>'
-            f'<span style="color:#e2e8f0;font-size:0.82rem;font-weight:600;">{label}</span>'
-            f'</div>'
-        )
-        if i < len(_PIPELINE_NODES) - 1:
-            parts.append(
-                f'<div style="text-align:center;color:{border};line-height:1.2;'
-                f'font-size:1rem;margin:0.05rem 0;">↓</div>'
-            )
-    return (
-        '<div style="display:flex;flex-direction:column;gap:0.2rem;">'
-        + "".join(parts)
-        + "</div>"
-    )
-
-
 def _render_agent_graphviz(node_statuses: dict, last_edge) -> str:
     """Hub-and-spoke DOT graph of the REAL topology — the Supervisor routes to Architect / Infra /
     Medic and each returns to it (it is NOT a linear pipeline). The currently-active node and the
@@ -528,48 +496,6 @@ def _render_agent_graphviz(node_statuses: dict, last_edge) -> str:
         _edge("supervisor", "medic"),
         "}",
     ])
-
-
-def _render_agent_log_html(agent_messages: dict) -> str:
-    import html as _html
-    _LABELS = {
-        "supervisor": "🎯 Supervisor",
-        "architect":  "🏗️ Architect",
-        "infra":      "⚙️ Infra",
-        "medic":      "🏥 Medic",
-    }
-    rows = []
-    for key, label in _LABELS.items():
-        raw = (agent_messages.get(key) or "").strip()
-        if not raw:
-            continue
-        safe = _html.escape(raw)
-        pre_style = (
-            "color:#7dd3fc;font-size:0.71rem;white-space:pre-wrap;"
-            "background:rgba(6,12,26,0.8);border-radius:6px;padding:0.45rem;"
-            "margin:0.25rem 0 0.45rem;overflow:auto;max-height:110px;"
-        )
-        if len(raw) > 500:
-            short = _html.escape(raw[:500])
-            rows.append(
-                f'<details style="margin-bottom:0.4rem;">'
-                f'<summary style="cursor:pointer;color:#94a3b8;font-size:0.76rem;'
-                f'padding:0.15rem 0;">{label}'
-                f'&nbsp;<span style="color:#475569;">▸ show more</span></summary>'
-                f'<pre style="{pre_style}">{short}…</pre>'
-                f'</details>'
-            )
-        else:
-            rows.append(
-                f'<p style="color:#64748b;font-size:0.74rem;margin:0.25rem 0 0.05rem;">'
-                f'{label}</p>'
-                f'<pre style="{pre_style}">{safe}</pre>'
-            )
-    return (
-        "".join(rows)
-        if rows
-        else '<p style="color:#334155;font-size:0.75rem;">No agent output yet.</p>'
-    )
 
 
 # ---------------------------------------------------------------------------
