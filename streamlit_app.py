@@ -737,7 +737,8 @@ st.markdown("""
     Describe a pipeline in plain English — the agent designs, deploys, and monitors it across&nbsp;
     <span style="color:#f97316; font-weight:600;">AWS</span>,&nbsp;
     <span style="color:#38bdf8; font-weight:600;">Azure</span>, and&nbsp;
-    <span style="color:#4ade80; font-weight:600;">GCP</span>.
+    <span style="color:#4ade80; font-weight:600;">GCP</span> — or as a&nbsp;
+    <span style="color:#ff6b57; font-weight:600;">Databricks</span> lakehouse.
   </p>
 
   <div style="display:flex; gap:1.5rem; margin-top:1.2rem; flex-wrap:wrap;">
@@ -775,7 +776,7 @@ st.markdown("""
       background:rgba(255,54,33,0.10); color:#ff6b57;
       border:1px solid rgba(255,54,33,0.28); border-radius:8px;
       padding:0.25rem 0.8rem; font-size:0.8rem; font-weight:600; letter-spacing:0.05em;
-    ">🧱 Databricks Lakehouse · deep-dive</span>
+    ">🧱 Databricks Lakehouse</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
