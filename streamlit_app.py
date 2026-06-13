@@ -15,7 +15,6 @@ import logging
 import datetime
 import threading
 import time
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -812,28 +811,34 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # ── Bootstrap outputs ────────────────────────────────────
-    bootstrap_file = Path(__file__).parent / ".bootstrap_outputs.json"
-    if bootstrap_file.exists():
-        import json
-        with open(bootstrap_file) as f:
-            bo = json.load(f)
-        flags = {"aws": "🟠", "azure": "🔵", "gcp": "🟢"}
-        cloud_rows = "".join(
-            f'<div class="sb-row">'
-            f'<span class="sb-lbl">{flags.get(c, "●")} {c.upper()}</span>'
-            f'<span class="sb-ok">● ready</span>'
-            f'</div>'
-            for c in bo.keys()
+    # ── Cloud baseline status (read-only; per-cloud NL-deploy readiness) ─────
+    # The baseline (cluster + registry + state backend + source DB + shared workload identity)
+    # is provisioned ONCE per cloud via `make bootstrap-<cloud>`. An NL deploy needs it ready —
+    # the same check the deploy guard uses (_bootstrap_ready). "Not provisioned" is shown
+    # NEUTRALLY (grey, not red): it's an optional one-time step, not a broken setup. This makes
+    # the prerequisite visible (and the "skip when ready" implicit) without running heavy,
+    # privileged, one-time infra from the demo UI.
+    _bl_flags = {"aws": "🟠", "azure": "🔵", "gcp": "🟢", "databricks": "🧱"}
+    _bl_rows, _any_missing = [], False
+    for _c, _flag in _bl_flags.items():
+        _ready, _ = _bootstrap_ready(_c)
+        _any_missing = _any_missing or not _ready
+        _status = ('<span class="sb-ok">● ready</span>' if _ready
+                   else '<span style="color:#64748b;">○ not provisioned</span>')
+        _bl_rows.append(
+            f'<div class="sb-row"><span class="sb-lbl">{_flag} {_c.upper()}</span>{_status}</div>'
         )
+    st.markdown(
+        f'<div class="sb-card"><p class="sb-title">Cloud Baseline</p>{"".join(_bl_rows)}</div>',
+        unsafe_allow_html=True,
+    )
+    if _any_missing:
         st.markdown(
-            f'<div class="sb-card"><p class="sb-title">Cloud Bootstrap</p>{cloud_rows}</div>',
+            '<p style="color:#475569;font-size:0.72rem;margin:0.3rem 0 0;line-height:1.45;">'
+            'One-time per cloud: <code style="color:#7dd3fc;">make bootstrap-&lt;cloud&gt;</code> '
+            '(provisions the baseline + auto-exports). Ready clouds deploy directly.</p>',
             unsafe_allow_html=True,
         )
-    # When bootstrap outputs are ABSENT, show nothing. They are an optional REAL-DEPLOY
-    # prerequisite, irrelevant to the preview/cost flow — surfacing their absence as a warning
-    # reads like a broken setup in a demo/interview. (The positive "ready" card above still shows
-    # once outputs exist; the requirement is documented in CLAUDE.md + the loader logs.)
 
     # ── Footer ───────────────────────────────────────────────
     st.markdown(
@@ -1133,6 +1138,16 @@ def _render_cost_charts(size_gb: int = 50, key: str = "cost"):
             f'{" ✓ cheapest" if _sel["cloud"] == cheapest["cloud"] else ""}</p>',
             unsafe_allow_html=True,
         )
+
+    st.markdown(
+        '<p style="color:#475569;font-size:0.78rem;margin:0.6rem 0 0;line-height:1.5;">'
+        '💡 This is the monthly <b>baseline</b> — the shared cluster + source DB + registry, '
+        'provisioned <b>once</b> per cloud — plus this pipeline\'s <b>data storage</b>. It looks '
+        'fixed because the baseline is shared: a second pipeline on the same cloud adds only its '
+        'storage, not another cluster (the GitHub deploy creates just a bucket + a Job on the '
+        'existing cluster). Upload a dataset to see the storage term scale.</p>',
+        unsafe_allow_html=True,
+    )
 
 
 # ---------------------------------------------------------------------------
