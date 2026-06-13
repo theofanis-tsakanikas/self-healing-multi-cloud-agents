@@ -155,7 +155,8 @@ def build_engine(db_type, target):
 # Each NL cloud reads from the SAME source DB as its validated pipeline (the agent resolves
 # creds via that pipeline's SSM/env wiring), so seed a user sample onto that cloud's source
 # DB by reusing the validated target's connection in build_engine.
-_CLOUD_SOURCE_TARGET = {"aws": "eu_sales", "azure": "us_crm", "gcp": "global_marketing"}
+_CLOUD_SOURCE_TARGET = {"aws": "eu_sales", "azure": "us_crm", "gcp": "global_marketing",
+                        "databricks": "sales_lakehouse"}
 
 
 def seed_dataframe_to_source(df: pd.DataFrame, slug: str, cloud: str = "aws") -> str:

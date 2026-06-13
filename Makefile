@@ -34,6 +34,8 @@ bootstrap-databricks: ## Provision baseline Databricks infrastructure (workspace
 	@echo "Provisioning Databricks baseline infrastructure..."
 	terraform -chdir=bootstrap/databricks init
 	terraform -chdir=bootstrap/databricks apply
+	@echo "Exporting bootstrap outputs -> .bootstrap_outputs.json (bridge for the NL/Streamlit deploy path)..."
+	$(PYTHON) scripts/export_bootstrap_outputs.py databricks
 
 .PHONY: destroy-aws
 destroy-aws: ## DANGER: Tear down all baseline AWS infrastructure

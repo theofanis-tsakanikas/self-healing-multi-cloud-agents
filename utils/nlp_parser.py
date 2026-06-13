@@ -134,7 +134,8 @@ _SCHEMA_MAP = {
 # cloud → the static infra config FILE name under configs/infra/. NOT a uniform "<cloud>_bucket":
 # azure's file is azure_blob.yaml (aws's is aws_s3.yaml). A wrong name makes the generated bundle's
 # target_infra_config point at a non-existent file → load_pipeline_bundle fails for a NL pipeline.
-_INFRA_CONFIG_NAME = {"aws": "aws_s3", "azure": "azure_blob", "gcp": "gcp_bucket"}
+_INFRA_CONFIG_NAME = {"aws": "aws_s3", "azure": "azure_blob", "gcp": "gcp_bucket",
+                      "databricks": "databricks"}
 
 # Infra conf templates — mimic the existing infra YAML files
 _INFRA_CONF = {
@@ -845,6 +846,144 @@ def parse_rules_from_content(content: str) -> list:
     return json.loads(raw)
 
 
+def _build_databricks_bundle(
+    intent: "PipelineIntent",
+    slug: str,
+    rules: list,
+    description: str = "",
+) -> tuple[dict, dict, dict, dict, str, str]:
+    """
+    Build the config bundle for a Databricks (Spark + Delta + Unity Catalog) pipeline from NL
+    answers. Mirrors the validated sales_lakehouse YAML bundle: no bucket/K8s/Trino/Grafana —
+    the agent reads target_infra_config.provider == "databricks" and switches to the Spark/Delta/
+    Lakeview model. Offered as an end-of-flow "also deploy on Databricks" (cloud_override).
+    """
+    dash = slug.replace("_", "-")
+    pipeline_id = f"pipe_{slug}_lakehouse"
+
+    db_outputs = _load_bootstrap_outputs().get("databricks", {})
+    # UC catalog created by bootstrap/databricks (= workspace name, hyphens -> underscores).
+    catalog = db_outputs.get("catalog_name", "multi_cloud_agent_workspace")
+    schema = "raw"
+    uc_table = f"{catalog}.{schema}.{pipeline_id}"
+
+    # Databricks host_cloud = aws (workspace + jobs cluster on AWS). cloud_provider stays "aws"
+    # for any host-cloud code path; the Databricks-ness is signalled by the infra config provider.
+    aws_setup = {
+        "bucket_name": "multi-cloud-agent-lakehouse",
+        "region": "eu-central-1",
+        "state_bucket": "multi-cloud-agent-bootstrap-state",
+        "state_key": f"terraform/{dash}-lakehouse/terraform.tfstate",
+        "lock_table": "terraform-state-lock",
+    }
+
+    pipeline_conf = {
+        "pipeline_id": pipeline_id,
+        "owner": intent.owner_team,
+        "project_name": f"{dash}-lakehouse-insights",
+        "project_folder_name": "multi-cloud-self-healing-agent",
+        "source_config": f"configs/databases/postgres_{slug}_lakehouse.yaml",
+        "business_rules_config": f"configs/business_rules/{slug}_lakehouse_logic.yaml",
+        "target_infra_config": "configs/infra/databricks.yaml",
+        "data_domain": intent.data_domain,
+        "priority": "high",
+        "update_frequency": intent.frequency,
+        "cloud_provider": "aws",  # host cloud
+        "aws_setup": aws_setup,
+        "databricks_target": {"catalog": catalog, "schema": schema, "table_name": pipeline_id},
+        "project_structure": {
+            "python_dir": "scripts",
+            "python_script_path": f"scripts/{pipeline_id}.py",
+            "sql_dir": "sql",
+            "unity_catalog_sql_path": "sql/setup_unity_catalog.sql",
+            "dashboards_dir": "dashboards",
+            "dashboard_path": f"dashboards/{pipeline_id}_lakeview.json",
+        },
+        "required_artifacts": [
+            f"scripts/{pipeline_id}.py",
+            "sql/setup_unity_catalog.sql",
+            f"dashboards/{pipeline_id}_lakeview.json",
+        ],
+    }
+
+    # Source = the dedicated Lakehouse RDS Postgres (mirrors postgres_lakehouse.yaml keys).
+    db_conf = {
+        "db_id": f"postgres_{slug}_lakehouse",
+        "db_type": "postgres",
+        "connection_type": "cloud_rds",
+        "env_var_host": "POSTGRES_DB_HOST",
+        "env_var_port": "POSTGRES_DB_PORT",
+        "env_var_user": "POSTGRES_DB_USER",
+        "env_var_password": "POSTGRES_DB_PASSWORD",
+        "env_var_name": "POSTGRES_DB_NAME",
+        "default_table": intent.source_table,
+        "description": f"Lakehouse source Postgres for the {slug} Databricks pipeline.",
+    }
+
+    quality_standards = [
+        {
+            "rule_id": r["rule_id"],
+            "description": r.get("reason", ""),
+            "target_criteria": {"column": r["target_column"], "condition": r["condition"]},
+            "on_failure_action": r["action"],
+        }
+        for r in rules
+    ]
+    rules_conf = {"quality_standards": quality_standards}
+
+    # infra_conf = the static Databricks infra config (provider: databricks + UC/warehouse/compute).
+    try:
+        with open(_PROJECT_ROOT / "configs" / "infra" / "databricks.yaml", encoding="utf-8") as fh:
+            infra_conf = yaml.safe_load(fh) or {}
+    except Exception:
+        infra_conf = {"provider": "databricks", "host_cloud": "aws"}
+
+    nl_header = f"**Natural Language Input:** {description}\n\n---\n\n" if description else ""
+    task = f"""\
+# MISSION OBJECTIVE: {pipeline_id.upper()}
+
+{nl_header}> **PLATFORM NOTE — Databricks, NOT a Kubernetes/Trino pipeline.** No Dockerfile, no
+> Kubernetes, no Trino, no Grafana/Prometheus, no parquet. Compute = Databricks jobs cluster;
+> storage = Delta Lake; catalog = Unity Catalog; observability = a Delta `_audit` table.
+
+## 🏗️ 1. ARCHITECT SCOPE (DATA LOGIC)
+
+**DATA PIPELINE (PYSPARK):**
+- Source: `postgres` database, table `{db_conf['default_table']}` — read via Spark JDBC.
+- Credentials: `dbutils.secrets` from the pipeline's secret scope — never `cloud_get()`, never `os.getenv()`.
+- Output: Delta, written to the Unity Catalog table `{uc_table}`, partitioned by `run_date`.
+- Idempotency: if the `run_date` partition already exists in the Delta table, log and return before writing.
+- Save script to: `scripts/{pipeline_id}.py`
+
+**BUSINESS RULES:**
+  - See `TRANSFORMATION_LOGIC` in your context — the authoritative, complete rules list.
+
+**CATALOG & OBSERVABILITY:**
+- Unity Catalog DDL: `sql/setup_unity_catalog.sql` — `USING DELTA` for BOTH the data table and the `_audit` table (3-part names). NO Trino-Hive syntax.
+- Delta `_audit` table (MANDATORY): one row per run with `run_timestamp`, `run_date`, `rows_processed`, `rows_rejected`, `duration_seconds`, `rejected_by_reason`.
+- Lakeview dashboard: `dashboards/{pipeline_id}_lakeview.json` querying the `_audit` table.
+
+---
+
+## 🛠️ 2. INFRA SCOPE (DEPLOYMENT & AUTOMATION)
+
+**TERRAFORM:** `databricks_job` (Spark task on the bootstrap jobs cluster) + `databricks_secret_scope` for the DB password. NO storage bucket, NO IAM, NO Kubernetes.
+**CI/CD:** `/.github/workflows/{pipeline_id}_pipeline.yml` — Databricks CLI auth. NO docker build, NO kubectl, NO ECR.
+
+---
+
+## 🔒 3. GLOBAL CONSTRAINTS
+
+- DB credentials via `dbutils.secrets` — never `cloud_get()` / `os.getenv()`.
+- Every agent MUST query the Vector Store for domain standards before writing.
+- Resource naming derived from `pipeline_id`, never `project_id`.
+- Final signal: `echo "Deployment Complete"`.
+"""
+
+    _save_generated_configs(pipeline_id, pipeline_conf, db_conf, rules_conf, infra_conf, task)
+    return pipeline_conf, db_conf, rules_conf, infra_conf, pipeline_id, task
+
+
 def _build_from_answers(
     answers: dict,
     rules: list,
@@ -873,10 +1012,17 @@ def _build_from_answers(
     intent = PipelineIntent(**answers)
 
     slug = _slugify(intent.pipeline_slug)
-    cloud = cloud_override if cloud_override in ("aws", "azure", "gcp") else intent.target_cloud
+    cloud = cloud_override if cloud_override in ("aws", "azure", "gcp", "databricks") else intent.target_cloud
     db_type = intent.source_db_type
     domain = intent.data_domain
     frequency = intent.frequency
+
+    # Databricks is a distinct execution model (Spark + Delta + Unity Catalog, no
+    # K8s/Trino/Grafana). It is NOT a start-of-wizard target (target_cloud stays aws/azure/gcp);
+    # it is offered as an end-of-flow "also deploy on Databricks" via cloud_override="databricks".
+    # Build its bundle separately and return early — the object-storage path below stays untouched.
+    if cloud == "databricks":
+        return _build_databricks_bundle(intent, slug, rules, description)
 
     storage_suffix = {"aws": "s3", "azure": "azure", "gcp": "gcp"}[cloud]
     pipeline_id = f"pipe_{slug}_to_{storage_suffix}"
@@ -1104,10 +1250,13 @@ def build_pipeline_bundle_from_nl(
     intent, final_rules = _confirm_and_edit(intent, final_rules)
 
     slug = _slugify(intent.pipeline_slug)
-    cloud = cloud_override if cloud_override in ("aws", "azure", "gcp") else intent.target_cloud
+    cloud = cloud_override if cloud_override in ("aws", "azure", "gcp", "databricks") else intent.target_cloud
     db_type = intent.source_db_type
     domain = intent.data_domain
     frequency = intent.frequency
+
+    if cloud == "databricks":
+        return _build_databricks_bundle(intent, slug, final_rules, description)
 
     storage_suffix = {"aws": "s3", "azure": "azure", "gcp": "gcp"}[cloud]
     pipeline_id = f"pipe_{slug}_to_{storage_suffix}"

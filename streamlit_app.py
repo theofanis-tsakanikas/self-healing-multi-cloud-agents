@@ -556,6 +556,11 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
         project_id = f"{pipeline_id.upper()}-{timestamp}"
         os.environ["PROJECT_ID"] = project_id
+        # Mirror main.py: agent-runtime cloud_get() resolves creds per CLOUD_PROVIDER, and the
+        # file tools detect Databricks via PIPELINE_PLATFORM (from the infra config provider).
+        # Without these a non-AWS / Databricks NL run silently uses the wrong creds / K8s path.
+        os.environ["CLOUD_PROVIDER"] = pipe_conf.get("cloud_provider", "aws")
+        os.environ["PIPELINE_PLATFORM"] = infra_conf.get("provider", "kubernetes").lower()
 
         initial_state = {
             "task": task, "messages": [], "error_log": "",
@@ -671,6 +676,7 @@ _BOOTSTRAP_REQUIRED_KEYS = {
     "aws":   ("state_bucket", "aws_account_id", "pipeline_irsa_role_name"),
     "azure": ("state_storage_account", "acr_login_server", "pipeline_managed_identity_name"),
     "gcp":   ("state_bucket", "artifact_registry_url", "project_id", "pipeline_service_account_email"),
+    "databricks": ("catalog_name", "warehouse_id"),
 }
 
 
@@ -1360,7 +1366,7 @@ with tab_upload:
                     _seed_slug = st.text_input("Pipeline slug", placeholder="e.g. my_sales",
                                                key="upload_seed_slug")
                 with _sd2:
-                    _seed_cloud = st.radio("Target cloud", ["aws", "azure", "gcp"],
+                    _seed_cloud = st.radio("Target cloud", ["aws", "azure", "gcp", "databricks"],
                                            horizontal=True, key="upload_seed_cloud")
                 if st.button("⬆️ Load sample into source DB", key="upload_seed_btn",
                              type="primary", disabled=not _seed_slug.strip()):
@@ -1955,6 +1961,43 @@ with tab_nl:
                 for _ck in [k for k in st.session_state if k.startswith("nl_")]:
                     del st.session_state[_ck]
                 st.rerun()
+
+        # ── Alternative target: Databricks (lakehouse) ────────────────────────
+        # Databricks is a distinct execution model, so it is NOT a wizard cloud — but the
+        # business intent above is cloud-agnostic, so it can ALSO deploy as a lakehouse with
+        # no extra fields (reuses the same answers + rules via cloud_override="databricks").
+        st.markdown(
+            '<p style="color:#475569;font-size:0.8rem;margin:0.9rem 0 0.3rem;">'
+            'Prefer a lakehouse? Deploy the same pipeline on <b style="color:#ff6b57;">Databricks</b> '
+            '(Spark + Delta + Unity Catalog) — no extra fields. Needs the Databricks baseline + your '
+            'sample seeded into its source DB (Upload tab → cloud: databricks).</p>',
+            unsafe_allow_html=True,
+        )
+        _db1, _ = st.columns([1, 2])
+        with _db1:
+            if st.button("⚡ Also deploy on Databricks", key="nl_wizard_step3_databricks",
+                         type="secondary"):
+                _db_ready, _db_why = _bootstrap_ready("databricks")
+                if not _db_ready:
+                    st.error("🚫 " + _db_why)
+                else:
+                    _pc = None
+                    with st.spinner("Building Databricks (lakehouse) configuration…"):
+                        try:
+                            from utils.nlp_parser import _build_from_answers
+                            _pc, _dc, _rc, _ic, _pid, _tk = _build_from_answers(
+                                st.session_state.nl_answers,
+                                st.session_state.nl_rules,
+                                description=st.session_state.nl_description,
+                                cloud_override="databricks",
+                            )
+                        except Exception as _ex:
+                            st.error(f"Could not build Databricks config: {_ex}")
+                    if _pc is not None:
+                        _start_run(_pc, _dc, _rc, _ic, _pid, _tk)
+                        for _rk in [k for k in st.session_state if k.startswith("nl_")]:
+                            del st.session_state[_rk]
+                        st.rerun()
 
     # ════════════════════════════════════════════════════════════════════════
     # STEP 4 — Deploy

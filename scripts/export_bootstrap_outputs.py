@@ -136,10 +136,21 @@ def _normalize_gcp(raw: dict) -> dict:
     return out
 
 
+def _normalize_databricks(raw: dict) -> dict:
+    out = {}
+    # NL-authored Databricks pipelines derive UC catalog + warehouse + source endpoint from these.
+    for k in ("workspace_url", "workspace_id", "cluster_id",
+              "warehouse_id", "catalog_name", "source_db_endpoint"):
+        if v := raw.get(k):
+            out[k] = v
+    return out
+
+
 _NORMALIZERS = {
     "aws": _normalize_aws,
     "azure": _normalize_azure,
     "gcp": _normalize_gcp,
+    "databricks": _normalize_databricks,
 }
 
 
@@ -173,7 +184,7 @@ def export(clouds: list):
 
 
 if __name__ == "__main__":
-    all_clouds = ["aws", "azure", "gcp"]
+    all_clouds = ["aws", "azure", "gcp", "databricks"]
     target = sys.argv[1].lower() if len(sys.argv) > 1 else "all"
     clouds = all_clouds if target == "all" else [target]
     export(clouds)
