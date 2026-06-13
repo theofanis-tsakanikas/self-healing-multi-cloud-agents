@@ -18,10 +18,11 @@ data:
         is_suspicious BOOLEAN,
         run_date DATE
     ) WITH (
-        format = 'PARQUET',
+        format            = 'PARQUET',
         external_location = 's3://eu-sales-insights-data/processed/',
-        partitioned_by = ARRAY['run_date']
+        partitioned_by    = ARRAY['run_date']
     );
+    CALL hive.system.sync_partition_metadata('sales_eu', 'pipe_eu_sales_to_s3', 'ADD');
 ---
 apiVersion: v1
 kind: ConfigMap
