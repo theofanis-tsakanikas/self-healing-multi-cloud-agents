@@ -1271,7 +1271,7 @@ def _render_execution_plan(cloud: str, pipeline_id: str):
 tab_nl, tab_upload, tab_existing, tab_trino, tab_obs = st.tabs([
     "💬 Natural Language",
     "📁 Upload Dataset",
-    "📂 Existing Pipeline",
+    "📂 Sample Pipelines",
     "🔮 Trino Federation",
     "📊 Observability",
 ])
@@ -2123,7 +2123,8 @@ launch_nl = False
 
 with tab_existing:
     st.markdown(
-        '<p style="color:#94a3b8; margin-bottom:0.5rem;">Run a pre-configured pipeline from the repo.</p>',
+        '<p style="color:#94a3b8; margin-bottom:0.5rem;">Run one of four end-to-end pre-built '
+        'reference pipelines — one per cloud. Proven, known-good examples.</p>',
         unsafe_allow_html=True,
     )
     _PIPELINE_CLOUDS = {
@@ -2136,7 +2137,7 @@ with tab_existing:
         "aws": "🟠 AWS", "azure": "🔵 Azure",
         "gcp": "🟢 GCP", "databricks": "⚡ Databricks",
     }
-    existing_choice = st.selectbox("Select pipeline", list(_PIPELINE_CLOUDS.keys()))
+    existing_choice = st.selectbox("Select a sample pipeline", list(_PIPELINE_CLOUDS.keys()))
     sel_cloud       = _PIPELINE_CLOUDS[existing_choice]
     st.markdown(
         f'<span style="color:#64748b;font-size:0.85rem;">Target: {_CLOUD_LABELS[sel_cloud]}</span>',
