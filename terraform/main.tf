@@ -51,6 +51,12 @@ resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
   }
 }
 
+resource "aws_s3_object" "processed_dir" {
+  bucket  = aws_s3_bucket.data_bucket.id
+  key     = "processed/"
+  content = " "
+}
+
 resource "aws_iam_policy" "s3_access_policy" {
   name        = "${var.project_id}-s3-access-policy"
   description = "Scoped S3 and Glue access policy for ${var.project_id}"
