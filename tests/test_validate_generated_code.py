@@ -251,9 +251,28 @@ class TestTerraformGcpProcessedDir:
         out = _validate(tmp_path, "main.tf", tf)
         assert "pre-created processed" not in out
 
-    def test_aws_main_tf_not_flagged_for_processed_dir(self, tmp_path, monkeypatch):
+    def test_aws_missing_processed_dir_flagged(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLOUD_PROVIDER", "aws")
-        out = _validate(tmp_path, "main.tf", 'resource "aws_s3_bucket" "data" {}\n')
+        monkeypatch.delenv("PIPELINE_PLATFORM", raising=False)
+        out = _validate(tmp_path, "main.tf", 'resource "aws_s3_bucket" "data_bucket" {}\n')
+        assert "pre-created processed" in out and "aws_s3_object" in out
+
+    def test_aws_with_processed_dir_clean(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLOUD_PROVIDER", "aws")
+        monkeypatch.delenv("PIPELINE_PLATFORM", raising=False)
+        tf = (
+            'resource "aws_s3_bucket" "data_bucket" {}\n'
+            'resource "aws_s3_object" "processed_dir" {\n'
+            '  bucket = aws_s3_bucket.data_bucket.id\n  key = "processed/"\n  content = " "\n}\n'
+        )
+        out = _validate(tmp_path, "main.tf", tf)
+        assert "pre-created processed" not in out
+
+    def test_aws_databricks_host_not_flagged_for_processed_dir(self, tmp_path, monkeypatch):
+        # Databricks host_cloud=aws but uses Unity Catalog (no Trino/S3 external table) → no marker.
+        monkeypatch.setenv("CLOUD_PROVIDER", "aws")
+        monkeypatch.setenv("PIPELINE_PLATFORM", "databricks")
+        out = _validate(tmp_path, "main.tf", 'resource "databricks_job" "x" {}\n')
         assert "pre-created processed" not in out
 
 

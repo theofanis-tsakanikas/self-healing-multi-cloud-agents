@@ -577,6 +577,23 @@ def validate_generated_code(filename: str) -> str:
                     "bucket. Without it the first Trino CREATE TABLE fails 'External location must be a "
                     "directory'. See terraform_gcp_bucket.md Section 2.2.1."
                 )
+            # AWS: SAME first-deploy problem — the processed/ "directory" must exist before
+            # init-trino's CREATE TABLE external_location = s3://.../processed/ (it runs BEFORE the
+            # pipeline writes any object). A brand-new bucket is empty, so pre-create it with an
+            # aws_s3_object keyed "processed/". (eu_sales' long-lived bucket hides this; a new NL
+            # pipeline's does not.) Databricks excluded: host_cloud=aws but no Trino/S3 external
+            # table (Unity Catalog), so it has no aws_s3_object and must not be flagged.
+            if (
+                _tf_cloud == "aws"
+                and os.getenv("PIPELINE_PLATFORM", "").lower() != "databricks"
+                and "aws_s3_object" not in tf_content
+            ):
+                errors.append(
+                    "TERRAFORM [project policy]: AWS main.tf is missing the pre-created processed/ "
+                    "directory — add an `aws_s3_object` with key \"processed/\" (content \" \") on the "
+                    "data bucket. Without it the FIRST Trino CREATE TABLE fails 'File does not exist: "
+                    "s3://.../processed'. See terraform_aws_s3.md Section 2.4."
+                )
 
     # ── Dockerfile ───────────────────────────────────────────────────────────
     # hadolint covers: base image tag, COPY . ., non-root user, pip flags, layer hygiene.

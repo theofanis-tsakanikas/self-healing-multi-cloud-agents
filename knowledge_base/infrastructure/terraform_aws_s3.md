@@ -35,6 +35,7 @@ Every `main.tf` generated for an AWS S3 pipeline MUST contain ALL of the followi
 | `aws_s3_bucket_versioning` | Enable versioning |
 | `aws_s3_bucket_server_side_encryption_configuration` | KMS encryption |
 | `aws_s3_bucket_lifecycle_configuration` | Storage tiering |
+| `aws_s3_object` | Pre-created `processed/` directory marker — Trino's external table needs it on the FIRST deploy (see §2.4) |
 | `aws_iam_policy` | Scoped S3 access policy |
 
 `outputs.tf` MUST export exactly: `bucket_name`, `bucket_arn`, `iam_policy_arn`, `region`.
@@ -148,6 +149,22 @@ resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
       storage_class = "GLACIER"
     }
   }
+}
+```
+
+### 2.4 Pre-created `processed/` directory — 🔴 MANDATORY
+Trino's Hive connector `CREATE TABLE ... external_location = 's3://.../processed/'` fails on the
+FIRST deploy with `File does not exist: s3://.../processed` unless that prefix already EXISTS —
+and `init-trino` runs the DDL BEFORE the pipeline writes any object there. On S3 a "directory" is
+a zero-byte object whose key ends in `/`, so pre-create it. (A long-lived bucket that already
+holds data hides this — but a brand-new bucket, e.g. an NL/Streamlit-authored pipeline, is empty
+and the first `CREATE TABLE` fails. This is the S3 equivalent of GCS's `google_storage_bucket_object`
+"processed/" and Azure's `azurerm_storage_data_lake_gen2_path`.)
+```hcl
+resource "aws_s3_object" "processed_dir" {
+  bucket  = aws_s3_bucket.data_bucket.id
+  key     = "processed/"   # trailing slash = S3 directory marker
+  content = " "
 }
 ```
 
