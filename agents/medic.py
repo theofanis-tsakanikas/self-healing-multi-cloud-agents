@@ -401,6 +401,15 @@ def medic_node(state: AgentState):
                 or "everything looks green" in result_str.lower()
             ):
                 verification_successful = True
+                # Append THIS fetch's ToolMessage BEFORE breaking. Otherwise the medic returns an
+                # AIMessage carrying an UNANSWERED tool_call, and the graph routes to the ToolNode
+                # (EXECUTE_TOOLS) to satisfy it instead of to the supervisor — re-running the fetch,
+                # hitting green, breaking before the ToolMessage again, and looping
+                # medic↔EXECUTE_TOOLS forever. The supervisor (and its mission_status="verified"
+                # FINISH) is never reached, so a SUCCESSFUL deploy dies at the recursion limit.
+                t_msg = ToolMessage(tool_call_id=tool_call["id"], content=result_str)
+                messages.append(t_msg)
+                new_messages_for_state.append(t_msg)
                 break  # green is conclusive — stop; the outer loop breaks before the next LLM call
 
             if tool_name == "request_fix" and '"REJECTED_BY_MEDIC"' in result_str:
