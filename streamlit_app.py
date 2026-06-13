@@ -1653,12 +1653,19 @@ with tab_nl:
             existing = existing or {}
             _ri = st.text_input("Rule ID", value=existing.get("rule_id", ""),
                                 key=f"{prefix}_id")
+            st.markdown(
+                '<p style="color:#475569;font-size:0.75rem;margin:0.2rem 0 0.1rem;">'
+                "Description — plain words (the agent reads this alongside the condition)</p>",
+                unsafe_allow_html=True,
+            )
+            _rr = st.text_input("Description", value=existing.get("reason", ""),
+                                key=f"{prefix}_reason")
             _rc = st.text_input("Target column", value=existing.get("target_column", ""),
                                 key=f"{prefix}_col")
             st.markdown(
                 '<p style="color:#475569;font-size:0.75rem;margin:0.2rem 0 0.1rem;">'
                 "Condition — pandas expression, e.g. df['col'].notna(). "
-                "Or leave it empty and just write the Description below — we'll derive it.</p>",
+                "Or leave it empty and just write the Description above — we'll derive it.</p>",
                 unsafe_allow_html=True,
             )
             _rk = st.text_input("Condition", value=existing.get("condition", ""),
@@ -1667,13 +1674,6 @@ with tab_nl:
                   if existing.get("action") in _ACTION_OPTS else 0
             _ra = st.radio("Action", _ACTION_OPTS, index=_ai, horizontal=True,
                            key=f"{prefix}_action")
-            st.markdown(
-                '<p style="color:#475569;font-size:0.75rem;margin:0.4rem 0 0.1rem;">'
-                "Description — plain words (the agent reads this alongside the condition)</p>",
-                unsafe_allow_html=True,
-            )
-            _rr = st.text_input("Description", value=existing.get("reason", ""),
-                                key=f"{prefix}_reason")
             return {"rule_id": _ri, "target_column": _rc,
                     "condition": _rk, "action": _ra, "reason": _rr}
 
@@ -1799,7 +1799,7 @@ with tab_nl:
                     st.rerun()
 
             st.markdown("<hr style='margin:1.2rem 0;'>", unsafe_allow_html=True)
-            _s2a1, _s2a2, _ = st.columns([1, 1, 3])
+            _s2a1, _s2a2, _s2a3, _ = st.columns([1, 1, 1.5, 1.5])
             with _s2a1:
                 if st.button("Continue →", key="nl_wizard_step2_continue", type="primary"):
                     _dest = st.session_state.pop("nl_back_to_step", None) or 3
@@ -1809,6 +1809,19 @@ with tab_nl:
                 if st.button("← Back", key="nl_wizard_step2_back", type="secondary"):
                     st.session_state.nl_step = 1
                     st.rerun()
+            with _s2a3:
+                # Clear the rules and return to the source picker (file / suggest / none) — so you
+                # can re-upload a different file, or drop the file approach and (via ← Back to the
+                # Describe step) write the rules in natural language instead.
+                if st.button("↺ Change rules source", key="nl_wizard_step2_changesrc",
+                             type="secondary"):
+                    st.session_state.nl_rules = []
+                    st.session_state.nl_wizard_loaded_rules = []
+                    st.session_state.nl_wizard_suggested_rules = []
+                    st.session_state.nl_wizard_editing_idx = None
+                    st.session_state.nl_wizard_adding_rule = False
+                    st.session_state.pop("nl_wizard_rule_mode_radio", None)
+                    st.rerun()  # nl_rules now empty → the source picker renders again
 
         # ─────────────────────────────────────────────────────────────────────
         # No rules YET — pick a source (domain suggestions / file / none). Whatever the
