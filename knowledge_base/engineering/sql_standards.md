@@ -3,7 +3,7 @@ id: sql-standards
 applies_to: aws, azure, gcp (object-storage)
 primary_consumer: architect-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
 enforced_by: validate_generated_code (safety net) + agent prompts
-last_reviewed: 2026-06-11
+last_reviewed: 2026-06-14
 ---
 
 # STANDARD: TRINO DDL GENERATION
@@ -35,6 +35,15 @@ When generating `setup_trino.sql`, ensure the following:
   Trino's Hive connector supports `s3://` natively via the AWS S3 file system. With a GCS connector configured it supports `gs://`. With an Azure connector it supports `abfss://`. **Do NOT use `s3a://` (Hadoop/Spark protocol) for any cloud.** Do NOT replace `gs://` or `abfss://` with `s3://` — that would point to a non-existent AWS bucket.
 - **Data Types**:
     - Column names and types MUST be derived from the schema returned by `read_data_schema` PLUS any columns added by business rules.
+    - **EVERY column appears EXACTLY ONCE; the column list is EXACTLY:** the columns `read_data_schema` returned (in order, real types) → then `is_suspicious BOOLEAN` (only if a `FLAG_AS_SUSPICIOUS` rule exists) → then `run_date DATE` last. **Nothing else.** Do **NOT** prepend a generic placeholder/header block (e.g. `id INT, data STRING, run_date TIMESTAMP, is_suspicious BOOLEAN`) above the real columns, and do **NOT** repeat any column. A duplicate column name (e.g. `run_date` listed twice, or `is_suspicious` twice) produces a corrupt table that Glue **accepts** (the `CREATE TABLE` appears to succeed) but Trino **cannot load** — the pipeline then fails only at runtime with a MISLEADING `Table '...' not found` on `sync_partition_metadata`. ❌ never:
+        ```sql
+        CREATE TABLE hive.sales_eu.pipe_x (
+            id INT, data STRING, run_date TIMESTAMP, is_suspicious BOOLEAN,  -- ❌ phantom header
+            order_id VARCHAR, unit_price DECIMAL(18,2), ... ,
+            is_suspicious BOOLEAN,  -- ❌ duplicate
+            run_date DATE           -- ❌ run_date appears twice
+        ) ...
+        ```
     - `is_suspicious BOOLEAN`: add this column **only if** at least one `FLAG_AS_SUSPICIOUS` rule is defined in `TRANSFORMATION_LOGIC`. If no such rule exists, omit the column entirely from the DDL — adding it without a corresponding pipeline implementation creates a schema/data mismatch. Do not add it as a default or placeholder.
     - Map discovered types as follows. **Preserve the type `read_data_schema` actually reports** — it returns the real SQL type per column (e.g. `cust_id (BIGINT)`), so use it directly instead of re-guessing from the column's meaning:
         - String / text → `VARCHAR`

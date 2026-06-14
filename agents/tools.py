@@ -522,6 +522,28 @@ def validate_generated_code(filename: str) -> str:
                         f"fails at runtime with 'Partition keys must be the last columns in the table'."
                     )
 
+            # Duplicate / phantom columns. The LLM intermittently PREPENDS a generic
+            # placeholder header (e.g. `id INT, data STRING, run_date TIMESTAMP`) above the
+            # real discovered columns, producing duplicate names (run_date twice, is_suspicious
+            # twice). Glue/init-trino ACCEPTS the corrupt CREATE TABLE ("CREATE TABLE" prints
+            # fine), but Trino then cannot load the table and the pipeline's
+            # sync_partition_metadata fails only at runtime with a MISLEADING
+            # "Table ... not found". Parse the raw column list and reject any repeated name.
+            if _cols_m:
+                _all_cols = [c.split()[0].strip("'\"").lower()
+                             for c in (x.strip() for x in _cols_m.group(1).split(","))
+                             if c and c.split()]
+                _dupes = sorted({c for c in _all_cols if _all_cols.count(c) > 1})
+                if _dupes:
+                    errors.append(
+                        f"SQL: duplicate column(s) {_dupes} in the CREATE TABLE list. Every "
+                        f"column must appear EXACTLY ONCE and come from read_data_schema (plus "
+                        f"the optional is_suspicious and the mandatory run_date) — do NOT prepend "
+                        f"placeholder columns (id, data, …). A duplicate-column table is accepted "
+                        f"by Glue but Trino cannot load it, failing at runtime with a misleading "
+                        f"'Table not found' on sync_partition_metadata."
+                    )
+
             # is_suspicious must agree with the pipeline script (FLAG_AS_SUSPICIOUS rule).
             # Derive the script name from the DDL table name (hive.<schema>.<table> →
             # scripts/<table>.py) so we compare the right pair, then cross-check.

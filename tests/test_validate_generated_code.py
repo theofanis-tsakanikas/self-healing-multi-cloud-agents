@@ -245,6 +245,44 @@ class TestIsSuspiciousCrossFile:
         assert "consistency" in out.lower()
 
 
+class TestSqlDuplicateColumns:
+    """The LLM sometimes prepends a phantom placeholder header above the real columns,
+    producing duplicate names. Glue accepts it but Trino fails at runtime with a misleading
+    'Table not found' on sync_partition_metadata — the validator must catch it pre-push."""
+
+    def _validate(self, tmp_path, ddl):
+        (tmp_path / "sql").mkdir()
+        sql_f = tmp_path / "sql" / "setup_trino.sql"
+        sql_f.write_text(ddl)
+        return validate_generated_code.invoke({"filename": str(sql_f)})
+
+    def test_phantom_header_with_duplicates_is_flagged(self, tmp_path):
+        ddl = (
+            "CREATE SCHEMA IF NOT EXISTS hive.s;\n"
+            "DROP TABLE IF EXISTS hive.s.pipe_x;\n"
+            "CREATE TABLE hive.s.pipe_x (\n"
+            "  id INT,\n  data STRING,\n  run_date TIMESTAMP,\n  is_suspicious BOOLEAN,\n"
+            "  order_id VARCHAR,\n  unit_price DECIMAL(18,2),\n"
+            "  is_suspicious BOOLEAN,\n  run_date DATE\n"
+            ") WITH (format='PARQUET', external_location='s3://b/processed/', "
+            "partitioned_by=ARRAY['run_date']);\n"
+        )
+        out = self._validate(tmp_path, ddl)
+        assert "duplicate column" in out.lower()
+        assert "run_date" in out and "is_suspicious" in out
+
+    def test_clean_ddl_has_no_duplicate_error(self, tmp_path):
+        ddl = (
+            "CREATE TABLE hive.s.pipe_x (\n"
+            "  order_id VARCHAR,\n  unit_price DECIMAL(18,2),\n"
+            "  is_suspicious BOOLEAN,\n  run_date DATE\n"
+            ") WITH (format='PARQUET', external_location='s3://b/processed/', "
+            "partitioned_by=ARRAY['run_date']);\n"
+        )
+        out = self._validate(tmp_path, ddl)
+        assert "duplicate column" not in out.lower()
+
+
 class TestTerraformGcpProcessedDir:
     _BUCKET = 'resource "google_storage_bucket" "data" {\n  name = "b"\n}\n'
 
