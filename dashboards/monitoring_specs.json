@@ -1,6 +1,6 @@
 {
-  "uid": "etl-from-postgress-to-s3-data-observability",
-  "title": "Etl From Postgress To S3 Data Observability",
+  "uid": "etl-sales-to-s3-data-observability",
+  "title": "Etl Sales To S3 Data Observability",
   "schemaVersion": 37,
   "version": 1,
   "refresh": "5m",
@@ -10,7 +10,7 @@
   },
   "tags": [
     "data-pipeline",
-    "etl-from-postgress-to-s3",
+    "etl-sales-to-s3",
     "aws"
   ],
   "templating": {

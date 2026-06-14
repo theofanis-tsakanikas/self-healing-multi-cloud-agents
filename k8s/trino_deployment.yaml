@@ -21,7 +21,7 @@ spec:
         project_id: multi-cloud-self-healing-agent
         component: trino
     spec:
-      serviceAccountName: etl-from-postgress-to-s3-insights-sa
+      serviceAccountName: etl-sales-to-s3-insights-sa
       containers:
       - name: trino
         image: trinodb/trino:403
