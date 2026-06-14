@@ -1706,6 +1706,14 @@ with tab_nl:
                     st.session_state.nl_description     = _desc.strip()
                     st.session_state.nl_intent          = _intent
                     st.session_state.nl_rules_initialized = False
+                    # NEW authoring session — drop state carried over from a previous pipeline so
+                    # the wizard starts fresh: stale rules/edits would otherwise make the Rules
+                    # step auto-open the EDITOR (with the old rule) instead of the source picker,
+                    # and stale field answers would pre-fill the wrong values. The Rules step then
+                    # re-seeds from THIS description's extracted rules, else shows the picker.
+                    st.session_state.nl_rules        = []
+                    st.session_state.nl_rules_view   = None
+                    st.session_state.nl_answers      = {}
                     st.session_state.nl_step            = 1
                     st.rerun()
 
