@@ -462,7 +462,33 @@ _PIPELINE_NODES = [
     ("infra",      "⚙️ INFRA"),
     ("medic",      "🏥 MEDIC"),
 ]
-def _render_agent_svg(node_statuses: dict, last_edge) -> str:
+def _legend_swatch(color: str, label: str) -> str:
+    return (f'<span style="display:inline-flex;align-items:center;gap:0.35rem;">'
+            f'<span style="width:13px;height:13px;border-radius:4px;background:#0b1220;'
+            f'border:2px solid {color};display:inline-block;"></span>{label}</span>')
+
+
+# Color key for the graph, matching the node stroke colors (a convention every execution-graph
+# UI carries — n8n / React Flow / LangSmith). Static, rendered once below the graph.
+_GRAPH_LEGEND_HTML = (
+    '<div style="display:flex;flex-wrap:wrap;gap:0.55rem 1.15rem;align-items:center;'
+    'margin:0.6rem 0 0;font-size:0.74rem;color:#94a3b8;">'
+    + _legend_swatch("#38bdf8", "Active (running)")
+    + _legend_swatch("#64748b", "Supervisor · hub")
+    + _legend_swatch("#4ade80", "Completed ✓")
+    + _legend_swatch("#f87171", "Failed ✗")
+    + _legend_swatch("#fbbf24", "Unverified !")
+    + _legend_swatch("#334155", "Pending")
+    + '<span style="display:inline-flex;align-items:center;gap:0.35rem;">'
+      '<span style="width:22px;border-top:2px dashed #38bdf8;display:inline-block;"></span>'
+      'current transition</span>'
+    + '<span style="display:inline-flex;align-items:center;gap:0.35rem;color:#64748b;">'
+      '<b style="color:#cbd5e1;">×N</b> times a node ran</span>'
+    + '</div>'
+)
+
+
+def _render_agent_svg(node_statuses: dict, last_edge, run_counts: dict = None) -> str:
     """Animated hub-and-spoke graph of the REAL topology — the Supervisor routes to Architect /
     Infra / Medic and each returns to it (NOT a linear pipeline). The node running NOW pulses with a
     marching-ants ring and the active edge animates in the travel direction; finished nodes are solid
@@ -495,13 +521,28 @@ def _render_agent_svg(node_statuses: dict, last_edge) -> str:
         mk = ' marker-end="url(#arrow)"' if hot else ''
         return f'<line x1="{sx:.0f}" y1="{sy:.0f}" x2="{dx:.0f}" y2="{dy:.0f}" class="{cls}"{mk}/>'
 
+    _GLYPH = {"completed": ("✓", "#4ade80"), "failed": ("✗", "#f87171"),
+              "warn": ("!", "#fbbf24")}
+
     def _box(key):
         cx, cy, w, h = _POS[key]
-        cls = _CLS.get(node_statuses.get(key, "pending"), "n-pending")
-        return (
-            f'<rect x="{cx-w/2:.0f}" y="{cy-h/2:.0f}" width="{w}" height="{h}" rx="13" class="{cls}"/>'
-            f'<text x="{cx}" y="{cy+6}" text-anchor="middle" class="lbl">{_LBL[key]}</text>'
-        )
+        status = node_statuses.get(key, "pending")
+        cls = _CLS.get(status, "n-pending")
+        parts = [
+            f'<rect x="{cx-w/2:.0f}" y="{cy-h/2:.0f}" width="{w}" height="{h}" rx="13" class="{cls}"/>',
+            f'<text x="{cx}" y="{cy+6}" text-anchor="middle" class="lbl">{_LBL[key]}</text>',
+        ]
+        # Status glyph at the top-right corner (n8n / React Flow convention).
+        if status in _GLYPH:
+            g, gc = _GLYPH[status]
+            parts.append(f'<text x="{cx+w/2-13:.0f}" y="{cy-h/2+17:.0f}" '
+                         f'class="glyph" fill="{gc}">{g}</text>')
+        # Run-count badge at the top-left when a node ran more than once — visualises the
+        # multi-agent looping (the Supervisor hub + the architect's multi-phase / self-heal runs).
+        n = (run_counts or {}).get(key, 0)
+        if n >= 2:
+            parts.append(f'<text x="{cx-w/2+9:.0f}" y="{cy-h/2+17:.0f}" class="cnt">×{n}</text>')
+        return "".join(parts)
 
     svg = (
         '<svg viewBox="0 0 600 312" width="100%" style="max-height:330px;display:block;margin:auto;" '
@@ -533,6 +574,8 @@ def _render_agent_svg(node_statuses: dict, last_edge) -> str:
         "animation:march .7s linear infinite,pulse 1.3s ease-in-out infinite;"
         "filter:drop-shadow(0 0 7px rgba(56,189,248,.7));}"
         ".lbl{fill:#e2e8f0;font-family:Helvetica,Arial,sans-serif;font-size:17px;font-weight:600;}"
+        ".glyph{font-family:Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;}"
+        ".cnt{fill:#94a3b8;font-family:Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;}"
         "</style>" + svg
     )
 
@@ -795,6 +838,7 @@ def _start_run(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
         "node_statuses":  {"supervisor": "pending", "architect": "pending",
                             "infra": "pending", "medic": "pending"},
         "agent_events": [],
+        "run_counts": {},
         "healing_cycles": 0,
         "run_start_time": time.time(),
     })
@@ -2545,6 +2589,7 @@ if st.session_state.get("run_status") == "running":
     _node_statuses  = dict(st.session_state.get("node_statuses",
                            {k: "pending" for k, _ in _PIPELINE_NODES}))
     _agent_events = list(st.session_state.get("agent_events", []))
+    _run_counts = dict(st.session_state.get("run_counts", {}))
     _healing_cycles = st.session_state.get("healing_cycles", 0)
     _run_start_time = st.session_state.get("run_start_time", time.time())
     _last_edge = None  # (from, to) of the transition just taken — highlighted in the graph
@@ -2576,6 +2621,7 @@ if st.session_state.get("run_status") == "running":
                 "deployment is verified end-to-end, red on failure (amber if merely unverified)."
             )
             graph_ph = st.empty()
+            st.markdown(_GRAPH_LEGEND_HTML, unsafe_allow_html=True)
 
         log_lines: list[str] = []
         written_files: list[str] = []
@@ -2601,6 +2647,8 @@ if st.session_state.get("run_status") == "running":
                         # "done". It gets its outcome colour (green/red/amber) only at the end.
                         _node_statuses[completed] = (
                             "hub" if completed == "supervisor" else "completed")
+                        _run_counts[completed] = _run_counts.get(completed, 0) + 1
+                        st.session_state.run_counts = dict(_run_counts)
                     if next_active and next_active in _node_statuses:
                         _node_statuses[next_active] = "active"
                     if completed and next_active:
@@ -2630,11 +2678,13 @@ if st.session_state.get("run_status") == "running":
 
             # Agent graph (center tab) — animated hub. Re-render ONLY on state change so the CSS
             # animation isn't restarted every poll (the iframe persists between changes).
-            _gsig = (tuple(sorted(_node_statuses.items())), _last_edge)
+            _gsig = (tuple(sorted(_node_statuses.items())),
+                     tuple(sorted(_run_counts.items())), _last_edge)
             if _gsig != _graph_sig:
                 _graph_sig = _gsig
                 with graph_ph.container():
-                    components.html(_render_agent_svg(_node_statuses, _last_edge), height=350)
+                    components.html(
+                        _render_agent_svg(_node_statuses, _last_edge, _run_counts), height=350)
 
             # Execution metrics
             elapsed = int(time.time() - _run_start_time)
@@ -2686,7 +2736,8 @@ if st.session_state.get("run_status") == "running":
 
         # Final graph refresh
         with graph_ph.container():
-            components.html(_render_agent_svg(_node_statuses, _last_edge), height=350)
+            components.html(
+                _render_agent_svg(_node_statuses, _last_edge, _run_counts), height=350)
         elapsed = int(time.time() - _run_start_time)
         _time_ph.metric("⏱️ Elapsed", f"{elapsed}s")
         _cycles_ph.metric("🔄 Healing Cycles", _healing_cycles)
