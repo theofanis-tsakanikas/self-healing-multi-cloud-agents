@@ -1,6 +1,6 @@
 {
-  "uid": "etl-sales-to-s3-data-observability",
-  "title": "Etl Sales To S3 Data Observability",
+  "uid": "eu-sales-data-observability",
+  "title": "EU Sales Data Observability",
   "schemaVersion": 37,
   "version": 1,
   "refresh": "5m",
@@ -10,7 +10,7 @@
   },
   "tags": [
     "data-pipeline",
-    "etl-sales-to-s3",
+    "eu-sales",
     "aws"
   ],
   "templating": {

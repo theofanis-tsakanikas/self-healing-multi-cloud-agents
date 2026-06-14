@@ -1,3 +1,3 @@
 region      = "eu-central-1"
-bucket_name = "etl-sales-to-s3-insights-data"
-project_id  = "pipe_etl_sales_to_s3_to_s3"
+bucket_name = "eu-sales-insights-data"
+project_id  = "pipe_eu_sales_to_s3"
