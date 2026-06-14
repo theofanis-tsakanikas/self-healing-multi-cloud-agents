@@ -545,8 +545,12 @@ def validate_generated_code(filename: str) -> str:
             # sync_partition_metadata fails only at runtime with a MISLEADING
             # "Table ... not found". Parse the raw column list and reject any repeated name.
             if _cols_m:
+                # Strip parenthesised type params FIRST (e.g. DECIMAL(18,2)) so the comma
+                # inside them doesn't split into a phantom "2)" token — otherwise two monetary
+                # columns would false-positive as a duplicate. Then split the real columns.
+                _col_blob = re.sub(r"\([^)]*\)", "", _cols_m.group(1))
                 _all_cols = [c.split()[0].strip("'\"").lower()
-                             for c in (x.strip() for x in _cols_m.group(1).split(","))
+                             for c in (x.strip() for x in _col_blob.split(","))
                              if c and c.split()]
                 _dupes = sorted({c for c in _all_cols if _all_cols.count(c) > 1})
                 if _dupes:

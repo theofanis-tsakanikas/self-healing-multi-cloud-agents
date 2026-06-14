@@ -282,6 +282,19 @@ class TestSqlDuplicateColumns:
         out = self._validate(tmp_path, ddl)
         assert "duplicate column" not in out.lower()
 
+    def test_two_decimal_columns_are_not_false_positive(self, tmp_path):
+        # DECIMAL(18,2)'s internal comma must not split into a phantom '2)' token that
+        # would false-positive as a duplicate — this would break a valid 2-monetary-column run.
+        ddl = (
+            "CREATE TABLE hive.s.pipe_x (\n"
+            "  order_id VARCHAR,\n  unit_price DECIMAL(18,2),\n  total_amount DECIMAL(18,2),\n"
+            "  is_suspicious BOOLEAN,\n  run_date DATE\n"
+            ") WITH (format='PARQUET', external_location='s3://b/processed/', "
+            "partitioned_by=ARRAY['run_date']);\n"
+        )
+        out = self._validate(tmp_path, ddl)
+        assert "duplicate column" not in out.lower()
+
 
 class TestTerraformGcpProcessedDir:
     _BUCKET = 'resource "google_storage_bucket" "data" {\n  name = "b"\n}\n'
