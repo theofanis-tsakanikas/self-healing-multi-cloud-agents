@@ -531,51 +531,138 @@ def _render_agent_svg(node_statuses: dict, last_edge) -> str:
     )
 
 
-def _render_agent_log_html(agent_events: list) -> str:
-    """Chronological timeline of agent step outputs — one collapsible entry per node
-    super-step, in execution order (mirrors the routing ping-pong in the graph tab).
-    Each entry is collapsed showing a one-line summary; the newest is open by default.
-    Keeps every step (e.g. the architect's Discovery→Schema→Implementation→self-heal
-    patches), not just the last. Fed by the `agent_event` updates from _run_agent."""
+_AGENT_TL_LABELS = {
+    "supervisor": "🎯 Supervisor", "architect": "🏗️ Architect",
+    "infra": "⚙️ Infra", "medic": "🏥 Medic", "execute_tools": "🔧 Tools",
+}
+
+
+def _structure_messages(messages) -> list:
+    """Turn a node super-step's delta messages into ordered sub-steps for the timeline:
+    tool CALLS (name + args), tool RESULTS (output), and TEXT (the agent's own message).
+    The architect/infra run their tools in-node, so a single super-step carries the whole
+    AIMessage(tool_calls)→ToolMessage(result) trace — exactly LangSmith's per-run detail."""
+    steps = []
+    for msg in messages:
+        tcs = getattr(msg, "tool_calls", None)
+        if tcs:
+            for tc in tcs:
+                if isinstance(tc, dict):
+                    steps.append({"kind": "call", "name": tc.get("name", "tool"),
+                                  "args": tc.get("args", {}) or {}})
+                else:
+                    steps.append({"kind": "call", "name": getattr(tc, "name", "tool"),
+                                  "args": getattr(tc, "args", {}) or {}})
+            txt = (getattr(msg, "content", "") or "")
+            if isinstance(txt, str) and txt.strip():
+                steps.append({"kind": "text", "text": txt.strip()})
+            continue
+        if getattr(msg, "tool_call_id", None) is not None:
+            steps.append({"kind": "result", "name": getattr(msg, "name", "") or "",
+                          "text": str(getattr(msg, "content", "") or "")})
+            continue
+        txt = getattr(msg, "content", "") or ""
+        if isinstance(txt, str) and txt.strip():
+            steps.append({"kind": "text", "text": txt.strip()})
+        elif txt:  # non-str content (rare) — stringify
+            steps.append({"kind": "text", "text": str(txt)})
+    return steps
+
+
+def _summarize_calls(names: list) -> str:
+    """`['a','b','b']` → `a · b ×2`, order-preserving — the collapsed step summary."""
+    seen = []
+    counts = {}
+    for n in names:
+        if n not in counts:
+            seen.append(n)
+        counts[n] = counts.get(n, 0) + 1
+    return " · ".join(n + (f" ×{counts[n]}" if counts[n] > 1 else "") for n in seen)
+
+
+def _render_substep_html(s: dict) -> str:
+    """One nested, expandable sub-step (LangSmith-style): a tool call shows its input args,
+    a result shows the tool output, plain text renders inline."""
     import html as _html
-    _LABELS = {
-        "supervisor": "🎯 Supervisor", "architect": "🏗️ Architect",
-        "infra": "⚙️ Infra", "medic": "🏥 Medic",
-    }
+    import json as _json
+    pre = ("color:#cbd5e1;font-size:0.74rem;white-space:pre-wrap;margin:0.25rem 0 0;"
+           "background:rgba(2,6,18,0.85);border-radius:5px;padding:0.45rem;"
+           "overflow:auto;max-height:340px;")
+    summ = ("cursor:pointer;font-size:0.78rem;font-weight:600;padding:0.3rem 0.45rem;"
+            "border-radius:5px;")
+    det = "margin:0.28rem 0 0.28rem 0.4rem;"
+
+    if s["kind"] == "call":
+        name = _html.escape(str(s.get("name", "tool")))
+        args = s.get("args", {}) or {}
+        rows = []
+        for k, v in (args.items() if isinstance(args, dict) else []):
+            vs = v if isinstance(v, str) else _json.dumps(v, default=str, ensure_ascii=False)
+            if len(vs) > 4000:
+                vs = vs[:4000] + "  …(truncated)"
+            rows.append(f"<b style='color:#7dd3fc;'>{_html.escape(str(k))}</b>: "
+                        f"{_html.escape(vs)}")
+        body = "<br>".join(rows) if rows else "<span style='color:#475569;'>(no input)</span>"
+        return (f'<details style="{det}"><summary style="{summ}color:#38bdf8;">'
+                f'🔧 <span style="color:#e2e8f0;">{name}</span></summary>'
+                f'<div style="{pre}">{body}</div></details>')
+
+    if s["kind"] == "result":
+        name = _html.escape(str(s.get("name", "")))
+        txt = str(s.get("text", ""))
+        if len(txt) > 6000:
+            txt = txt[:6000] + "\n…(truncated)"
+        head = f' <span style="color:#94a3b8;">{name}</span>' if name else ""
+        return (f'<details style="{det}"><summary style="{summ}color:#4ade80;">'
+                f'↳ result{head}</summary>'
+                f'<pre style="{pre}">{_html.escape(txt)}</pre></details>')
+
+    txt = str(s.get("text", ""))
+    if len(txt) > 6000:
+        txt = txt[:6000] + "\n…(truncated)"
+    return (f'<div style="margin:0.28rem 0 0.28rem 0.4rem;font-size:0.78rem;color:#cbd5e1;">'
+            f'💬 <span style="color:#94a3b8;">agent</span>'
+            f'<pre style="{pre}">{_html.escape(txt)}</pre></div>')
+
+
+def _render_agent_log_html(agent_events: list) -> str:
+    """LangSmith-style execution timeline — one collapsible entry per node super-step, in
+    order. Collapsed shows the agent + a summary of the tools it called; expanded reveals the
+    nested tool calls (with input args) and their outputs. The newest step is open by default.
+    Keeps EVERY step (architect Discovery→Schema→Implementation→self-heal patches, medic
+    diagnosis + tools), not just the last. Fed by the `agent_event` updates from _run_agent."""
+    import html as _html
     if not agent_events:
-        return '<p style="color:#334155;font-size:0.8rem;">No agent output yet.</p>'
+        return ('<p style="color:#334155;font-size:0.82rem;padding:0.6rem;">'
+                'Waiting for the first agent step…</p>')
 
-    pre_style = (
-        "color:#7dd3fc;font-size:0.78rem;white-space:pre-wrap;"
-        "background:rgba(6,12,26,0.8);border-radius:6px;padding:0.55rem;"
-        "margin:0.35rem 0 0;overflow:auto;max-height:260px;"
-    )
     summary_style = (
-        "cursor:pointer;color:#cbd5e1;font-size:0.82rem;font-weight:600;"
-        "padding:0.4rem 0.55rem;border-radius:6px;background:rgba(15,23,42,0.6);"
+        "cursor:pointer;color:#e2e8f0;font-size:0.85rem;font-weight:600;"
+        "padding:0.5rem 0.6rem;border-radius:7px;background:rgba(15,23,42,0.7);"
     )
-    det_style = "margin:0.3rem 0;border-left:2px solid #1e293b;padding-left:0.5rem;"
+    det_style = ("margin:0.35rem 0;border-left:2px solid #1e293b;padding:0 0 0.2rem 0.55rem;")
 
-    rows = []
+    blocks = []
     last = len(agent_events) - 1
-    for i, (agent, content) in enumerate(agent_events):
-        label = _LABELS.get(agent, agent.title())
-        raw = (content or "").strip()
-        # one-line summary: first non-empty line, truncated
-        first = next((ln.strip() for ln in raw.splitlines() if ln.strip()), "")
-        if len(first) > 100:
-            first = first[:100] + "…"
+    for i, (agent, steps) in enumerate(agent_events):
+        label = _AGENT_TL_LABELS.get(agent, agent.title())
+        calls = [s["name"] for s in steps if s.get("kind") == "call"]
+        if calls:
+            summ = _summarize_calls(calls)
+        else:
+            txt = next((s.get("text", "") for s in steps if s.get("kind") == "text"), "")
+            txt = " ".join(txt.split())
+            summ = (txt[:90] + "…") if len(txt) > 90 else (txt or "—")
+        inner = "".join(_render_substep_html(s) for s in steps)
         open_attr = " open" if i == last else ""
-        rows.append(
+        blocks.append(
             f'<details{open_attr} style="{det_style}">'
             f'<summary style="{summary_style}">'
-            f'<span style="color:#64748b;">#{i + 1}</span> {label} '
-            f'<span style="color:#64748b;font-weight:400;">— {_html.escape(first)}</span>'
-            f'</summary>'
-            f'<pre style="{pre_style}">{_html.escape(raw)}</pre>'
-            f'</details>'
+            f'<span style="color:#475569;">#{i + 1}</span> {label} '
+            f'<span style="color:#64748b;font-weight:400;">— {_html.escape(summ)}</span>'
+            f'</summary>{inner}</details>'
         )
-    return "".join(rows)
+    return "".join(blocks)
 
 
 # ---------------------------------------------------------------------------
@@ -652,14 +739,14 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
                         "completed": node_name,
                         "next_active": nxt if nxt and nxt != "finish" else None,
                     }})
-                    msgs = state_update.get("messages", [])
-                    if msgs:
-                        last = msgs[-1]
-                        content = getattr(last, "content", "") or ""
-                        if content:
-                            # Append (not overwrite): one entry per node super-step, in
-                            # execution order — the timeline mirrors the routing ping-pong.
-                            state_q.put({"agent_event": (node_name, str(content))})
+
+                # Timeline capture — structured sub-steps (tool calls + args + results + text)
+                # per super-step, in execution order. execute_tools carries the medic's tool
+                # results. One appended entry per step (the timeline mirrors the ping-pong).
+                if node_name in ("supervisor", "architect", "infra", "medic", "execute_tools"):
+                    steps = _structure_messages(state_update.get("messages", []))
+                    if steps:
+                        state_q.put({"agent_event": (node_name, steps)})
 
                 # Healing cycle: medic reset architect or infra status to pending
                 if node_name == "medic" and (
@@ -2461,14 +2548,19 @@ if st.session_state.get("run_status") == "running":
     with st.status("Agent is running…", expanded=True) as status_box:
         _tab_log, _tab_graph = st.tabs(["📋 Activity log", "🕸️ Agent graph"])
         with _tab_log:
-            log_area   = st.empty()
+            # Timeline is the MAIN view — expandable, LangSmith-style (tool calls + inputs +
+            # outputs per step). The raw routing/log stream is demoted to a collapsed expander.
             st.markdown(
                 '<p style="color:#475569;font-size:0.72rem;text-transform:uppercase;'
-                'letter-spacing:0.08em;margin:0.7rem 0 0;">📝 Agent activity timeline</p>',
+                'letter-spacing:0.08em;margin:0 0 0.3rem;">🧭 Agent activity timeline '
+                '<span style="text-transform:none;color:#334155;">— click a step to see its '
+                'tools, inputs &amp; outputs</span></p>',
                 unsafe_allow_html=True,
             )
             _agent_log_ph = st.empty()
             files_area = st.empty()
+            with st.expander("🔎 Raw log (routing + runtime output)", expanded=False):
+                log_area = st.empty()
         with _tab_graph:
             st.caption(
                 "Hub-and-spoke: the **Supervisor** routes to Architect / Infra / Medic and each "
