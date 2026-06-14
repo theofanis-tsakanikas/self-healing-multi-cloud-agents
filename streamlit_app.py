@@ -531,31 +531,51 @@ def _render_agent_svg(node_statuses: dict, last_edge) -> str:
     )
 
 
-def _render_agent_log_html(agent_messages: dict) -> str:
-    """Latest output per agent (file saves, validation, patches, diagnoses) — the detail behind
-    the routing trace. Fed by the `agent_message` updates from _run_agent."""
+def _render_agent_log_html(agent_events: list) -> str:
+    """Chronological timeline of agent step outputs — one collapsible entry per node
+    super-step, in execution order (mirrors the routing ping-pong in the graph tab).
+    Each entry is collapsed showing a one-line summary; the newest is open by default.
+    Keeps every step (e.g. the architect's Discovery→Schema→Implementation→self-heal
+    patches), not just the last. Fed by the `agent_event` updates from _run_agent."""
     import html as _html
     _LABELS = {
         "supervisor": "🎯 Supervisor", "architect": "🏗️ Architect",
         "infra": "⚙️ Infra", "medic": "🏥 Medic",
     }
+    if not agent_events:
+        return '<p style="color:#334155;font-size:0.8rem;">No agent output yet.</p>'
+
     pre_style = (
         "color:#7dd3fc;font-size:0.78rem;white-space:pre-wrap;"
         "background:rgba(6,12,26,0.8);border-radius:6px;padding:0.55rem;"
-        "margin:0.2rem 0 0.6rem;overflow:auto;max-height:220px;"
+        "margin:0.35rem 0 0;overflow:auto;max-height:260px;"
     )
+    summary_style = (
+        "cursor:pointer;color:#cbd5e1;font-size:0.82rem;font-weight:600;"
+        "padding:0.4rem 0.55rem;border-radius:6px;background:rgba(15,23,42,0.6);"
+    )
+    det_style = "margin:0.3rem 0;border-left:2px solid #1e293b;padding-left:0.5rem;"
+
     rows = []
-    for key, label in _LABELS.items():
-        raw = (agent_messages.get(key) or "").strip()
-        if not raw:
-            continue
+    last = len(agent_events) - 1
+    for i, (agent, content) in enumerate(agent_events):
+        label = _LABELS.get(agent, agent.title())
+        raw = (content or "").strip()
+        # one-line summary: first non-empty line, truncated
+        first = next((ln.strip() for ln in raw.splitlines() if ln.strip()), "")
+        if len(first) > 100:
+            first = first[:100] + "…"
+        open_attr = " open" if i == last else ""
         rows.append(
-            f'<p style="color:#94a3b8;font-size:0.82rem;margin:0.5rem 0 0.1rem;font-weight:600;">'
-            f'{label}</p><pre style="{pre_style}">{_html.escape(raw)}</pre>'
+            f'<details{open_attr} style="{det_style}">'
+            f'<summary style="{summary_style}">'
+            f'<span style="color:#64748b;">#{i + 1}</span> {label} '
+            f'<span style="color:#64748b;font-weight:400;">— {_html.escape(first)}</span>'
+            f'</summary>'
+            f'<pre style="{pre_style}">{_html.escape(raw)}</pre>'
+            f'</details>'
         )
-    return "".join(rows) if rows else (
-        '<p style="color:#334155;font-size:0.8rem;">No agent output yet.</p>'
-    )
+    return "".join(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -637,7 +657,9 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
                         last = msgs[-1]
                         content = getattr(last, "content", "") or ""
                         if content:
-                            state_q.put({"agent_message": (node_name, str(content))})
+                            # Append (not overwrite): one entry per node super-step, in
+                            # execution order — the timeline mirrors the routing ping-pong.
+                            state_q.put({"agent_event": (node_name, str(content))})
 
                 # Healing cycle: medic reset architect or infra status to pending
                 if node_name == "medic" and (
@@ -678,7 +700,7 @@ def _start_run(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
         "written_files": [], "run_status": "running",
         "node_statuses":  {"supervisor": "pending", "architect": "pending",
                             "infra": "pending", "medic": "pending"},
-        "agent_messages": {"supervisor": "", "architect": "", "infra": "", "medic": ""},
+        "agent_events": [],
         "healing_cycles": 0,
         "run_start_time": time.time(),
     })
@@ -2428,8 +2450,7 @@ if st.session_state.get("run_status") == "running":
     # Local copies of visualization state — kept in sync with session_state
     _node_statuses  = dict(st.session_state.get("node_statuses",
                            {k: "pending" for k, _ in _PIPELINE_NODES}))
-    _agent_messages = dict(st.session_state.get("agent_messages",
-                           {k: "" for k, _ in _PIPELINE_NODES}))
+    _agent_events = list(st.session_state.get("agent_events", []))
     _healing_cycles = st.session_state.get("healing_cycles", 0)
     _run_start_time = st.session_state.get("run_start_time", time.time())
     _last_edge = None  # (from, to) of the transition just taken — highlighted in the graph
@@ -2443,7 +2464,7 @@ if st.session_state.get("run_status") == "running":
             log_area   = st.empty()
             st.markdown(
                 '<p style="color:#475569;font-size:0.72rem;text-transform:uppercase;'
-                'letter-spacing:0.08em;margin:0.7rem 0 0;">📝 Latest output per agent</p>',
+                'letter-spacing:0.08em;margin:0.7rem 0 0;">📝 Agent activity timeline</p>',
                 unsafe_allow_html=True,
             )
             _agent_log_ph = st.empty()
@@ -2481,12 +2502,10 @@ if st.session_state.get("run_status") == "running":
                     if completed and next_active:
                         _last_edge = (completed, next_active)
                     st.session_state.node_statuses = dict(_node_statuses)
-                # Agent messages
-                if "agent_message" in upd:
-                    agent, content = upd["agent_message"]
-                    if agent in _agent_messages:
-                        _agent_messages[agent] = content
-                        st.session_state.agent_messages = dict(_agent_messages)
+                # Agent events — append in execution order (chronological timeline)
+                if "agent_event" in upd:
+                    _agent_events.append(upd["agent_event"])
+                    st.session_state.agent_events = list(_agent_events)
                 # Healing cycle counter
                 if "healing_cycle" in upd:
                     _healing_cycles += upd["healing_cycle"]
@@ -2495,7 +2514,7 @@ if st.session_state.get("run_status") == "running":
             # ── Refresh UI placeholders ───────────────────────────────────
             log_area.code("\n".join(log_lines[-80:]), language=None)
             _agent_log_ph.markdown(
-                _render_agent_log_html(_agent_messages), unsafe_allow_html=True
+                _render_agent_log_html(_agent_events), unsafe_allow_html=True
             )
             if written_files:
                 files_area.markdown(
@@ -2536,7 +2555,7 @@ if st.session_state.get("run_status") == "running":
 
         log_area.code("\n".join(log_lines), language=None)
         _agent_log_ph.markdown(
-            _render_agent_log_html(_agent_messages), unsafe_allow_html=True
+            _render_agent_log_html(_agent_events), unsafe_allow_html=True
         )
 
         final = st.session_state.get("final_status", {})
