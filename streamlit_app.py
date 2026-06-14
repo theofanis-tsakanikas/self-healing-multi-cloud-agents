@@ -477,7 +477,8 @@ def _render_agent_svg(node_statuses: dict, last_edge) -> str:
         "medic":      (496, 250, 150, 60),
     }
     _LBL = {"supervisor": "Supervisor", "architect": "Architect", "infra": "Infra", "medic": "Medic"}
-    _CLS = {"active": "n-active", "completed": "n-done", "failed": "n-failed", "pending": "n-pending"}
+    _CLS = {"active": "n-active", "completed": "n-done", "failed": "n-failed",
+            "pending": "n-pending", "hub": "n-hub", "warn": "n-warn"}
 
     def _short(sx, sy, dx, dy, gap):
         L = math.hypot(dx - sx, dy - sy) or 1
@@ -521,8 +522,13 @@ def _render_agent_svg(node_statuses: dict, last_edge) -> str:
         ".e-active{stroke:#38bdf8;stroke-width:3;stroke-dasharray:9 5;animation:march .55s linear infinite;}"
         "rect{fill:#0b1220;}"
         ".n-pending{stroke:#334155;stroke-width:1.5;}"
+        # hub = the Supervisor while running: a steady, neutral coordinator look (NOT done-green
+        # from being visited, NOT the pulsing active ring). Its green/red/amber comes only at the
+        # terminal state, so it reflects the MISSION outcome.
+        ".n-hub{fill:#0f1830;stroke:#64748b;stroke-width:2;}"
         ".n-done{fill:#04210f;stroke:#4ade80;stroke-width:2;}"
         ".n-failed{fill:#2a0f0f;stroke:#f87171;stroke-width:2.5;}"
+        ".n-warn{fill:#2a210a;stroke:#fbbf24;stroke-width:2.5;}"
         ".n-active{fill:#0c2942;stroke:#38bdf8;stroke-dasharray:11 6;"
         "animation:march .7s linear infinite,pulse 1.3s ease-in-out infinite;"
         "filter:drop-shadow(0 0 7px rgba(56,189,248,.7));}"
@@ -758,14 +764,15 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
         log_q.put(("sep", "─" * 55))
         if mission_status == "verified":
             log_q.put(("ok",  "🎉  Deployment complete — verified end-to-end!"))
-            state_q.put({"status": "DONE"})
+            state_q.put({"status": "DONE", "mission_status": mission_status})
         else:
             # The graph ENDED but without verified deployment (fix loop abandoned,
             # CI unverified, or an LLM-fallback FINISH) — never celebrate a failure.
             from main import mission_failure_summary
             reason = mission_failure_summary(mission_status)
             log_q.put(("err", f"❌  Mission failed (mission_status={mission_status or 'unset'}): {reason}"))
-            state_q.put({"status": "ERROR", "error": f"Unverified termination: {reason}"})
+            state_q.put({"status": "ERROR", "error": f"Unverified termination: {reason}",
+                         "mission_status": mission_status})
 
     except Exception as exc:
         log_q.put(("err", f"❌  {exc}"))
@@ -2564,7 +2571,9 @@ if st.session_state.get("run_status") == "running":
         with _tab_graph:
             st.caption(
                 "Hub-and-spoke: the **Supervisor** routes to Architect / Infra / Medic and each "
-                "returns to it. The active node + the edge just taken are highlighted."
+                "returns to it. The active node + the edge just taken are highlighted. The "
+                "Supervisor is the **mission-outcome** node — it turns green only when the "
+                "deployment is verified end-to-end, red on failure (amber if merely unverified)."
             )
             graph_ph = st.empty()
 
@@ -2588,7 +2597,10 @@ if st.session_state.get("run_status") == "running":
                     completed = nu.get("completed", "")
                     next_active = nu.get("next_active")
                     if completed in _node_statuses:
-                        _node_statuses[completed] = "completed"
+                        # The Supervisor is the hub/router, not a task — being visited is not
+                        # "done". It gets its outcome colour (green/red/amber) only at the end.
+                        _node_statuses[completed] = (
+                            "hub" if completed == "supervisor" else "completed")
                     if next_active and next_active in _node_statuses:
                         _node_statuses[next_active] = "active"
                     if completed and next_active:
@@ -2654,14 +2666,20 @@ if st.session_state.get("run_status") == "running":
         if final.get("status") == "DONE":
             status_box.update(label="✅ Deployment complete!", state="complete")
             st.session_state.run_status = "done"
-            # Mark any still-pending/active nodes as completed on clean exit
+            # Mark any still-pending/active spoke as completed on clean exit; the Supervisor
+            # turns green ONLY here (mission verified) — a green Supervisor means real success.
             for k in _node_statuses:
-                if _node_statuses[k] in ("active", "pending"):
+                if _node_statuses[k] in ("active", "pending", "hub"):
                     _node_statuses[k] = "completed"
         elif final.get("status") == "ERROR":
             status_box.update(label="❌ Deployment failed", state="error")
             st.session_state.run_status = "error"
-            # Mark the currently-active node as failed
+            # The Supervisor is the MISSION-OUTCOME indicator: red on failure, amber when the
+            # outcome is merely unverified/escalated (not a hard failure). Completed spokes STAY
+            # green (option A) — they did their part; the failure is at the mission level.
+            _ms = final.get("mission_status", "")
+            _node_statuses["supervisor"] = (
+                "warn" if _ms in ("escalated", "ci_unverified") else "failed")
             for k in _node_statuses:
                 if _node_statuses[k] == "active":
                     _node_statuses[k] = "failed"
