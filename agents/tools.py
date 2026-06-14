@@ -320,6 +320,21 @@ def validate_generated_code(filename: str) -> str:
                 "rejected row) BEFORE comparing. See python_standards.md Business Rules section."
             )
 
+        # Trino partition sync: the FIRST arg to sync_partition_metadata is the BARE schema
+        # name — the catalog (`hive`) is already in `hive.system.sync_partition_metadata`. A
+        # catalog-prefixed arg ('hive.sales_eu') makes Trino look for a schema literally named
+        # 'hive.sales_eu' and fail at RUNTIME with "Table 'hive.sales_eu.<table>' not found".
+        # write_project_file/patch_project_file strip it deterministically; this is the safety
+        # net for any path that bypasses them.
+        if re.search(r"sync_partition_metadata\(\s*['\"][A-Za-z0-9_]+\.[A-Za-z0-9_]+['\"]", py_content):
+            errors.append(
+                "TRINO: sync_partition_metadata's first argument is catalog-prefixed (e.g. "
+                "'hive.sales_eu') — it must be the BARE schema name ('sales_eu'). The catalog "
+                "`hive` already lives in `hive.system.sync_partition_metadata`; prefixing it makes "
+                "Trino fail at runtime with a misleading \"Table 'hive.<schema>.<table>' not found\". "
+                "See python_standards.md Partition Registration."
+            )
+
         # Cloud guard: cloud_get() for a specific cloud must be inside the matching
         # if _CLOUD == "..." block. An unguarded call hardcodes a provider and breaks
         # the script on all other clouds — a fundamental cloud-agnostic violation.
@@ -1271,6 +1286,24 @@ def _fix_fstring_double_braces(content: str) -> str:
     )
 
 
+# Deterministic guard for the sync_partition_metadata schema argument. Its FIRST arg is the
+# BARE schema name — the catalog (`hive`) already lives in `hive.system.sync_partition_metadata`.
+# The architect intermittently catalog-prefixes it ('hive.sales_eu') DESPITE explicit ❌/✅
+# guidance in BOTH the prompt (architect.md) and the standard (python_standards.md). Trino then
+# looks for a schema literally named 'hive.sales_eu' and raises "Table 'hive.sales_eu.<table>'
+# not found" — but only at RUNTIME, and only from the PIPELINE's call: init-trino's separate
+# (correct, bare-name) CALL succeeds first, masking the bug until the job runs. Strip the catalog
+# prefix from the first string arg → a generation guarantee, not an output patch. No-op when the
+# arg is already bare. See CLAUDE.md "Deterministic generation guarantees".
+_SYNC_SCHEMA_RE = re.compile(
+    r"(sync_partition_metadata\(\s*)(['\"])[A-Za-z0-9_]+\.([A-Za-z0-9_]+)\2"
+)
+
+
+def _fix_sync_partition_schema_arg(content: str) -> str:
+    return _SYNC_SCHEMA_RE.sub(r"\g<1>\g<2>\g<3>\g<2>", content)
+
+
 # Deterministic Lakeview dashboard guarantee. The dashboard JSON is mechanically determined — a
 # fixed widget layout over the pipeline's Delta `_audit` table — yet the LLM intermittently
 # mangles the nested encodings (e.g. nesting `color`/`displayName` INSIDE `y.scale`), producing
@@ -1401,9 +1434,12 @@ def write_project_file(filename: str, content: str):
     # Deterministic guards for intermittent LLM slips in generated .py:
     #  - F821: guarantee the cloud-SDK import the script's SDK call needs.
     #  - F541: un-double f-string braces (f"{{x}}" → f"{x}") before they reach ruff.
+    #  - Trino: strip the catalog prefix the LLM intermittently adds to the
+    #    sync_partition_metadata schema arg ('hive.X' → 'X') — else a runtime "not found".
     if filepath.endswith(".py"):
         content = _ensure_cloud_sdk_import(content)
         content = _fix_fstring_double_braces(content)
+        content = _fix_sync_partition_schema_arg(content)
 
     # Deterministic Lakeview dashboard: rebuild from the canonical structure so the LLM's mangled
     # nested encodings can't produce invalid JSON. The audit table name is reliably substituted by
@@ -1509,6 +1545,11 @@ def patch_project_file(filename: str, replacements: list) -> str:
         count = content.count(old)
         content = content.replace(old, new, 1)
         applied.append(f"replaced ({count}x): {repr(old[:60])}")
+
+    # Same deterministic Trino guard as the write path: a fix-mode patch can re-introduce the
+    # catalog-prefixed sync_partition_metadata schema arg ('hive.X' → 'X'). No-op when bare.
+    if ext == ".py":
+        content = _fix_sync_partition_schema_arg(content)
 
     # Safety-net: never let a patch turn a parseable .py file into a syntactically broken
     # one. If the file compiled BEFORE the patch but the patched content does NOT, reject

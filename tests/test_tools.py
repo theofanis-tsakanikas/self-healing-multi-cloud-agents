@@ -181,3 +181,43 @@ class TestCloudSdkImportGuard:
         from agents.tools import _ensure_cloud_sdk_import
         n = "import os\nimport pandas as pd\ndef r():\n    pass\n"
         assert _ensure_cloud_sdk_import(n) == n
+
+
+class TestSyncPartitionSchemaArgGuard:
+    """The first arg to sync_partition_metadata is the BARE schema name. The LLM intermittently
+    catalog-prefixes it ('hive.sales_eu') despite explicit prompt+standard guidance, causing a
+    misleading runtime 'Table not found'. _fix_sync_partition_schema_arg strips it deterministically."""
+
+    _BAD = ("cursor.execute(\"CALL hive.system.sync_partition_metadata("
+            "'hive.sales_eu', 'pipe_eu_sales_to_s3', 'ADD')\")\n")
+    _GOOD = ("cursor.execute(\"CALL hive.system.sync_partition_metadata("
+             "'sales_eu', 'pipe_eu_sales_to_s3', 'ADD')\")\n")
+
+    def test_catalog_prefix_is_stripped(self):
+        from agents.tools import _fix_sync_partition_schema_arg
+        assert _fix_sync_partition_schema_arg(self._BAD) == self._GOOD
+
+    def test_bare_schema_is_noop(self):
+        from agents.tools import _fix_sync_partition_schema_arg
+        assert _fix_sync_partition_schema_arg(self._GOOD) == self._GOOD
+
+    def test_single_quote_and_underscored_schema(self):
+        from agents.tools import _fix_sync_partition_schema_arg
+        bad = "CALL hive.system.sync_partition_metadata('hive.marketing_global', 'orders', 'ADD')"
+        out = _fix_sync_partition_schema_arg(bad)
+        assert "'marketing_global'" in out and "'hive.marketing_global'" not in out
+
+    def test_validator_flags_catalog_prefixed_schema(self, tmp_path):
+        # The validator reads from disk; simulate a script that bypassed the write/patch guard.
+        from agents.tools import validate_generated_code
+        (tmp_path / "scripts").mkdir()
+        f = tmp_path / "scripts" / "pipe_x.py"
+        f.write_text(
+            "import os\n"
+            "from utils.cloud_config import cloud_get\n"
+            "def run():\n"
+            "    cursor.execute(\"CALL hive.system.sync_partition_metadata("
+            "'hive.sales_eu', 'pipe_x', 'ADD')\")\n"
+        )
+        out = validate_generated_code.invoke({"filename": str(f)})
+        assert "TRINO" in out and "bare schema" in out.lower()
