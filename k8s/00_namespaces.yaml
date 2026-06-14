@@ -11,7 +11,7 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: eu-sales-insights-sa
+  name: eu-sales-etl-insights-sa
   namespace: analytics
   annotations:
     eks.amazonaws.com/role-arn: arn:aws:iam::387229419515:role/multi-cloud-pipelines-irsa
