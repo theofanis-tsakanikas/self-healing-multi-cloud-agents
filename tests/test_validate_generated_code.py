@@ -296,6 +296,45 @@ class TestSqlDuplicateColumns:
         assert "duplicate column" not in out.lower()
 
 
+class TestSqlTrinoTypes:
+    """`read_data_schema` reports the SOURCE type; the architect sometimes copies a source-only
+    type (TEXT/STRING/DOUBLE PRECISION/CHARACTER VARYING) verbatim into the Trino DDL → runtime
+    'Unknown type'. The validator flags it; _fix_trino_ddl_types normalises it."""
+
+    def _validate(self, tmp_path, ddl):
+        (tmp_path / "sql").mkdir()
+        sql_f = tmp_path / "sql" / "setup_trino.sql"
+        sql_f.write_text(ddl)
+        return validate_generated_code.invoke({"filename": str(sql_f)})
+
+    def test_text_type_is_flagged(self, tmp_path):
+        ddl = ("CREATE TABLE hive.s.pipe_x (\n  order_id TEXT,\n  run_date DATE\n"
+               ") WITH (format='PARQUET', external_location='s3://b/processed/', "
+               "partitioned_by=ARRAY['run_date']);\n")
+        out = self._validate(tmp_path, ddl)
+        assert "Unknown type" in out
+
+    def test_double_precision_is_flagged(self, tmp_path):
+        ddl = ("CREATE TABLE hive.s.pipe_x (\n  amount DOUBLE PRECISION,\n  run_date DATE\n"
+               ") WITH (format='PARQUET', external_location='s3://b/processed/', "
+               "partitioned_by=ARRAY['run_date']);\n")
+        out = self._validate(tmp_path, ddl)
+        assert "Unknown type" in out
+
+    def test_valid_trino_types_are_clean(self, tmp_path):
+        ddl = ("CREATE TABLE hive.s.pipe_x (\n  order_id VARCHAR,\n  amount DECIMAL(18,2),\n"
+               "  run_date DATE\n) WITH (format='PARQUET', external_location='s3://b/processed/', "
+               "partitioned_by=ARRAY['run_date']);\n")
+        out = self._validate(tmp_path, ddl)
+        assert "Unknown type" not in out
+
+    def test_helper_normalises_source_types(self):
+        from agents.tools import _fix_trino_ddl_types
+        ddl = "  order_id TEXT,\n  amount DOUBLE PRECISION,\n  note STRING,\n"
+        out = _fix_trino_ddl_types(ddl)
+        assert "order_id VARCHAR" in out and "amount DOUBLE," in out and "note VARCHAR" in out
+
+
 class TestTerraformGcpProcessedDir:
     _BUCKET = 'resource "google_storage_bucket" "data" {\n  name = "b"\n}\n'
 

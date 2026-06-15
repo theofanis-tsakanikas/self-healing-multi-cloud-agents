@@ -570,6 +570,19 @@ def validate_generated_code(filename: str) -> str:
                         f"'Table not found' on sync_partition_metadata."
                     )
 
+            # Source-only column types copied verbatim into the Trino DDL (TEXT / STRING /
+            # DOUBLE PRECISION / CHARACTER VARYING) are NOT valid Trino types → CREATE TABLE
+            # crashes at runtime with "Unknown type 'X'". write_project_file normalises them;
+            # this is the safety net. (Reuses the normaliser: if it would change anything, the
+            # DDL carries an invalid type.) Skipped for Databricks Delta (STRING is valid there).
+            if not _is_databricks_run() and _fix_trino_ddl_types(_raw_sql) != _raw_sql:
+                errors.append(
+                    "SQL: a source-only column type (TEXT / STRING / DOUBLE PRECISION / "
+                    "CHARACTER VARYING) is not a valid Trino type — CREATE TABLE fails at runtime "
+                    "with \"Unknown type 'X'\". Map text→VARCHAR and DOUBLE PRECISION→DOUBLE "
+                    "(monetary→DECIMAL(18,2)) per sql_standards.md Data Types."
+                )
+
             # is_suspicious must agree with the pipeline script (FLAG_AS_SUSPICIOUS rule).
             # Derive the script name from the DDL table name (hive.<schema>.<table> →
             # scripts/<table>.py) so we compare the right pair, then cross-check.
@@ -1327,6 +1340,29 @@ def _fix_sync_partition_schema_arg(content: str) -> str:
     return _SYNC_CALL_RE.sub(_fix, content)
 
 
+# Deterministic guard for Trino DDL column types. `read_data_schema` reports the SOURCE SQL type
+# (Postgres/MySQL/Hive), and the architect intermittently copies it VERBATIM into setup_trino.sql
+# despite the standard's mapping — but several source types are NOT valid Trino types and crash
+# the CREATE TABLE at runtime with "Unknown type 'X'" (init-trino), aborting the whole job.
+# Normalise the unambiguous, syntactic source→Trino fixes (a finite map, one correct answer each).
+# This does NOT touch semantic choices (e.g. DOUBLE→DECIMAL for money vs INTEGER for a count) —
+# those stay the LLM's judgement; the guard only guarantees the DDL PARSES. \1 = the column name
+# (TEXT/STRING must be in type position, i.e. follow an identifier, so a column NAMED 'text' is
+# untouched). See CLAUDE.md "Deterministic generation guarantees".
+_TRINO_TYPE_FIXES = (
+    (re.compile(r"\bDOUBLE\s+PRECISION\b", re.IGNORECASE), "DOUBLE"),
+    (re.compile(r"\bCHARACTER\s+VARYING\b", re.IGNORECASE), "VARCHAR"),
+    (re.compile(r"(\b[A-Za-z_]\w*\s+)TEXT\b", re.IGNORECASE), r"\1VARCHAR"),
+    (re.compile(r"(\b[A-Za-z_]\w*\s+)STRING\b", re.IGNORECASE), r"\1VARCHAR"),
+)
+
+
+def _fix_trino_ddl_types(content: str) -> str:
+    for rx, rep in _TRINO_TYPE_FIXES:
+        content = rx.sub(rep, content)
+    return content
+
+
 # Deterministic Lakeview dashboard guarantee. The dashboard JSON is mechanically determined — a
 # fixed widget layout over the pipeline's Delta `_audit` table — yet the LLM intermittently
 # mangles the nested encodings (e.g. nesting `color`/`displayName` INSIDE `y.scale`), producing
@@ -1464,6 +1500,12 @@ def write_project_file(filename: str, content: str):
         content = _fix_fstring_double_braces(content)
         content = _fix_sync_partition_schema_arg(content)
 
+    # Trino DDL: map source-only column types the LLM copies verbatim (TEXT/STRING/DOUBLE
+    # PRECISION/CHARACTER VARYING) to valid Trino types — else CREATE TABLE crashes "Unknown
+    # type". Object-storage only (a Databricks Delta DDL legitimately uses STRING).
+    if filepath.endswith(".sql") and not _is_databricks_run():
+        content = _fix_trino_ddl_types(content)
+
     # Deterministic Lakeview dashboard: rebuild from the canonical structure so the LLM's mangled
     # nested encodings can't produce invalid JSON. The audit table name is reliably substituted by
     # the LLM → extract it and regenerate the whole dashboard. (See CLAUDE.md.)
@@ -1569,10 +1611,13 @@ def patch_project_file(filename: str, replacements: list) -> str:
         content = content.replace(old, new, 1)
         applied.append(f"replaced ({count}x): {repr(old[:60])}")
 
-    # Same deterministic Trino guard as the write path: a fix-mode patch can re-introduce the
-    # catalog-prefixed sync_partition_metadata schema arg ('hive.X' → 'X'). No-op when bare.
+    # Same deterministic Trino guards as the write path: a fix-mode patch can re-introduce the
+    # catalog-prefixed sync_partition_metadata schema arg ('hive.X' → 'X'), or a source-only DDL
+    # type (TEXT/STRING/DOUBLE PRECISION). No-op when already correct.
     if ext == ".py":
         content = _fix_sync_partition_schema_arg(content)
+    if ext == ".sql" and not _is_databricks_run():
+        content = _fix_trino_ddl_types(content)
 
     # Safety-net: never let a patch turn a parseable .py file into a syntactically broken
     # one. If the file compiled BEFORE the patch but the patched content does NOT, reject

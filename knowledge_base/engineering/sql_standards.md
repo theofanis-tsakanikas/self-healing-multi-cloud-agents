@@ -3,7 +3,7 @@ id: sql-standards
 applies_to: aws, azure, gcp (object-storage)
 primary_consumer: architect-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
 enforced_by: validate_generated_code (safety net) + agent prompts
-last_reviewed: 2026-06-14
+last_reviewed: 2026-06-15
 ---
 
 # STANDARD: TRINO DDL GENERATION
@@ -45,12 +45,14 @@ When generating `setup_trino.sql`, ensure the following:
         ) ...
         ```
     - `is_suspicious BOOLEAN`: add this column **only if** at least one `FLAG_AS_SUSPICIOUS` rule is defined in `TRANSFORMATION_LOGIC`. If no such rule exists, omit the column entirely from the DDL — adding it without a corresponding pipeline implementation creates a schema/data mismatch. Do not add it as a default or placeholder.
-    - Map discovered types as follows. **Preserve the type `read_data_schema` actually reports** — it returns the real SQL type per column (e.g. `cust_id (BIGINT)`), so use it directly instead of re-guessing from the column's meaning:
-        - String / text → `VARCHAR`
-        - Integer / count / quantity / **identifier** (e.g. `cust_id`, `customer_id`) → keep the discovered integer type: `INTEGER` stays `INTEGER`, `BIGINT` stays `BIGINT`. **NEVER downgrade an integer/BIGINT column to `VARCHAR`** just because it is an ID.
-        - Floating-point / financial amount → `DECIMAL(18,2)`
-        - Date-time → `TIMESTAMP`
+    - Map the discovered type to a **valid Trino type** as below. The discovered type guides the choice (e.g. an integer width), but you MUST emit a Trino type — **never copy a source-only type verbatim.** `read_data_schema` reports the SOURCE (Postgres/MySQL) type, and several source types are **NOT valid Trino types** — emitting them crashes `CREATE TABLE` at runtime with `Unknown type 'X'`:
+        - `TEXT`, `STRING`, `CHARACTER VARYING`, `VARCHAR(n)` (string / text) → **`VARCHAR`** ❌ `order_id TEXT` ✅ `order_id VARCHAR`
+        - `DOUBLE PRECISION`, `REAL`, `FLOAT` (floating-point) → **`DOUBLE`** ❌ `amount DOUBLE PRECISION` ✅ `amount DOUBLE` (and if it is a **monetary** value, prefer `DECIMAL(18,2)`)
+        - Integer / count / quantity / **identifier** (e.g. `cust_id`, `customer_id`) → keep the discovered integer width: `INTEGER` stays `INTEGER`, `BIGINT` stays `BIGINT`. **NEVER downgrade an integer/BIGINT column to `VARCHAR`** just because it is an ID.
+        - Floating-point **financial amount** → `DECIMAL(18,2)`
+        - Date-time (`TIMESTAMP WITHOUT TIME ZONE`, `DATE`+time) → `TIMESTAMP`
         - Boolean → `BOOLEAN`
+      **Rule of thumb:** the only column types that may appear in `setup_trino.sql` are `VARCHAR`, `INTEGER`, `BIGINT`, `DOUBLE`, `DECIMAL(p,s)`, `TIMESTAMP`, `DATE`, `BOOLEAN`. Anything else is a source type that was not mapped.
     - Do not apply `DECIMAL(18,2)` to quantity or count columns — reserve it for monetary values only. Example:
         ```sql
         unit_price DECIMAL(18,2),  -- ✅ monetary
