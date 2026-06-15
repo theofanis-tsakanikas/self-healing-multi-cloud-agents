@@ -1,7 +1,7 @@
 CREATE SCHEMA IF NOT EXISTS hive.sales_eu;
 DROP TABLE IF EXISTS hive.sales_eu.pipe_etl_pipeline_to_s3;
 CREATE TABLE hive.sales_eu.pipe_etl_pipeline_to_s3 (
-    order_id TEXT,
+    order_id VARCHAR,
     unit_price DECIMAL(18,2),
     quantity INTEGER,
     order_date TIMESTAMP,

@@ -22,7 +22,6 @@ elif _CLOUD == "azure":
 
 logging.basicConfig(level=logging.INFO)
 
-
 def run():
     logging.info("Pipeline starting: pipe_etl_pipeline_to_s3")
 
