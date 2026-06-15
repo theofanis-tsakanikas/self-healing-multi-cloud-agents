@@ -93,3 +93,8 @@ def test_pending_ci_repolls_in_python_without_the_llm():
     assert out.get("ci_poll_attempt", 0) == 1           # counter advanced
     assert out.get("mission_status", "") != "verified"  # not a false green
     llm_with_tools.invoke.assert_not_called()           # the LLM was NOT consulted on pending
+    # The fetch MUST be invoked with the REQUIRED project_id (no default) — passing only
+    # head_sha raises a pydantic 'Field required' and crashes the workflow engine.
+    _args = fetch_mock.invoke.call_args.args[0]
+    assert "project_id" in _args and _args["project_id"] == "PIPE-X"
+    assert _args["head_sha"] == "abc1234"

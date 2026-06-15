@@ -386,7 +386,9 @@ def medic_node(state: AgentState):
     _verif_tool = next((t for t in tools if t.name == "fetch_github_action_logs"), None)
     _push_sha = state.get("last_push_sha", "")
     if _verif_tool is not None and _push_sha:
-        _poll = str(_verif_tool.invoke({"head_sha": _push_sha}))
+        # project_id is REQUIRED by fetch_github_action_logs (no default) — pass it explicitly;
+        # the LLM-driven path used to fill it from the prompt, the deterministic path must too.
+        _poll = str(_verif_tool.invoke({"project_id": project_id, "head_sha": _push_sha}))
         _poll_msg = HumanMessage(content=f"[auto CI poll] {_poll}")
         messages.append(_poll_msg)
         new_messages_for_state.append(_poll_msg)
