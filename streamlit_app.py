@@ -2274,15 +2274,17 @@ with tab_nl:
         # no extra fields (reuses the same answers + rules via cloud_override="databricks").
         st.markdown(
             '<p style="color:#475569;font-size:0.8rem;margin:0.9rem 0 0.3rem;">'
-            'Prefer a lakehouse? Deploy the same pipeline on <b style="color:#ff6b57;">Databricks</b> '
-            '(Spark + Delta + Unity Catalog) — no extra fields. Needs the Databricks baseline + your '
-            'sample seeded into its source DB (Upload tab → cloud: databricks).</p>',
+            'Prefer a lakehouse instead? This runs the <b>same pipeline intent</b> as a '
+            '<b style="color:#ff6b57;">Databricks</b> lakehouse (Spark + Delta + Unity Catalog) — '
+            'a <b>separate</b> deploy, not in addition to the cloud above, no extra fields. '
+            'Needs the Databricks baseline + your sample seeded into its source DB '
+            '(Upload tab → cloud: databricks).</p>',
             unsafe_allow_html=True,
         )
         _db1, _ = st.columns([1, 2])
         with _db1:
-            if st.button("⚡ Also deploy on Databricks", key="nl_wizard_step3_databricks",
-                         type="secondary"):
+            if st.button("⚡ Or: deploy as a Databricks lakehouse instead",
+                         key="nl_wizard_step3_databricks", type="secondary"):
                 _db_ready, _db_why = _bootstrap_ready("databricks")
                 if not _db_ready:
                     st.error("🚫 " + _db_why)
