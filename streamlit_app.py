@@ -590,25 +590,45 @@ def _structure_messages(messages) -> list:
     """Turn a node super-step's delta messages into ordered sub-steps for the timeline:
     tool CALLS (name + args), tool RESULTS (output), and TEXT (the agent's own message).
     The architect/infra run their tools in-node, so a single super-step carries the whole
-    AIMessage(tool_calls)→ToolMessage(result) trace — exactly LangSmith's per-run detail."""
-    steps = []
+    AIMessage(tool_calls)→ToolMessage(result) trace — exactly LangSmith's per-run detail.
+
+    Each result is placed IMMEDIATELY AFTER the call it belongs to (matched by tool_call_id),
+    even when one LLM message issues several tool_calls at once (where the raw order is
+    call,call,…,result,result,…). Results whose call lives in an earlier super-step (the
+    medic → execute_tools split) are emitted standalone, in order."""
+    def _tc_field(tc, key, default):
+        return tc.get(key, default) if isinstance(tc, dict) else getattr(tc, key, default)
+
+    # Index this batch's results by their originating call id.
+    results_by_id = {}
+    for msg in messages:
+        tid = getattr(msg, "tool_call_id", None)
+        if tid is not None and not getattr(msg, "tool_calls", None):
+            results_by_id[tid] = {"kind": "result", "name": getattr(msg, "name", "") or "",
+                                  "text": str(getattr(msg, "content", "") or "")}
+
+    steps, consumed = [], set()
     for msg in messages:
         tcs = getattr(msg, "tool_calls", None)
         if tcs:
             for tc in tcs:
-                if isinstance(tc, dict):
-                    steps.append({"kind": "call", "name": tc.get("name", "tool"),
-                                  "args": tc.get("args", {}) or {}})
-                else:
-                    steps.append({"kind": "call", "name": getattr(tc, "name", "tool"),
-                                  "args": getattr(tc, "args", {}) or {}})
+                tid = _tc_field(tc, "id", None)
+                steps.append({"kind": "call", "name": _tc_field(tc, "name", "tool"),
+                              "args": _tc_field(tc, "args", {}) or {}})
+                if tid in results_by_id:          # interleave: result right after its call
+                    steps.append(results_by_id[tid])
+                    consumed.add(tid)
             txt = (getattr(msg, "content", "") or "")
             if isinstance(txt, str) and txt.strip():
                 steps.append({"kind": "text", "text": txt.strip()})
             continue
-        if getattr(msg, "tool_call_id", None) is not None:
-            steps.append({"kind": "result", "name": getattr(msg, "name", "") or "",
-                          "text": str(getattr(msg, "content", "") or "")})
+        tid = getattr(msg, "tool_call_id", None)
+        if tid is not None:
+            if tid not in consumed:               # call was in an earlier super-step
+                steps.append(results_by_id.get(tid, {
+                    "kind": "result", "name": getattr(msg, "name", "") or "",
+                    "text": str(getattr(msg, "content", "") or "")}))
+                consumed.add(tid)
             continue
         txt = getattr(msg, "content", "") or ""
         if isinstance(txt, str) and txt.strip():
@@ -2742,7 +2762,9 @@ if st.session_state.get("run_status") == "running":
                 if _node_statuses[k] == "active":
                     _node_statuses[k] = "failed"
 
-        # Final graph refresh
+        # Final graph refresh. Clear the active edge so no transition arrow keeps animating on
+        # the finished graph — the run is over, nothing is "in transit" any more.
+        _last_edge = None
         with graph_ph.container():
             components.html(
                 _render_agent_svg(_node_statuses, _last_edge, _run_counts), height=350)
