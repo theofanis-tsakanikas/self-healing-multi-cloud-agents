@@ -373,52 +373,14 @@ def medic_node(state: AgentState):
             "medic_fix_target": "",
         }
 
-    # 3a. DETERMINISTIC CI POLL (verification phase). The green/pending outcome is mechanically
-    # determined by the CI run state, so do NOT leave it to the LLM to (re-)call
-    # fetch_github_action_logs. gpt-4o-mini frequently SKIPS the re-call on a re-poll turn — it
-    # follows the prompt's "tell the user you are waiting and finish your turn" instead — so the
-    # Python poll loop stalls, the supervisor falls to its LLM fallback, and the run FINISHes with
-    # mission_status unset (MissionFailedError) on an otherwise-successful deploy. This was masked
-    # locally because the deploy was usually already green by the first poll; it surfaced when the
-    # run executes IN CI and the deploy workflow is still QUEUED. Fetch here, in Python: green →
-    # verified, pending → re-poll, only a REAL failure falls through to the LLM (whose job is the
-    # failure DIAGNOSIS, not the polling). See CLAUDE.md "Deterministic generation guarantees".
-    # FAIL-SAFE: the whole block is wrapped so the deterministic poll can NEVER crash the engine.
-    # On ANY error (bad args, network, tool change) it logs and falls through to the LLM-driven
-    # verification — the original, working path. So this is purely additive: best case it makes the
-    # poll deterministic; worst case it degrades to exactly the prior behaviour, never a hard crash.
-    _verif_tool = next((t for t in tools if t.name == "fetch_github_action_logs"), None)
-    _push_sha = state.get("last_push_sha", "")
-    if _verif_tool is not None and _push_sha:
-        try:
-            # project_id is REQUIRED by fetch_github_action_logs (no default) — pass it explicitly;
-            # the LLM-driven path filled it from the prompt, the deterministic path must too.
-            _poll = str(_verif_tool.invoke({"project_id": project_id, "head_sha": _push_sha}))
-            _poll_msg = HumanMessage(content=f"[auto CI poll] {_poll}")
-            messages.append(_poll_msg)
-            new_messages_for_state.append(_poll_msg)
-            if ("no failed jobs found" in _poll.lower()
-                    or "everything looks green" in _poll.lower()):
-                verification_successful = True
-            elif ("PENDING" in _poll.upper() or "PERMISSIONS_ERROR" in _poll.upper()
-                  or "could not list workflow runs" in _poll.lower()
-                  or "error resolving run" in _poll.lower()):
-                logs_still_pending = True
-        except Exception as _poll_err:
-            logger.warning(
-                f"Auto CI poll failed ({_poll_err}); falling back to LLM-driven verification.")
-        # else: a real CI failure — fall through to the reasoning loop for diagnosis / request_fix.
-
     # 3. REASONING LOOP
     fix_requested = False
     fix_signature_parts = []  # error text of each request_fix this turn → loop-convergence signature
     healing_context = ""  # Populated when request_fix is called; written to state for next agent
     for i in range(5):
-        # Stop once the CI run is confirmed green OR still pending (both set deterministically by
-        # the auto-poll above) — do NOT invoke the LLM, which could hallucinate a request_fix on an
-        # already-verified run, or skip the re-fetch on a pending one. The LLM only runs for a REAL
-        # failure (which leaves both flags False) so it can diagnose and request_fix.
-        if verification_successful or logs_still_pending:
+        # Stop once the CI run is confirmed green (set deterministically below) — do NOT re-invoke
+        # the LLM, which could then hallucinate a request_fix on an already-verified run.
+        if verification_successful:
             break
         response = llm_with_tools.invoke(messages)
         messages.append(response)
