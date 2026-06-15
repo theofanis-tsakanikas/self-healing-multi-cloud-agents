@@ -55,10 +55,41 @@ def test_green_ci_verifies_and_routes_to_supervisor():
 
 def test_green_ci_leaves_no_dangling_tool_call():
     # The whole bug: an unanswered tool_call routes to the ToolNode, not the supervisor.
+    # The CI poll is now deterministic (Python), so verification no longer goes through an LLM
+    # tool_call at all — but the invariant still holds and is STRONGER: the medic's last message
+    # must not be an AIMessage carrying an unanswered tool_call (which graph.should_continue would
+    # route to EXECUTE_TOOLS instead of the supervisor).
     out = _run_green_medic()
     answered = {m.tool_call_id for m in out["messages"] if isinstance(m, ToolMessage)}
     for m in out["messages"]:
         if isinstance(m, AIMessage) and m.tool_calls:
             for tc in m.tool_calls:
-                assert tc["id"] in answered, "green fetch tool_call left unanswered → EXECUTE_TOOLS loop"
-    assert isinstance(out["messages"][-1], ToolMessage)
+                assert tc["id"] in answered, "fetch tool_call left unanswered → EXECUTE_TOOLS loop"
+    last = out["messages"][-1]
+    assert not (isinstance(last, AIMessage) and last.tool_calls), \
+        "last message must not carry an unanswered tool_call → would route to EXECUTE_TOOLS"
+
+
+def test_pending_ci_repolls_in_python_without_the_llm():
+    # The CI-triggered failure: the deploy was QUEUED, so the auto-poll returns PENDING. The medic
+    # must re-poll deterministically (next_step='medic', counter++) WITHOUT consulting the LLM —
+    # gpt-4o-mini used to skip the re-fetch (prompt: "tell the user you are waiting"), stalling the
+    # loop so the supervisor's LLM fallback FINISHed with mission_status unset on a fine deploy.
+    pending = "PENDING: Run 27529330898 still in progress (status: queued). Retry later."
+    fetch_mock = MagicMock()
+    fetch_mock.name = "fetch_github_action_logs"
+    fetch_mock.invoke.return_value = pending
+    llm_with_tools = MagicMock()
+    llm = MagicMock()
+    llm.bind_tools.return_value = llm_with_tools
+
+    with patch.object(medic_mod, "get_llm", return_value=llm), \
+         patch.object(medic_mod, "fetch_github_action_logs", fetch_mock), \
+         patch.object(medic_mod, "time", MagicMock()), \
+         patch.object(medic_mod, "store_architectural_insight", MagicMock()):
+        out = medic_node(_green_state())
+
+    assert out["next_step"] == "medic"                  # re-poll, not FINISH
+    assert out.get("ci_poll_attempt", 0) == 1           # counter advanced
+    assert out.get("mission_status", "") != "verified"  # not a false green
+    llm_with_tools.invoke.assert_not_called()           # the LLM was NOT consulted on pending
