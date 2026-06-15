@@ -98,3 +98,24 @@ def test_pending_ci_repolls_in_python_without_the_llm():
     _args = fetch_mock.invoke.call_args.args[0]
     assert "project_id" in _args and _args["project_id"] == "PIPE-X"
     assert _args["head_sha"] == "abc1234"
+
+
+def test_auto_poll_failure_falls_back_to_llm_and_never_crashes():
+    # FAIL-SAFE: if the deterministic fetch raises (bad args / network / tool change), the medic
+    # must NOT crash the engine — it falls through to the LLM-driven verification (original path).
+    fetch_mock = MagicMock()
+    fetch_mock.name = "fetch_github_action_logs"
+    fetch_mock.invoke.side_effect = RuntimeError("boom — e.g. a missing required field")
+    ai = AIMessage(content="Waiting on CI; nothing to fix.")  # plain text → loop ends gracefully
+    llm_with_tools = MagicMock()
+    llm_with_tools.invoke.return_value = ai
+    llm = MagicMock()
+    llm.bind_tools.return_value = llm_with_tools
+
+    with patch.object(medic_mod, "get_llm", return_value=llm), \
+         patch.object(medic_mod, "fetch_github_action_logs", fetch_mock), \
+         patch.object(medic_mod, "store_architectural_insight", MagicMock()):
+        out = medic_node(_green_state())  # must NOT raise
+
+    assert out["next_step"] == "supervisor"   # graceful termination, no crash
+    llm_with_tools.invoke.assert_called()     # fell back to the LLM-driven path
