@@ -2456,6 +2456,14 @@ def fetch_github_action_logs(project_id: str, head_sha: str = "", run_id: str = 
 
     owner, repo = owner_repo
 
+    # The workflow filename is built as f"{project_id}_pipeline.yml", so project_id MUST be the
+    # BARE pipeline name (e.g. 'pipe_eu_sales_to_s3'). Callers occasionally pass the timestamped
+    # runtime PROJECT_ID ('PIPE_EU_SALES_TO_S3-20260615-0820') — that resolves to a non-existent
+    # workflow file → GitHub 404 → the deploy is wrongly reported unverified even when it SUCCEEDED.
+    # Normalise here: strip a trailing '-YYYYMMDD-HHMM' timestamp and lowercase. No-op for an
+    # already-bare name, so the long-working path is unchanged.
+    project_id = re.sub(r"-\d{8}-\d{4}$", "", project_id).lower()
+
     if head_sha:
         workflow_file = f"{project_id}_pipeline.yml"
         list_url = (
