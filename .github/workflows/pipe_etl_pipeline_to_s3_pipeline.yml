@@ -67,7 +67,7 @@ jobs:
 
       - name: Create DB Credentials Secret
         run: |
-          kubectl create secret generic pipe-eu-sales-etl-to-s3-db-credentials -n analytics \
+          kubectl create secret generic pipe-etl-pipeline-to-s3-db-credentials -n analytics \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy Pipeline Job to Kubernetes

@@ -10,7 +10,7 @@ terraform {
 
   backend "s3" {
     bucket         = "multi-cloud-agent-tf-state-bucket"
-    key            = "terraform/eu-sales-etl-insights/terraform.tfstate"
+    key            = "terraform/etl-pipeline-insights/terraform.tfstate"
     region         = "eu-central-1"
     dynamodb_table = "terraform-state-lock"
   }

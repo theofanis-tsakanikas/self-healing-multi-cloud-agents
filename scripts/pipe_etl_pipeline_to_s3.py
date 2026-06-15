@@ -13,11 +13,18 @@ from utils.cloud_config import cloud_get  # SSM → bootstrap_outputs → env fa
 
 _CLOUD = os.getenv("CLOUD_PROVIDER", "aws")
 
+if _CLOUD == "aws":
+    import boto3
+elif _CLOUD == "gcp":
+    from google.cloud import storage
+elif _CLOUD == "azure":
+    from azure.storage.blob import BlobServiceClient
+
 logging.basicConfig(level=logging.INFO)
 
 
 def run():
-    logging.info("Pipeline starting: pipe_etl_postgres_to_s3_to_s3")  # ← MUST be the very first line
+    logging.info("Pipeline starting: pipe_etl_pipeline_to_s3")
 
     # ── 1. IDEMPOTENCY CHECK ──────────────────────────────────────────────────
     run_date = datetime.date.today().isoformat()
@@ -28,21 +35,18 @@ def run():
     prefix = parsed.path.lstrip('/')
 
     if _CLOUD == "aws":
-        import boto3
         s3 = boto3.client('s3')
         response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
         if response.get('KeyCount', 0) > 0:
             logging.info(f"Partition run_date={run_date} already populated. Skipping.")
             return
     elif _CLOUD == "gcp":
-        from google.cloud import storage
         client = storage.Client()
         blobs = list(client.list_blobs(bucket, prefix=prefix, max_results=1))
         if blobs:
             logging.info("Destination already populated. Skipping.")
             return
     elif _CLOUD == "azure":
-        from azure.storage.blob import BlobServiceClient
         container_name = bucket.split('@')[0]
         client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))
         container = client.get_container_client(container_name)
@@ -80,8 +84,8 @@ def run():
     # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
-    rejected_by_reason = {}    # rule_name → cumulative dropped rows (one entry per row-removing rule)
-    query = "SELECT * FROM raw_eu_sales"  # replace with actual table from context
+    rejected_by_reason = {}    # rule_name → cumulative dropped rows
+    query = "SELECT * FROM raw_eu_sales"  # source table from context
 
     try:
         engine = create_engine(connection_string)
@@ -92,6 +96,7 @@ def run():
             chunk = chunk[chunk['unit_price'] > 0.0]
             rejected_by_reason['monetary_integrity'] = rejected_by_reason.get('monetary_integrity', 0) + (_before - len(chunk))
 
+            chunk['order_date'] = pd.to_datetime(chunk['order_date'], errors='coerce')
             _before = len(chunk)
             _future = chunk['order_date'] > pd.Timestamp.now()
             if _future.any():
@@ -127,7 +132,7 @@ def run():
         raise
 
     rejected_rows = sum(rejected_by_reason.values())
-    duration_seconds = time.time() - start_time   # for pipeline_duration_seconds metric
+    duration_seconds = time.time() - start_time
     logging.info(f"Pipeline completed. Rows: {total_rows}, rejected: {rejected_rows}, duration: {duration_seconds:.1f}s")
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
@@ -136,7 +141,7 @@ def run():
     cursor = conn.cursor()
     for _attempt in range(5):
         try:
-            cursor.execute("CALL hive.system.sync_partition_metadata('hive.sales_eu', 'pipe_etl_postgres_to_s3_to_s3', 'ADD')")
+            cursor.execute("CALL hive.system.sync_partition_metadata('hive', 'sales_eu', 'pipe_etl_pipeline_to_s3', 'ADD')")
             cursor.fetchall()
             break
         except Exception as _e:
