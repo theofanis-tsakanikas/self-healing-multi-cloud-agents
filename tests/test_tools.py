@@ -184,20 +184,28 @@ class TestCloudSdkImportGuard:
 
 
 class TestSyncPartitionSchemaArgGuard:
-    """The first arg to sync_partition_metadata is the BARE schema name. The LLM intermittently
-    catalog-prefixes it ('hive.sales_eu') despite explicit prompt+standard guidance, causing a
-    misleading runtime 'Table not found'. _fix_sync_partition_schema_arg strips it deterministically."""
+    """sync_partition_metadata takes EXACTLY 3 args (schema, table, mode); the catalog `hive`
+    belongs only in the `hive.system.` prefix. The LLM injects it into the args two ways — a
+    dotted first arg ('hive.sales_eu' → runtime "Table not found") or a separate 4th catalog arg
+    ('hive','schema',… → "Cannot cast varchar to boolean"). _fix_sync_partition_schema_arg
+    normalises BOTH to the 3-arg form."""
 
-    _BAD = ("cursor.execute(\"CALL hive.system.sync_partition_metadata("
-            "'hive.sales_eu', 'pipe_eu_sales_to_s3', 'ADD')\")\n")
     _GOOD = ("cursor.execute(\"CALL hive.system.sync_partition_metadata("
              "'sales_eu', 'pipe_eu_sales_to_s3', 'ADD')\")\n")
+    _DOTTED = ("cursor.execute(\"CALL hive.system.sync_partition_metadata("
+               "'hive.sales_eu', 'pipe_eu_sales_to_s3', 'ADD')\")\n")
+    _FOURARG = ("cursor.execute(\"CALL hive.system.sync_partition_metadata("
+                "'hive', 'sales_eu', 'pipe_eu_sales_to_s3', 'ADD')\")\n")
 
-    def test_catalog_prefix_is_stripped(self):
+    def test_dotted_prefix_is_stripped(self):
         from agents.tools import _fix_sync_partition_schema_arg
-        assert _fix_sync_partition_schema_arg(self._BAD) == self._GOOD
+        assert _fix_sync_partition_schema_arg(self._DOTTED) == self._GOOD
 
-    def test_bare_schema_is_noop(self):
+    def test_separate_catalog_arg_is_dropped(self):
+        from agents.tools import _fix_sync_partition_schema_arg
+        assert _fix_sync_partition_schema_arg(self._FOURARG) == self._GOOD
+
+    def test_correct_call_is_noop(self):
         from agents.tools import _fix_sync_partition_schema_arg
         assert _fix_sync_partition_schema_arg(self._GOOD) == self._GOOD
 
@@ -207,8 +215,7 @@ class TestSyncPartitionSchemaArgGuard:
         out = _fix_sync_partition_schema_arg(bad)
         assert "'marketing_global'" in out and "'hive.marketing_global'" not in out
 
-    def test_validator_flags_catalog_prefixed_schema(self, tmp_path):
-        # The validator reads from disk; simulate a script that bypassed the write/patch guard.
+    def _validate(self, tmp_path, call_line):
         from agents.tools import validate_generated_code
         (tmp_path / "scripts").mkdir()
         f = tmp_path / "scripts" / "pipe_x.py"
@@ -216,8 +223,19 @@ class TestSyncPartitionSchemaArgGuard:
             "import os\n"
             "from utils.cloud_config import cloud_get\n"
             "def run():\n"
-            "    cursor.execute(\"CALL hive.system.sync_partition_metadata("
-            "'hive.sales_eu', 'pipe_x', 'ADD')\")\n"
+            f"    cursor.execute(\"CALL hive.system.{call_line}\")\n"
         )
-        out = validate_generated_code.invoke({"filename": str(f)})
-        assert "TRINO" in out and "bare schema" in out.lower()
+        return validate_generated_code.invoke({"filename": str(f)})
+
+    def test_validator_flags_dotted_schema(self, tmp_path):
+        out = self._validate(tmp_path, "sync_partition_metadata('hive.sales_eu', 'pipe_x', 'ADD')")
+        assert "TRINO" in out
+
+    def test_validator_flags_four_arg_catalog(self, tmp_path):
+        out = self._validate(
+            tmp_path, "sync_partition_metadata('hive', 'sales_eu', 'pipe_x', 'ADD')")
+        assert "TRINO" in out
+
+    def test_validator_clean_on_correct_call(self, tmp_path):
+        out = self._validate(tmp_path, "sync_partition_metadata('sales_eu', 'pipe_x', 'ADD')")
+        assert "TRINO" not in out

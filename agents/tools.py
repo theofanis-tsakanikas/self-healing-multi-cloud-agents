@@ -320,20 +320,27 @@ def validate_generated_code(filename: str) -> str:
                 "rejected row) BEFORE comparing. See python_standards.md Business Rules section."
             )
 
-        # Trino partition sync: the FIRST arg to sync_partition_metadata is the BARE schema
-        # name — the catalog (`hive`) is already in `hive.system.sync_partition_metadata`. A
-        # catalog-prefixed arg ('hive.sales_eu') makes Trino look for a schema literally named
-        # 'hive.sales_eu' and fail at RUNTIME with "Table 'hive.sales_eu.<table>' not found".
-        # write_project_file/patch_project_file strip it deterministically; this is the safety
-        # net for any path that bypasses them.
-        if re.search(r"sync_partition_metadata\(\s*['\"][A-Za-z0-9_]+\.[A-Za-z0-9_]+['\"]", py_content):
-            errors.append(
-                "TRINO: sync_partition_metadata's first argument is catalog-prefixed (e.g. "
-                "'hive.sales_eu') — it must be the BARE schema name ('sales_eu'). The catalog "
-                "`hive` already lives in `hive.system.sync_partition_metadata`; prefixing it makes "
-                "Trino fail at runtime with a misleading \"Table 'hive.<schema>.<table>' not found\". "
-                "See python_standards.md Partition Registration."
-            )
+        # Trino partition sync: sync_partition_metadata takes EXACTLY 3 string args
+        # (schema, table, mode); the catalog (`hive`) belongs ONLY in the `hive.system.` prefix.
+        # The architect injects the catalog into the args two ways — a dotted first arg
+        # ('hive.sales_eu' → "Table not found") or a separate 4th catalog arg ('hive','schema',…
+        # → the mode is cast to the boolean case_sensitive param → "Cannot cast varchar to
+        # boolean"). write_project_file/patch_project_file normalise both; this is the safety net.
+        _sp = re.search(r"sync_partition_metadata\(([^)]*)\)", py_content)
+        if _sp:
+            _spargs = [a.strip() for a in _sp.group(1).split(",") if a.strip()]
+            _dotted = bool(_spargs and re.match(
+                r"^['\"][A-Za-z0-9_]+\.[A-Za-z0-9_]+['\"]$", _spargs[0]))
+            if len(_spargs) >= 4 or _dotted:
+                errors.append(
+                    "TRINO: sync_partition_metadata must take EXACTLY 3 string args "
+                    "('schema', 'table', 'ADD') — the catalog `hive` belongs ONLY in the "
+                    "`hive.system.` prefix, never in the arguments. A dotted arg "
+                    "('hive.sales_eu') fails at runtime with \"Table not found\"; a separate "
+                    "catalog arg ('hive', 'schema', 'table', 'ADD') makes the mode get cast to "
+                    "the boolean case_sensitive param → \"Cannot cast varchar to boolean\". "
+                    "See python_standards.md Partition Registration."
+                )
 
         # Cloud guard: cloud_get() for a specific cloud must be inside the matching
         # if _CLOUD == "..." block. An unguarded call hardcodes a provider and breaks
@@ -1290,22 +1297,34 @@ def _fix_fstring_double_braces(content: str) -> str:
     )
 
 
-# Deterministic guard for the sync_partition_metadata schema argument. Its FIRST arg is the
-# BARE schema name — the catalog (`hive`) already lives in `hive.system.sync_partition_metadata`.
-# The architect intermittently catalog-prefixes it ('hive.sales_eu') DESPITE explicit ❌/✅
-# guidance in BOTH the prompt (architect.md) and the standard (python_standards.md). Trino then
-# looks for a schema literally named 'hive.sales_eu' and raises "Table 'hive.sales_eu.<table>'
-# not found" — but only at RUNTIME, and only from the PIPELINE's call: init-trino's separate
-# (correct, bare-name) CALL succeeds first, masking the bug until the job runs. Strip the catalog
-# prefix from the first string arg → a generation guarantee, not an output patch. No-op when the
-# arg is already bare. See CLAUDE.md "Deterministic generation guarantees".
-_SYNC_SCHEMA_RE = re.compile(
-    r"(sync_partition_metadata\(\s*)(['\"])[A-Za-z0-9_]+\.([A-Za-z0-9_]+)\2"
-)
+# Deterministic guard for the sync_partition_metadata arguments. The procedure takes EXACTLY
+# three string args — (schema, table, mode) — with the catalog living ONLY in the
+# `hive.system.` prefix. The architect intermittently injects the catalog INTO the args, in two
+# shapes, DESPITE explicit ❌/✅ guidance in both the prompt (architect.md) and the standard
+# (python_standards.md):
+#   ❌ ('hive.sales_eu', 'tbl', 'ADD')      → Trino looks for schema 'hive.sales_eu' →
+#                                              "Table 'hive.sales_eu.tbl' not found"
+#   ❌ ('hive', 'sales_eu', 'tbl', 'ADD')   → 4 args: the mode 'ADD' lands in the boolean
+#                                              case_sensitive param → "Cannot cast varchar to boolean"
+#   ✅ ('sales_eu', 'tbl', 'ADD')
+# Both fail only at RUNTIME (init-trino's own CALL uses the correct form, masking it). Normalise
+# to the 3-arg form → a generation guarantee, not a patch. No-op when already correct. See
+# CLAUDE.md "Deterministic generation guarantees".
+_SYNC_CALL_RE = re.compile(r"sync_partition_metadata\(([^)]*)\)")
+_SYNC_PREFIX_RE = re.compile(r"^(['\"])[A-Za-z0-9_]+\.([A-Za-z0-9_]+)\1$")
 
 
 def _fix_sync_partition_schema_arg(content: str) -> str:
-    return _SYNC_SCHEMA_RE.sub(r"\g<1>\g<2>\g<3>\g<2>", content)
+    def _fix(m):
+        args = [a.strip() for a in m.group(1).split(",") if a.strip()]
+        # Form 2: a spurious leading catalog arg → drop it (our calls are always 3-arg).
+        if len(args) == 4:
+            args = args[1:]
+        # Form 1: catalog prefix inside the (now first) schema arg → strip it.
+        if args:
+            args[0] = _SYNC_PREFIX_RE.sub(r"\1\2\1", args[0])
+        return "sync_partition_metadata(" + ", ".join(args) + ")"
+    return _SYNC_CALL_RE.sub(_fix, content)
 
 
 # Deterministic Lakeview dashboard guarantee. The dashboard JSON is mechanically determined — a

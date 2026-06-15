@@ -383,11 +383,17 @@ def run():
     # variables: the model tends to fill the real value into BOTH the assignment AND the string,
     # leaving the variable unused (ruff F841) and the f-string placeholder-less (ruff F541). Use
     # a PLAIN string (no f-prefix) with the literals inlined.
-    # The schema is the BARE middle segment of `hive.<schema>.<table>` — NEVER catalog-prefix it
-    # (the catalog comes from `hive.system.` below; prefixing duplicates it → "schema not found"):
-    #   ❌ CALL hive.system.sync_partition_metadata('hive.marketing_global', 'orders', 'ADD')  → crash
+    # sync_partition_metadata takes EXACTLY THREE args: ('<schema>', '<table>', 'ADD'). The
+    # catalog `hive` lives ONLY in the `hive.system.` prefix — NEVER inside the args, in either
+    # of these two wrong shapes:
+    #   ❌ CALL hive.system.sync_partition_metadata('hive.marketing_global', 'orders', 'ADD')
+    #        → Trino looks for a schema named 'hive.marketing_global' → "Table ... not found"
+    #   ❌ CALL hive.system.sync_partition_metadata('hive', 'marketing_global', 'orders', 'ADD')
+    #        → 4 args: the mode 'ADD' is cast to the boolean case_sensitive param →
+    #          "Cannot cast type varchar(3) to boolean"
     #   ✅ CALL hive.system.sync_partition_metadata('marketing_global', 'orders', 'ADD')
-    # If the objective shows the target as `hive.<schema>.<table>`, use only the middle segment.
+    # The schema is the BARE middle segment of `hive.<schema>.<table>`. If the objective shows the
+    # target fully-qualified, use only the middle segment — and never add `hive` as its own arg.
     # Retry the partition registration. A freshly-started Trino coordinator (the init container
     # creates this table only seconds before the pipeline runs) may not yet see it in its Glue
     # catalog and raises "Table ... not found" TRANSIENTLY — the table IS in Glue and becomes
