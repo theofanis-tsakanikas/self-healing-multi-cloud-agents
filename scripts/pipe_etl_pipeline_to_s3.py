@@ -57,35 +57,34 @@ def run():
 
     # ── 2. CREDENTIALS via cloud_get() ───────────────────────────────────────
     if _CLOUD == "aws":
-        host = cloud_get("aws", "db_host",     db_type="postgres")
-        port = cloud_get("aws", "db_port",     db_type="postgres") or "5432"
-        user = cloud_get("aws", "db_user",     db_type="postgres")
-        pw   = cloud_get("aws", "db_password", db_type="postgres")
-        db   = cloud_get("aws", "db_name",     db_type="postgres")
+        host = cloud_get("aws", "db_host", db_type="postgres")
+        port = cloud_get("aws", "db_port", db_type="postgres") or "5432"
+        user = cloud_get("aws", "db_user", db_type="postgres")
+        pw = cloud_get("aws", "db_password", db_type="postgres")
+        db = cloud_get("aws", "db_name", db_type="postgres")
         connection_string = (
-            f"postgresql+psycopg2://{user}:{pw}"
-            f"@{host}:{port}/{db}"
+            f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
         )
     elif _CLOUD == "gcp":
-        host = cloud_get("gcp", "db_host",     db_type="mysql")
-        port = cloud_get("gcp", "db_port",     db_type="mysql") or "3306"
-        user = cloud_get("gcp", "db_user",     db_type="mysql")
-        pw   = cloud_get("gcp", "db_password", db_type="mysql")
-        db   = cloud_get("gcp", "db_name",     db_type="mysql")
+        host = cloud_get("gcp", "db_host", db_type="mysql")
+        port = cloud_get("gcp", "db_port", db_type="mysql") or "3306"
+        user = cloud_get("gcp", "db_user", db_type="mysql")
+        pw = cloud_get("gcp", "db_password", db_type="mysql")
+        db = cloud_get("gcp", "db_name", db_type="mysql")
         connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
     elif _CLOUD == "azure":
-        host = cloud_get("azure", "db_host",     db_type="postgres")
-        port = cloud_get("azure", "db_port",     db_type="postgres") or "5432"
-        user = cloud_get("azure", "db_user",     db_type="postgres")
-        pw   = cloud_get("azure", "db_password", db_type="postgres")
-        db   = cloud_get("azure", "db_name",     db_type="postgres")
+        host = cloud_get("azure", "db_host", db_type="postgres")
+        port = cloud_get("azure", "db_port", db_type="postgres") or "5432"
+        user = cloud_get("azure", "db_user", db_type="postgres")
+        pw = cloud_get("azure", "db_password", db_type="postgres")
+        db = cloud_get("azure", "db_name", db_type="postgres")
         connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
 
     # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
     rejected_by_reason = {}    # rule_name → cumulative dropped rows
-    query = "SELECT * FROM raw_eu_sales"  # source table from context
+    query = "SELECT * FROM raw_eu_sales"  # source table
 
     try:
         engine = create_engine(connection_string)
@@ -141,7 +140,7 @@ def run():
     cursor = conn.cursor()
     for _attempt in range(5):
         try:
-            cursor.execute("CALL hive.system.sync_partition_metadata('hive', 'sales_eu', 'pipe_etl_pipeline_to_s3', 'ADD')")
+            cursor.execute("CALL hive.system.sync_partition_metadata('sales_eu', 'pipe_etl_pipeline_to_s3', 'ADD')")
             cursor.fetchall()
             break
         except Exception as _e:
@@ -154,7 +153,7 @@ def run():
 
     # ── 5. METRICS EMISSION ───────────────────────────────────────────────────
     pushgateway_url = os.getenv("PUSHGATEWAY_URL", "http://pushgateway.monitoring.svc.cluster.local:9091")
-    project_id     = os.getenv("PROJECT_ID", "unknown")
+    project_id = os.getenv("PROJECT_ID", "unknown")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")
 
     registry = CollectorRegistry()
