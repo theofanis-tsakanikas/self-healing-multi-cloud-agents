@@ -3,7 +3,7 @@ id: python-standards
 applies_to: aws, azure, gcp (object-storage)
 primary_consumer: architect-agent   # retrieved via Pinecone (query_vector_store); medic may also retrieve it
 enforced_by: validate_generated_code (safety net) + agent prompts
-last_reviewed: 2026-06-11
+last_reviewed: 2026-06-15
 ---
 
 # STANDARD: PYTHON DATA PIPELINES
@@ -18,7 +18,7 @@ These violations cause immediate runtime failure. No exceptions.
 
 ### Code syntax — single braces only
 - The generated file is a plain Python script — it is NOT a template and is NOT passed through `.format()`. Use a SINGLE pair of braces for an f-string placeholder: `f"{var}"`. For the empty `storage_options` dict, use **`dict()`** — it has no braces, so it can never be accidentally double-braced.
-- **Never double the braces.** Wrapping an f-string placeholder in a second pair of braces cancels the substitution — it emits the literal placeholder text and trips ruff `F541`. (The empty `storage_options` uses `dict()` specifically to sidestep the equivalent `{{}}` trap, which would build a set containing a dict → `TypeError: unhashable type: dict` at runtime.) The remaining brace site is the part-file f-string; it takes exactly one pair:
+- **Never double the braces** — a second pair cancels the substitution (emits the literal text, trips ruff `F541`). `storage_options=dict()` sidesteps the `{{}}` trap (which builds a set-of-dict → `TypeError: unhashable type: dict`). The one brace site is the part-file f-string — exactly one pair:
 ```python
 # ✅ CORRECT — dict() for the empty options, one pair of braces in the f-string:
 chunk.to_parquet(f"{partition_uri}part_{i}.parquet", storage_options=dict())
@@ -29,7 +29,7 @@ chunk.to_parquet(f"{partition_uri}part_{i}.parquet", storage_options=dict())
 - Import: `from utils.cloud_config import cloud_get` — place after standard library imports, before cloud SDK block.
 - Connection strings MUST use double-quoted outer f-strings to avoid `SyntaxError: f-string: unmatched '('`.
 - Every `cloud_get()` call and the `connection_string` assignment MUST be inside a cloud-specific guard (`if _CLOUD == "aws":` / `elif _CLOUD == "gcp":` / `elif _CLOUD == "azure":`). An unguarded `cloud_get("aws", ...)` hardcodes AWS credentials into a supposedly cloud-agnostic script — it will fail silently when `CLOUD_PROVIDER=gcp` or `CLOUD_PROVIDER=azure` because the wrong credential keys are resolved.
-- **Emit the FULL three-cloud skeleton verbatim — keep ALL THREE branches (`if _CLOUD == "aws":` / `elif _CLOUD == "gcp":` / `elif _CLOUD == "azure":`), each with a REAL body, in the cloud-SDK import block, the idempotency block, AND the credentials block.** The script is cloud-agnostic: only the branch matching `CLOUD_PROVIDER` runs at runtime (conditional imports load only the active cloud's SDK), so carrying all three is correct and **always valid** — this is exactly the structure the validated AWS and Azure pipelines use. **Do NOT collapse to a single branch and do NOT drop the others.** Collapsing is where the model intermittently flattens away the `if _CLOUD ==` guard (→ CLOUD-GUARD failure) or drops the cloud-SDK import (→ F821 `Undefined name`). And **NEVER** leave a branch empty or comment-only (`# Add AWS credentials logic here`): a comment-only `if`/`elif` body is a `SyntaxError` that `patch_project_file`'s safety-net rejects, dead-looping the self-heal. Every branch gets the same real implementation shown in the skeleton.
+- **Emit the FULL three-cloud skeleton verbatim** — keep ALL THREE branches (`if _CLOUD == "aws":` / `elif _CLOUD == "gcp":` / `elif _CLOUD == "azure":`), each with a REAL body, in the cloud-SDK import, idempotency, AND credentials blocks. Only the active `CLOUD_PROVIDER` branch runs (imports are conditional), so all three are always valid — the structure the validated AWS/Azure pipelines use. **Do NOT collapse to one branch or drop the others** (collapsing flattens the `if _CLOUD ==` guard → CLOUD-GUARD failure, or drops the SDK import → F821). **NEVER** leave a branch empty/comment-only (e.g. `# Add AWS logic here`) — a comment-only body is a `SyntaxError` that `patch_project_file` rejects, dead-looping the self-heal.
 ```python
 # ❌ WRONG — unguarded, breaks on GCP/Azure:
 host = cloud_get("aws", "db_host", db_type="postgres")
@@ -102,11 +102,11 @@ The config expresses rules in business language. The architect resolves them to 
 | `DEFAULT_VALUE` | `chunk[col] = chunk[col].where(condition, other=default)` |
 | `FLAG_AS_SUSPICIOUS` | accumulate with `\|`: `chunk['is_suspicious'] = flag_rule1 \| flag_rule2` |
 
-**Numeric comparison columns — coerce, NEVER `.astype(float)`:** any column compared numerically (`> 0`, `>= 0`, `<`, range checks) may carry dirty/non-numeric values from the source (e.g. `'not_a_number'`, empty strings). Coerce it with `pd.to_numeric(chunk[col], errors='coerce')` (assign it back) **before** the comparison — dirty values become `NaN`, which the comparison then drops as a normal rejected row, and the surviving column is real numeric for the typed parquet write. **NEVER use `chunk[col].astype(float)`**: it raises `ValueError: could not convert string to float` on the FIRST bad value and crashes the ENTIRE pipeline instead of rejecting that one row. (`.astype('Int64')` for the final integer cast is unrelated and still required — see Storage.)
+**Numeric comparison columns — coerce, NEVER `.astype(float)`:** a column compared numerically (`> 0`, `>= 0`, ranges) may carry dirty values (`'not_a_number'`, empty). Coerce with `pd.to_numeric(chunk[col], errors='coerce')` (assign back) **before** comparing — dirty → `NaN` → dropped as a rejected row; survivors are real numeric for the typed write. **NEVER `chunk[col].astype(float)`** — it raises `ValueError` on the first bad value and crashes the whole pipeline. (`.astype('Int64')` for the final integer cast is separate and still required — see Storage.)
 
-**Temporal/date comparison columns — coerce with `pd.to_datetime` FIRST:** any column compared to a date/`Timestamp` (`> pd.Timestamp.now()`, date-range checks) may arrive as a **STRING** from the source (a VARCHAR/text column → pandas `large_string`). `str > Timestamp` raises `TypeError: Invalid comparison between dtype=str and Timestamp` and crashes the ENTIRE pipeline. Coerce it **before** the comparison with `chunk[col] = pd.to_datetime(chunk[col], errors='coerce')` (assign it back) — unparseable/dirty values become `NaT` (dropped as a normal rejected row, never matched as "future"), and the column is real datetime. EXACTLY like `pd.to_numeric` for numeric columns. (The eu_sales source column happened to be a real DATE type so it survived without this — **do NOT rely on that; ALWAYS coerce.**)
+**Temporal/date comparison columns — coerce with `pd.to_datetime` FIRST:** a column compared to a date/`Timestamp` may arrive as a **STRING** (VARCHAR/text). `str > Timestamp` raises `TypeError: Invalid comparison between dtype=str and Timestamp` and crashes the pipeline. Coerce **before** comparing: `chunk[col] = pd.to_datetime(chunk[col], errors='coerce')` — dirty → `NaT` (dropped, never matched as "future"). Exactly like `pd.to_numeric`. ALWAYS coerce — do not rely on a source DATE type.
 
-**Worked example** — EU Sales pipeline (6 rules → 5 matched columns). **CRITICAL: each row-removing rule MUST take a FRESH `_before = len(chunk)` immediately before ITS OWN filter.** A single shared `_before` captured once at the top is the most common bug — it makes every rule report the *cumulative* drop so far (`_before - len(chunk)`), so the deltas double-count and `sum(by_reason)` explodes far above the real total. The fresh-per-rule reading is what guarantees the invariant `sum(rejected_by_reason.values()) == rejected_rows`.
+**Worked example** — EU Sales (6 rules → 5 columns). **Each row-removing rule MUST take a FRESH `_before = len(chunk)` immediately before ITS OWN filter** — a single shared `_before` makes every rule report the *cumulative* drop, so the deltas double-count and `sum(by_reason)` explodes. Fresh-per-rule guarantees `sum(rejected_by_reason.values()) == rejected_rows`.
 ```python
 # monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
 chunk['unit_price'] = pd.to_numeric(chunk['unit_price'], errors='coerce')  # dirty/non-numeric → NaN
@@ -139,15 +139,12 @@ chunk['currency'] = chunk['currency'].where(chunk['currency'].isin(['EUR', 'GBP'
 #   (FLAG_AS_SUSPICIOUS does not remove rows → no rejected_by_reason entry)
 chunk['is_suspicious'] = (chunk['quantity'] >= 1000) | (chunk['quantity'] <= 0)
 ```
-After the chunk loop, DERIVE the scalar total from the per-reason dict — do NOT maintain a
-separate `rejected_rows +=` counter inside the loop (the LLM reliably updates it after only
-one rule, so the scalar disagrees with the per-reason sum):
+After the chunk loop, DERIVE the scalar total from the per-reason dict — do NOT keep a separate
+`rejected_rows +=` counter inside the loop (the LLM updates it after only one rule → it disagrees
+with the per-reason sum):
 ```python
 rejected_rows = sum(rejected_by_reason.values())   # single source of truth
 ```
-This makes `rejected_rows == sum(rejected_by_reason.values())` true by construction, so the
-Rejection Rate panel (uses the scalar) and the Rejections-by-Reason panel (uses the dict)
-can never disagree.
 Column names (`unit_price`, `order_date`, `order_id`, `currency`, `quantity`) come from `read_data_schema` — never invented or hardcoded from the `target_criteria` description. The `reason` keys (`monetary_integrity`, `temporal_validity`, `completeness_enforcement`) are the rule names straight from `quality_standards` — never hardcoded literals invented by the architect.
 
 ### PII anonymization (ONLY when `pii_sensitive: true`)
@@ -187,8 +184,8 @@ for col in int_cols:
   - **Four scalar metrics** with `['project_id', 'cloud_provider']` labels: `pipeline_rows_processed_total` (volume), `pipeline_last_success_timestamp` (freshness), `pipeline_rows_rejected_total` (data quality — total), `pipeline_duration_seconds` (performance).
   - **One labeled metric** `pipeline_rows_rejected_by_reason` with `['project_id', 'cloud_provider', 'reason']` labels — emits **one series per business rule**, where `reason` is the rule name from `quality_standards`. This is the per-rule breakdown of the total `pipeline_rows_rejected_total`.
   The Grafana dashboard renders one panel per metric — omitting any leaves a "No data" panel.
-- **Per-rule attribution (pipeline-agnostic — never hardcode reasons):** maintain a `rejected_by_reason` dict (`rule_name → cumulative dropped rows`). Each `DROP_RECORD` / `EXCLUDE_AND_LOG` rule wraps its filter with its OWN FRESH `_before = len(chunk)` (taken immediately before that rule's filter) and adds the delta under its own rule name. `DEFAULT_VALUE` / `FLAG_AS_SUSPICIOUS` do not remove rows, so they get no entry.
-- `rejected_rows` (scalar total) is **DERIVED** after the loop as `sum(rejected_by_reason.values())` — never a separate in-loop `+=` counter (that reliably drifts out of sync). `duration_seconds` is `time.time() - start_time` captured after the extract loop. See the skeleton.
+- **Per-rule attribution (never hardcode reasons):** maintain a `rejected_by_reason` dict (`rule_name → dropped rows`); each `DROP_RECORD`/`EXCLUDE_AND_LOG` rule adds its delta under its own rule name (fresh `_before` per rule — see Business Rules). `DEFAULT_VALUE`/`FLAG_AS_SUSPICIOUS` remove no rows → no entry.
+- `rejected_rows` is **DERIVED** after the loop as `sum(rejected_by_reason.values())` — never an in-loop `+=` (it drifts out of sync). `duration_seconds = time.time() - start_time` after the extract loop. See the skeleton.
 
 ---
 
