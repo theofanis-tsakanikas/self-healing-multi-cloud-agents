@@ -1,20 +1,21 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pipe-eu-sales-to-s3-job
+  name: pipe-crm-us-to-azure-job
   namespace: analytics
   labels:
-    project_id: pipe_eu_sales_to_s3
+    project_id: pipe_crm_us_to_azure
     component: pipeline-job
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        project_id: pipe_eu_sales_to_s3
+        project_id: pipe_crm_us_to_azure
         component: pipeline-job
+        azure.workload.identity/use: "true"
     spec:
-      serviceAccountName: eu-sales-insights-sa
+      serviceAccountName: us-crm-insights-sa
       restartPolicy: Never
       initContainers:
       - name: init-trino
@@ -32,21 +33,21 @@ spec:
           mountPath: /scripts
       containers:
       - name: pipeline
-        image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
+        image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:latest
         env:
         - name: PROJECT_ID
-          value: "pipe_eu_sales_to_s3"
+          value: "pipe_crm_us_to_azure"
         - name: CLOUD_PROVIDER
-          value: "aws"
+          value: "azure"
         - name: DESTINATION_URI
-          value: "s3://eu-sales-insights-data/processed/"
+          value: "abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/"
         - name: TRINO_HOST
           value: "trino.analytics.svc.cluster.local"
         - name: PUSHGATEWAY_URL
           value: "http://pushgateway.monitoring.svc.cluster.local:9091"
         envFrom:
         - secretRef:
-            name: pipe-eu-sales-to-s3-db-credentials
+            name: pipe-crm-us-to-azure-db-credentials
         resources:
           requests:
             memory: "1Gi"

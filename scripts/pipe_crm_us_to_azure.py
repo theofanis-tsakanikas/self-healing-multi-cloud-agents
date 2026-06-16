@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 def run():
-    logging.info("Pipeline starting: pipe_crm_us_to_azure")
+    logging.info("Pipeline starting: pipe_crm_us_to_azure")  # ← MUST be the very first line
 
     # ── 1. IDEMPOTENCY CHECK ──────────────────────────────────────────────────
     run_date = datetime.date.today().isoformat()
@@ -80,15 +80,13 @@ def run():
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
     rejected_by_reason = {}
-
     query = "SELECT * FROM raw_us_crm"  # source table from context
 
     try:
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
             # PII Anonymization
-            chunk['full_name'] = chunk['full_name'].apply(
-                lambda v: hashlib.sha256(str(v).encode()).hexdigest())
+            chunk['full_name'] = chunk['full_name'].apply(lambda v: hashlib.sha256(str(v).encode()).hexdigest())
             chunk['email_address'] = chunk['email_address'].str.replace(r'(?<=.).*?(?=@)', '***', regex=True)
             chunk['phone_number'] = chunk['phone_number'].astype(str).str.replace(r'\d(?=\d{4})', '*', regex=True)
 

@@ -12,4 +12,3 @@ CREATE TABLE hive.crm_us.pipe_crm_us_to_azure (
     external_location = 'abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/',
     partitioned_by = ARRAY['run_date']
 );
-CALL hive.system.sync_partition_metadata('crm_us', 'pipe_crm_us_to_azure', 'ADD');
