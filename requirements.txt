@@ -3,6 +3,6 @@ sqlalchemy
 pyarrow
 trino
 prometheus-client
-boto3
-s3fs
+azure-storage-blob
+adlfs
 psycopg2-binary

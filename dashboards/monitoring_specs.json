@@ -1,6 +1,6 @@
 {
-  "uid": "eu-sales-data-observability",
-  "title": "EU Sales Data Observability",
+  "uid": "us-crm-data-observability",
+  "title": "US Crm Data Observability",
   "schemaVersion": 37,
   "version": 1,
   "refresh": "5m",
@@ -10,8 +10,8 @@
   },
   "tags": [
     "data-pipeline",
-    "eu-sales",
-    "aws"
+    "us-crm",
+    "azure"
   ],
   "templating": {
     "list": [

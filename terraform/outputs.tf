@@ -1,15 +1,28 @@
-output "bucket_name" {
-  value = aws_s3_bucket.data_bucket.bucket
+output "storage_account_name" {
+  value = azurerm_storage_account.data.name
+
+
+output "container_name" {
+  value = azurerm_storage_container.data.name
+}
+  value = azurerm_storage_container.data.name
 }
 
-output "bucket_arn" {
-  value = aws_s3_bucket.data_bucket.arn
+output "managed_identity_client_id" {
+  value = data.azurerm_user_assigned_identity.pipeline.client_id
+}
+  value = data.azurerm_user_assigned_identity.pipeline.client_id
 }
 
-output "iam_policy_arn" {
-  value = aws_iam_policy.s3_access_policy.arn
+output "managed_identity_id" {
+  value = data.azurerm_user_assigned_identity.pipeline.id
+}
+  value = data.azurerm_user_assigned_identity.pipeline.id
+}
 }
 
-output "region" {
-  value = var.region
+output "resource_group_name" {
+  value = data.azurerm_resource_group.main.name
+}
+  value = data.azurerm_resource_group.main.name
 }
