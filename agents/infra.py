@@ -784,9 +784,13 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                             if tracked_key and tracked_key in updated_files:
                                 updated_files.remove(tracked_key)
                                 logger.info(f"↩️ Removed '{tracked_key}' from tracking — validation failed, will regenerate.")
+                            # The "in '<file>'" phrasing is REQUIRED — the medic's
+                            # _AUTOVAL_FAIL_RE keys the VALIDATION SUMMARY off it. Without it the
+                            # summary is empty and the medic hallucinates a generic diagnosis.
                             result_str = (
                                 f"{result_str}\n\n"
-                                f"AUTO-VALIDATION FAILED — fix these errors and call the same generation tool again with corrected content:\n"
+                                f"AUTO-VALIDATION FAILED — fix these errors in '{auto_validate_path}' "
+                                f"and call the same generation tool again with corrected content:\n"
                                 f"{validation_result}"
                             )
                         else:

@@ -1761,6 +1761,27 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
 _CANONICAL_TF_FILES = frozenset({"providers.tf", "main.tf", "variables.tf", "outputs.tf"})
 
 
+def _fix_terraform_stray_brace(content: str) -> str:
+    """Deterministic repair for the recurring stray-'}' slip in generated .tf
+    (almost always at the tail of outputs.tf): the LLM intermittently emits one
+    extra standalone '}' that closes a block already closed, which fails
+    `terraform init` with 'Argument or block definition required'. A '}' seen at
+    brace-depth 0 closes nothing — it is unambiguously illegal HCL — so we drop
+    exactly those standalone '}' lines. Acts ONLY when '}' outnumber '{' (a
+    balanced/valid file is returned untouched), so the four validated clouds'
+    terraform is never altered. Assumes no lone brace inside a string literal,
+    which holds for our generated .tf (same assumption as the validator)."""
+    if content.count("}") <= content.count("{"):
+        return content
+    out, depth = [], 0
+    for line in content.split("\n"):
+        if line.strip() == "}" and depth <= 0:
+            continue  # closes nothing → stray extra brace, drop the line
+        depth += line.count("{") - line.count("}")
+        out.append(line)
+    return "\n".join(out)
+
+
 @tool
 def write_terraform_config(filename: str, content: str):
     """
@@ -1773,6 +1794,9 @@ def write_terraform_config(filename: str, content: str):
     # Sanitize escape sequences the LLM emits as literal characters.
     # \\n → real newline, \\" → real quote — both are invalid HCL syntax.
     sanitized = content.replace("\\n", "\n").replace('\\"', '"')
+    # Deterministic guard: drop an LLM-emitted stray '}' (recurring slip at the tail
+    # of outputs.tf) before it reaches disk → terraform init / the validator / the medic.
+    sanitized = _fix_terraform_stray_brace(sanitized)
 
     try:
         with open(target_path, "w", encoding="utf-8") as f:
