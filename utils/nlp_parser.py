@@ -25,6 +25,7 @@ from pydantic import BaseModel, field_validator, ValidationError
 from openai import OpenAI
 from dotenv import load_dotenv
 from agents.constants import CONFIGS_DIR
+from utils.cloud_config import _ENV_FALLBACKS
 from utils.llm_defaults import NL_MODEL
 
 load_dotenv()
@@ -1176,15 +1177,26 @@ def _build_from_answers(
         f"{cloud}_setup": cloud_setup,
     }
 
-    env_prefix = {"postgres": "POSTGRES_DB", "mysql": "MYSQL_DB", "sqlite": "SQLITE"}[db_type]
+    # Env-var names are the SINGLE SOURCE OF TRUTH in _ENV_FALLBACKS, keyed by
+    # (cloud, db_type) — that is exactly what cloud_get() reads at runtime. azure+postgres
+    # → CRM_DB_*, aws/gcp → POSTGRES_DB_* / MYSQL_DB_*. Deriving from a db_type-only prefix
+    # (ignoring cloud) emitted POSTGRES_DB_* on azure, which cloud_get could not resolve →
+    # "user None" auth failure. Fall back to the db_type prefix for engines with no fallback
+    # table entry (e.g. sqlite).
+    _prefix = {"postgres": "POSTGRES_DB", "mysql": "MYSQL_DB", "sqlite": "SQLITE"}[db_type]
+
+    def _env_var(generic_key: str) -> str:
+        suffix = generic_key.replace("db_", "").upper()  # db_host -> HOST
+        return _ENV_FALLBACKS.get((cloud, db_type, generic_key), f"{_prefix}_{suffix}")
+
     db_conf = {
         "db_type": db_type,
         "default_table": intent.source_table,
-        f"env_var_{db_type}_host": f"{env_prefix}_HOST",
-        f"env_var_{db_type}_port": f"{env_prefix}_PORT",
-        f"env_var_{db_type}_user": f"{env_prefix}_USER",
-        f"env_var_{db_type}_password": f"{env_prefix}_PASSWORD",
-        f"env_var_{db_type}_name": f"{env_prefix}_NAME",
+        f"env_var_{db_type}_host": _env_var("db_host"),
+        f"env_var_{db_type}_port": _env_var("db_port"),
+        f"env_var_{db_type}_user": _env_var("db_user"),
+        f"env_var_{db_type}_password": _env_var("db_password"),
+        f"env_var_{db_type}_name": _env_var("db_name"),
     }
 
     quality_standards = [
@@ -1403,15 +1415,26 @@ def build_pipeline_bundle_from_nl(
     }
 
     # DB config — env var names follow the convention in tools.py:read_data_schema
-    env_prefix = {"postgres": "POSTGRES_DB", "mysql": "MYSQL_DB", "sqlite": "SQLITE"}[db_type]
+    # Env-var names are the SINGLE SOURCE OF TRUTH in _ENV_FALLBACKS, keyed by
+    # (cloud, db_type) — that is exactly what cloud_get() reads at runtime. azure+postgres
+    # → CRM_DB_*, aws/gcp → POSTGRES_DB_* / MYSQL_DB_*. Deriving from a db_type-only prefix
+    # (ignoring cloud) emitted POSTGRES_DB_* on azure, which cloud_get could not resolve →
+    # "user None" auth failure. Fall back to the db_type prefix for engines with no fallback
+    # table entry (e.g. sqlite).
+    _prefix = {"postgres": "POSTGRES_DB", "mysql": "MYSQL_DB", "sqlite": "SQLITE"}[db_type]
+
+    def _env_var(generic_key: str) -> str:
+        suffix = generic_key.replace("db_", "").upper()  # db_host -> HOST
+        return _ENV_FALLBACKS.get((cloud, db_type, generic_key), f"{_prefix}_{suffix}")
+
     db_conf = {
         "db_type": db_type,
         "default_table": intent.source_table,
-        f"env_var_{db_type}_host": f"{env_prefix}_HOST",
-        f"env_var_{db_type}_port": f"{env_prefix}_PORT",
-        f"env_var_{db_type}_user": f"{env_prefix}_USER",
-        f"env_var_{db_type}_password": f"{env_prefix}_PASSWORD",
-        f"env_var_{db_type}_name": f"{env_prefix}_NAME",
+        f"env_var_{db_type}_host": _env_var("db_host"),
+        f"env_var_{db_type}_port": _env_var("db_port"),
+        f"env_var_{db_type}_user": _env_var("db_user"),
+        f"env_var_{db_type}_password": _env_var("db_password"),
+        f"env_var_{db_type}_name": _env_var("db_name"),
     }
 
     # Business rules from extracted intent
