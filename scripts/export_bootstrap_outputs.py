@@ -102,9 +102,16 @@ def _normalize_azure(raw: dict) -> dict:
         out["state_container"] = v
     if v := raw.get("resource_group_name"):
         out["resource_group_name"] = v
-    for k in ("db_host", "db_port", "db_name", "db_username"):
+    for k in ("db_host", "db_port", "db_name"):
         if v := raw.get(k):
             out[k] = v
+    # The azure bootstrap output is named `db_username`, but on azure cloud_get has no
+    # SSM tier and resolves the GENERIC key `db_user` from this bridge file. Emit
+    # `db_user` so a local NL deploy resolves the username from the bridge (only the
+    # password must come from env). Keep `db_username` too (additive — no other reader breaks).
+    if v := raw.get("db_username"):
+        out["db_user"] = v
+        out["db_username"] = v
     return out
 
 

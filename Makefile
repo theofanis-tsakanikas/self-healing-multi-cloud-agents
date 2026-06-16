@@ -17,7 +17,12 @@ bootstrap-aws: ## Provision baseline AWS infrastructure (EKS + RDS + S3 + ECR)
 bootstrap-azure: ## Provision baseline Azure infrastructure (AKS + PostgreSQL + ACR)
 	@echo "Provisioning Azure baseline infrastructure..."
 	terraform -chdir=bootstrap/azure init
-	terraform -chdir=bootstrap/azure apply
+	@# Restrict the Postgres firewall to THIS operator's public IP instead of the
+	@# 0.0.0.0/0 allow-all fallback (db_allowed_cidrs default []). Auto-detected so a
+	@# cloner gets a hardened, IP-scoped DB with no manual `az` step. Override by
+	@# exporting TF_VAR_db_allowed_cidrs yourself (e.g. a fixed office CIDR).
+	TF_VAR_db_allowed_cidrs="$${TF_VAR_db_allowed_cidrs:-[\"$$(curl -s ifconfig.me)/32\"]}" \
+		terraform -chdir=bootstrap/azure apply
 	@echo "Exporting bootstrap outputs -> .bootstrap_outputs.json (bridge for the NL/Streamlit deploy path)..."
 	$(PYTHON) scripts/export_bootstrap_outputs.py azure
 
