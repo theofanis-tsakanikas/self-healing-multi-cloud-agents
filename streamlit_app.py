@@ -114,6 +114,37 @@ st.markdown("""
     border-radius: 6px !important;
 }
 
+/* ── STICKY RUN TABS (Log/Graph) — scoped via the .sticky-tabs-anchor span ── */
+/* Collapse the empty anchor's own container so it adds no vertical gap. */
+[data-testid="stElementContainer"]:has(.sticky-tabs-anchor),
+.element-container:has(.sticky-tabs-anchor) {
+    display: none !important;
+}
+/* WHY this is needed: the run tabs live inside st.status, which is an EXPANDER whose
+   body clips overflow — and a clipping ancestor neutralises position:sticky (the bar
+   ends up sticky relative to that short box, so it scrolls away). Clear overflow on the
+   anchor's whole ancestor chain (scoped: only the run-status subtree carries the anchor)
+   AND on the sibling tabs wrappers, so the bar can pin to the viewport instead. */
+div:has(.sticky-tabs-anchor),
+details:has(.sticky-tabs-anchor),
+[data-testid="stExpanderDetails"]:has(.sticky-tabs-anchor),
+div:has(.sticky-tabs-anchor) ~ div,
+div:has(.sticky-tabs-anchor) ~ div [data-testid="stTabs"],
+div:has(.sticky-tabs-anchor) ~ div [data-baseweb="tabs"] {
+    overflow: visible !important;
+}
+/* Pin ONLY the tab bar that FOLLOWS the anchor. The top-level navigation tabs
+   precede the anchor in the DOM, so the general-sibling combinator never reaches
+   them — they keep scrolling normally. */
+div:has(.sticky-tabs-anchor) ~ div [data-baseweb="tab-list"] {
+    position: sticky !important;
+    top: 3.5rem;                       /* pin just below the fixed Streamlit header */
+    z-index: 50;
+    background: rgba(6, 12, 26, 0.98);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(56, 189, 248, 0.12);
+}
+
 /* ── SIDEBAR ─────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
     background: rgba(10, 18, 40, 0.97) !important;
@@ -750,6 +781,9 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
     root.addHandler(handler)
 
     try:
+        # MissionFailedError/mission_failure_summary live in main.py; import here (lazy,
+        # as before) and early so the except handler below always has the name bound.
+        from main import MissionFailedError, mission_failure_summary
         graph = get_graph()
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
         project_id = f"{pipeline_id.upper()}-{timestamp}"
@@ -779,15 +813,24 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
         state_q.put({"project_id": project_id})
 
         mission_status = ""
-        for output in graph.stream(initial_state, config={
+        _graph_stream = graph.stream(initial_state, config={
             "run_name": f"streamlit_{pipeline_id}_{timestamp}",
             "recursion_limit": 200,
             "configurable": {"thread_id": project_id},
-        }):
+        })
+        for output in _graph_stream:
             for node_name, state_update in output.items():
                 log_q.put(("node", f"\n{_NODE_LABELS.get(node_name, node_name.upper())}"))
                 if state_update.get("mission_status"):
                     mission_status = state_update["mission_status"]
+                # Fail-closed into the trace: a FINISH without a verified mission is thrown
+                # INTO the stream (the proven main.py:_consume_stream path) so the LangSmith
+                # ROOT run is recorded as errored — a green trace must mean a verified
+                # mission, never just "the graph reached FINISH".
+                if state_update.get("next_step") == "FINISH" and mission_status != "verified":
+                    _graph_stream.throw(MissionFailedError(
+                        f"mission_status='{mission_status or 'unset'}' — "
+                        f"{mission_failure_summary(mission_status)}"))
                 if nxt := state_update.get("next_step"):
                     if nxt != "FINISH":
                         log_q.put(("route", f"  → {nxt.upper()}"))
@@ -837,6 +880,15 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
             state_q.put({"status": "ERROR", "error": f"Unverified termination: {reason}",
                          "mission_status": mission_status})
 
+    except MissionFailedError:
+        # Thrown above on a non-verified FINISH → the LangSmith root run is now errored.
+        # Report ❌ and PRESERVE mission_status so the Supervisor node still colours amber
+        # (escalated / ci_unverified) vs red — identical UI verdict as before, now with a
+        # matching red trace instead of a misleading green one.
+        reason = mission_failure_summary(mission_status)
+        log_q.put(("err", f"❌  Mission failed (mission_status={mission_status or 'unset'}): {reason}"))
+        state_q.put({"status": "ERROR", "error": f"Unverified termination: {reason}",
+                     "mission_status": mission_status})
     except Exception as exc:
         log_q.put(("err", f"❌  {exc}"))
         state_q.put({"status": "ERROR", "error": str(exc)})
@@ -1846,6 +1898,19 @@ with tab_nl:
         _raw_rules = st.session_state.nl_intent.get("business_rules", [])
         _domain    = st.session_state.nl_answers.get("data_domain", "other")
 
+        # STALE-RULES GUARD (path-independent): the held rules are stamped with the
+        # description they were seeded from. If that differs from the CURRENT description,
+        # they belong to a previous/other pipeline (reached here via "Edit fields", Back, or
+        # an un-deployed prior session whose nl_ keys were never cleared) — drop them so THIS
+        # run re-seeds from its own extraction (else shows the source picker). Same
+        # description → rules/edits are preserved. This generalises the step-0 reset to
+        # EVERY entry path, not just "re-describe".
+        if st.session_state.get("nl_rules_desc") != st.session_state.nl_description:
+            st.session_state.nl_rules             = []
+            st.session_state.nl_rules_initialized = False
+            st.session_state.nl_rules_view        = None
+            st.session_state.nl_rules_desc        = st.session_state.nl_description
+
         if not st.session_state.nl_rules_initialized:
             # Seed from the NL-extracted rules ONLY if we don't already hold rules. Re-entering
             # via step-3 "Edit rules" resets this flag, but must NOT wipe rules that came from a
@@ -2628,6 +2693,9 @@ if st.session_state.get("run_status") == "running":
     st.divider()
 
     with st.status("Agent is running…", expanded=True) as status_box:
+        # Anchor marker — the CSS scopes the sticky tab bar to ONLY these run tabs
+        # (the top-level navigation tabs precede this anchor → untouched).
+        st.markdown('<span class="sticky-tabs-anchor"></span>', unsafe_allow_html=True)
         _tab_log, _tab_graph = st.tabs(["📋 Activity log", "🕸️ Agent graph"])
         with _tab_log:
             # Timeline is the MAIN view — expandable, LangSmith-style (tool calls + inputs +
@@ -2809,4 +2877,8 @@ if st.session_state.get("run_status") == "running":
         for key in ["run_status", "log_q", "state_q", "agent_thread",
                     "pipeline_meta", "written_files", "final_status"]:
             st.session_state.pop(key, None)
+        # Also drop any leftover NL wizard state so the next pipeline starts from a clean
+        # slate (belt-and-suspenders alongside the step-2 stale-rules guard).
+        for _nk in [k for k in st.session_state if k.startswith("nl_")]:
+            del st.session_state[_nk]
         st.rerun()
