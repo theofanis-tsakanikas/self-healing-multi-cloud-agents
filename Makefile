@@ -5,6 +5,10 @@ SCRIPTS_DIR = scripts
 
 # --- Commands ---
 
+.PHONY: streamlit ui
+streamlit ui: ## Launch the NL/demo Streamlit app (dark theme, file-watcher off) → http://localhost:8501
+	uv run streamlit run streamlit_app.py --server.fileWatcherType none
+
 .PHONY: bootstrap-aws
 bootstrap-aws: ## Provision baseline AWS infrastructure (EKS + RDS + S3 + ECR)
 	@echo "Provisioning AWS baseline infrastructure..."

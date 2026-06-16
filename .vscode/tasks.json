@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Streamlit",
+      "detail": "Launch the NL/demo Streamlit app (dark theme, file-watcher off) on http://localhost:8501",
+      "type": "shell",
+      "command": "uv run streamlit run streamlit_app.py --server.fileWatcherType none",
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": [],
+      "runOptions": { "instanceLimit": 1 }
+    }
+  ]
+}
