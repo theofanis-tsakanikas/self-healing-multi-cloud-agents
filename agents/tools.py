@@ -1868,9 +1868,12 @@ def execute_terraform(command: str, vars_dict: dict = None):
             # no-op patch). Surface a dedicated marker the Medic recognises (mirrors the
             # fetch_github_action_logs PERMISSIONS_ERROR pattern) so it tells the user to
             # break the stale tfstate lease instead of flailing with code edits.
+            # Match only GENUINE lock-acquisition failures. NOT a bare "state lock"
+            # substring — terraform prints "Acquiring state lock. This may take a few
+            # moments..." on EVERY apply, so that would misclassify any failed apply
+            # (e.g. a 409 StorageAccountAlreadyTaken) as a lock issue and hide the real error.
             if ("Error acquiring the state lock" in combined
-                    or "state blob is already locked" in combined
-                    or "state lock" in combined.lower()):
+                    or "state blob is already locked" in combined):
                 return (
                     "PENDING: STATE_LOCK_ERROR — Terraform could not acquire the state lock; "
                     "the tfstate is locked by a previous run. This is an OPERATIONAL "

@@ -14,6 +14,7 @@ Usage:
     from utils.nlp_parser import build_pipeline_bundle_from_nl
     pipe, db, rules, infra, pipeline_id, task = build_pipeline_bundle_from_nl(description)
 """
+import hashlib
 import json
 import os
 import re
@@ -602,8 +603,15 @@ def _resource_names(slug: str, cloud: str, cloud_outputs: dict) -> dict:
             "state_key": f"terraform/{dash}-insights/terraform.tfstate",
         }
     elif cloud == "azure":
-        acct = re.sub(r"[^a-z0-9]", "", slug)[:20] + "storage"
-        acct = acct[:24]
+        # Azure storage account names are GLOBALLY unique (across every tenant) and
+        # capped at 24 lowercase-alphanumeric chars. A bare slug+"storage" collides
+        # (409 StorageAccountAlreadyTaken — bites a fresh NL pipeline). Append a 6-char
+        # tenant-stable hash so the name is unique across tenants yet IDEMPOTENT for
+        # this operator on re-runs (seed = the tenant's own state storage account).
+        _seed = (cloud_outputs.get("state_storage_account")
+                 or os.getenv("AZURE_SUBSCRIPTION_ID") or "")
+        _suffix = hashlib.sha1(f"{_seed}:{slug}".encode()).hexdigest()[:6]
+        acct = (re.sub(r"[^a-z0-9]", "", slug)[:18] + _suffix)[:24]
         return {
             "storage_account_name": acct,
             "container_name": f"{dash}-insights-data",
