@@ -717,6 +717,11 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                         tracked = ("terraform/" + Path(raw).name).replace("\\", "/")
                         if tracked not in updated_files:
                             updated_files.append(tracked)
+                        # Route .tf through the same auto-validator as Dockerfile/k8s/gha.
+                        # The .tf checks (brace-balance + empty-output) exist in
+                        # validate_generated_code but were never wired here, so a stray '}'
+                        # the LLM intermittently emits in outputs.tf leaked to `terraform init`.
+                        auto_validate_path = tracked
 
                     elif t_name == "generate_dockerfile":
                         if "Dockerfile" not in updated_files:
@@ -773,6 +778,8 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                             elif t_name == "generate_k8s_manifest":
                                 tracked_key = tracked  # set above when file was added
                             elif t_name == "generate_github_action":
+                                tracked_key = tracked  # set above when file was added
+                            elif t_name == "write_terraform_config":
                                 tracked_key = tracked  # set above when file was added
                             if tracked_key and tracked_key in updated_files:
                                 updated_files.remove(tracked_key)
