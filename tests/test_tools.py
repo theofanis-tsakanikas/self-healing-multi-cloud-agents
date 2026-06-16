@@ -182,6 +182,19 @@ class TestCloudSdkImportGuard:
         n = "import os\nimport pandas as pd\ndef r():\n    pass\n"
         assert _ensure_cloud_sdk_import(n) == n
 
+    def test_hashlib_injected_for_pii_hashing(self):
+        # PII anonymization: hashlib.sha256(...) on a hashed column without `import hashlib` → F821.
+        from agents.tools import _ensure_cloud_sdk_import
+        bad = "import os\nimport pandas as pd\ndef r():\n    h = hashlib.sha256(b'x').hexdigest()\n"
+        out = _ensure_cloud_sdk_import(bad)
+        assert "import hashlib" in out and out.index("import hashlib") < out.index("def r")
+
+    def test_hashlib_not_injected_when_unused(self):
+        # Never add an unused import (would trip F401).
+        from agents.tools import _ensure_cloud_sdk_import
+        n = "import os\ndef r():\n    pass\n"
+        assert "import hashlib" not in _ensure_cloud_sdk_import(n)
+
 
 class TestSyncPartitionSchemaArgGuard:
     """sync_partition_metadata takes EXACTLY 3 args (schema, table, mode); the catalog `hive`

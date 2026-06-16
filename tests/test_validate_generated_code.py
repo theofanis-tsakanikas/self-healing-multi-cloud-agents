@@ -296,6 +296,34 @@ class TestSqlDuplicateColumns:
         assert "duplicate column" not in out.lower()
 
 
+class TestTerraformEmptyOutput:
+    """An `output "X" {}` block with no `value` is a terraform syntax error that only surfaces at
+    `terraform init` in the deploy — the validator flags it at write time so the medic self-heals
+    before the costly infra run. (Observed on Azure us_crm outputs.tf, 2026-06-16.)"""
+
+    def _validate(self, tmp_path, content, name="outputs.tf"):
+        f = tmp_path / name
+        f.write_text(content)
+        return validate_generated_code.invoke({"filename": str(f)})
+
+    def test_empty_output_block_is_flagged(self, tmp_path):
+        out = self._validate(
+            tmp_path,
+            'output "storage_account_name" {\n  value = azurerm_storage_account.s.name\n}\n\n'
+            'output "container_name" {\n}\n')
+        assert "no `value`" in out and "container_name" in out
+
+    def test_output_without_value_is_flagged(self, tmp_path):
+        out = self._validate(tmp_path, 'output "x" {\n  description = "hi"\n}\n')
+        assert "no `value`" in out
+
+    def test_valid_outputs_are_clean(self, tmp_path):
+        out = self._validate(
+            tmp_path,
+            'output "a" {\n  value = x.y\n}\noutput "b" {\n  value = z.w\n}\n')
+        assert "no `value`" not in out
+
+
 class TestSqlTrinoTypes:
     """`read_data_schema` reports the SOURCE type; the architect sometimes copies a source-only
     type (TEXT/STRING/DOUBLE PRECISION/CHARACTER VARYING) verbatim into the Trino DDL → runtime

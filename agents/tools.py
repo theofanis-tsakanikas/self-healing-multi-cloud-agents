@@ -670,6 +670,19 @@ def validate_generated_code(filename: str) -> str:
                     "s3://.../processed'. See terraform_aws_s3.md Section 2.4."
                 )
 
+        # Any .tf (esp. outputs.tf): an `output "X" {}` block with no `value` argument is a
+        # terraform SYNTAX error ("Argument or block definition required" / "Missing required
+        # argument: value") that only surfaces at `terraform init` in the deploy. The LLM
+        # intermittently emits an empty/incomplete output block — flag it at write time so the
+        # medic self-heals BEFORE the costly infra terraform run.
+        for _om in re.finditer(r'output\s+"([^"]+)"\s*\{(.*?)\}', tf_content, re.DOTALL):
+            if "value" not in _om.group(2):
+                errors.append(
+                    f'TERRAFORM: output "{_om.group(1)}" has no `value` argument — an empty/'
+                    f"incomplete output block fails `terraform init` ('Argument or block definition "
+                    f'required\'). Every output block MUST set `value = ...`.'
+                )
+
     # ── Dockerfile ───────────────────────────────────────────────────────────
     # hadolint covers: base image tag, COPY . ., non-root user, pip flags, layer hygiene.
     # We add only the ONE rule hadolint cannot know: our project requires utils/.
@@ -1262,16 +1275,17 @@ def validate_generated_code(filename: str) -> str:
     return msg
 
 
-# A pipeline script's cloud-SDK import is mechanically determined by the SDK call it
-# makes (storage.Client → google.cloud.storage, etc.), but the architect intermittently
-# drops it → F821 'Undefined name'. Inject it deterministically: the call uniquely fixes
-# the import, and the matching SDK is the one installed on that cloud's image. A generation
-# guarantee (like the ConfigMap verbatim-embed), not an output patch. Only fires when the
-# call is used AND its import is absent — a full skeleton already carries it, so it's a no-op.
+# A pipeline script's import is mechanically determined by the call it makes (storage.Client →
+# google.cloud.storage; hashlib.sha256 → hashlib for PII hashing), but the architect
+# intermittently drops it → F821 'Undefined name'. Inject it deterministically: the call uniquely
+# fixes the import. A generation guarantee (like the ConfigMap verbatim-embed), not an output
+# patch. Only fires when the call is used AND its import is absent — a full skeleton already
+# carries it, so it's a no-op (and never adds an unused import → no F401).
 _CLOUD_SDK_IMPORTS = (
     ("storage.Client", "from google.cloud import storage"),
     ("boto3.", "import boto3"),
     ("BlobServiceClient", "from azure.storage.blob import BlobServiceClient"),
+    ("hashlib.", "import hashlib"),   # PII anonymization: hashlib.sha256(...) on a hashed column
 )
 
 
