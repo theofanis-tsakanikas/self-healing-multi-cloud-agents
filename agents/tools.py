@@ -389,9 +389,15 @@ def validate_generated_code(filename: str) -> str:
             # smaller than the per-reason sum (used by Rejections-by-Reason) — the two panels
             # disagree. Deriving from sum makes them consistent by construction.
             if "rejected_by_reason" in py_content and "rejected_rows" in py_content:
+                # Match CODE only, not comments. The model echoes the standard's own warning
+                # ("Do NOT keep an in-loop `rejected_rows += ...`") verbatim as a comment, and a
+                # raw substring scan would flag that guidance text → false positive that
+                # dead-loops the self-heal. Strip line-comments before the check.
+                _code_only = "\n".join(
+                    _ln.split("#", 1)[0] for _ln in py_content.splitlines())
                 _has_sum = re.search(
-                    r"rejected_rows\s*=\s*sum\s*\(\s*rejected_by_reason\.values\(\)\s*\)", py_content)
-                _has_inloop = re.search(r"rejected_rows\s*\+=", py_content)
+                    r"rejected_rows\s*=\s*sum\s*\(\s*rejected_by_reason\.values\(\)\s*\)", _code_only)
+                _has_inloop = re.search(r"rejected_rows\s*\+=", _code_only)
                 if not _has_sum or _has_inloop:
                     errors.append(
                         "PYTHON [project policy]: rejected_rows must be DERIVED after the loop as "
