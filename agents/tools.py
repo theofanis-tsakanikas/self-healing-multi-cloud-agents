@@ -670,6 +670,19 @@ def validate_generated_code(filename: str) -> str:
                     "s3://.../processed'. See terraform_aws_s3.md Section 2.4."
                 )
 
+        # Any .tf: a STRAY or MISSING brace — the LLM intermittently emits an extra `}` (e.g.
+        # closing an output block twice). terraform init then fails 'Argument or block definition
+        # required' (the exact error seen on Azure us_crm outputs.tf). A raw { vs } count is
+        # reliable for our generated .tf (no lone braces inside string literals) and catches it at
+        # write time, so the medic self-heals BEFORE the costly infra terraform run.
+        _open_b, _close_b = tf_content.count("{"), tf_content.count("}")
+        if _open_b != _close_b:
+            errors.append(
+                f"TERRAFORM: unbalanced braces — {_open_b} '{{' vs {_close_b} '}}'. A stray/missing "
+                f"brace (e.g. an extra '}}' that closes a block twice) fails `terraform init` with "
+                f"'Argument or block definition required'. Every block must open and close exactly once."
+            )
+
         # Any .tf (esp. outputs.tf): an `output "X" {}` block with no `value` argument is a
         # terraform SYNTAX error ("Argument or block definition required" / "Missing required
         # argument: value") that only surfaces at `terraform init` in the deploy. The LLM

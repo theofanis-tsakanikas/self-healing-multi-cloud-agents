@@ -321,7 +321,17 @@ class TestTerraformEmptyOutput:
         out = self._validate(
             tmp_path,
             'output "a" {\n  value = x.y\n}\noutput "b" {\n  value = z.w\n}\n')
-        assert "no `value`" not in out
+        assert "no `value`" not in out and "unbalanced" not in out.lower()
+
+    def test_stray_extra_brace_is_flagged(self, tmp_path):
+        # The real Azure us_crm bug: a stray extra `}` after a complete output block.
+        content = (
+            'output "managed_identity_id" {\n'
+            '  value = data.azurerm_user_assigned_identity.pipeline.id\n'
+            '}\n}\n\n'                                   # ← stray extra brace
+            'output "resource_group_name" {\n  value = data.azurerm_resource_group.main.name\n}\n')
+        out = self._validate(tmp_path, content)
+        assert "unbalanced braces" in out.lower()
 
 
 class TestSqlTrinoTypes:
