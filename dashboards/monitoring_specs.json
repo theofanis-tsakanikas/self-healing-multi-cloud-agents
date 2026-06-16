@@ -1,6 +1,6 @@
 {
-  "uid": "us-crm-data-observability",
-  "title": "US Crm Data Observability",
+  "uid": "etl-postgres-to-adls-data-observability",
+  "title": "Etl Postgres To Adls Data Observability",
   "schemaVersion": 37,
   "version": 1,
   "refresh": "5m",
@@ -10,7 +10,7 @@
   },
   "tags": [
     "data-pipeline",
-    "us-crm",
+    "etl-postgres-to-adls",
     "azure"
   ],
   "templating": {

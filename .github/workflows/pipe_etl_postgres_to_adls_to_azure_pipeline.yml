@@ -34,23 +34,23 @@ jobs:
 
       - name: Build Azure Storage Connection String + inject Trino ABFS key
         run: |
-          KEY=$(az storage account keys list -g multi-cloud-agent-rg -n uscrminsightsstorage --query '[0].value' -o tsv)
-          echo "AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=uscrminsightsstorage;AccountKey=$KEY;EndpointSuffix=core.windows.net" >> "$GITHUB_ENV"
+          KEY=$(az storage account keys list -g multi-cloud-agent-rg -n etlpostgrestoadls021826 --query '[0].value' -o tsv)
+          echo "AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=etlpostgrestoadls021826;AccountKey=$KEY;EndpointSuffix=core.windows.net" >> "$GITHUB_ENV"
           sed -i "s|__ABFS_KEY__|$KEY|g" k8s/configmaps.yaml
 
       - name: Build and Push Docker Image
         run: |
-          docker build -t mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }} -f Dockerfile .
-          docker push mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}
-          docker tag mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }} mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:latest
-          docker push mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:latest
+          docker build -t mcselfhealagentacr.azurecr.io/pipe-etl-postgres-to-adls-to-azure:${{ github.sha }} -f Dockerfile .
+          docker push mcselfhealagentacr.azurecr.io/pipe-etl-postgres-to-adls-to-azure:${{ github.sha }}
+          docker tag mcselfhealagentacr.azurecr.io/pipe-etl-postgres-to-adls-to-azure:${{ github.sha }} mcselfhealagentacr.azurecr.io/pipe-etl-postgres-to-adls-to-azure:latest
+          docker push mcselfhealagentacr.azurecr.io/pipe-etl-postgres-to-adls-to-azure:latest
 
       - name: Update Kubeconfig
         run: az aks get-credentials --resource-group multi-cloud-agent-rg --name multi-cloud-agent-aks
 
       - name: Set Image Tag in Job Manifest
         run: |
-          sed -i 's|image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:.*|image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}|' k8s/job.yaml
+          sed -i 's|image: mcselfhealagentacr.azurecr.io/pipe-etl-postgres-to-adls-to-azure:.*|image: mcselfhealagentacr.azurecr.io/pipe-etl-postgres-to-adls-to-azure:${{ github.sha }}|' k8s/job.yaml
 
       - name: Create Grafana Admin Secret
         env:
@@ -75,7 +75,7 @@ jobs:
 
       - name: Create DB Credentials Secret
         run: |
-          kubectl create secret generic pipe-crm-us-to-azure-db-credentials -n analytics \
+          kubectl create secret generic pipe-etl-postgres-to-adls-to-azure-db-credentials -n analytics \
             --from-literal=CRM_DB_HOST=${{ vars.CRM_DB_HOST }} \
             --from-literal=CRM_DB_PORT=${{ vars.CRM_DB_PORT }} \
             --from-literal=CRM_DB_USER=${{ vars.CRM_DB_USER }} \

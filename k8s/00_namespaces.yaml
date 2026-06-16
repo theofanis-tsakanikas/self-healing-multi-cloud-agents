@@ -11,9 +11,9 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: us-crm-insights-sa
+  name: pipelines-insights-sa
   namespace: analytics
   annotations:
-    azure.workload.identity/client-id: "5574374a-4944-46d1-a382-c9ba373c092c"
+    azure.workload.identity/client-id: "07c760a9-863c-4f34-bf50-ef2460dcc28c"
   labels:
     azure.workload.identity/use: "true"

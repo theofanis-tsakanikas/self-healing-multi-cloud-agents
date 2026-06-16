@@ -21,7 +21,7 @@ spec:
         project_id: multi-cloud-self-healing-agent
         component: trino
     spec:
-      serviceAccountName: us-crm-insights-sa
+      serviceAccountName: pipelines-insights-sa
       containers:
       - name: trino
         image: trinodb/trino:403

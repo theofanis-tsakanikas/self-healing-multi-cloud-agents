@@ -28,6 +28,7 @@ resource "azurerm_storage_account" "data" {
     project_id = var.project_id
     ManagedBy  = "terraform"
   }
+
   lifecycle {
     prevent_destroy = true
   }
