@@ -102,6 +102,10 @@ The config expresses rules in business language. The architect resolves them to 
 | `DEFAULT_VALUE` | `chunk[col] = chunk[col].where(condition, other=default)` |
 | `FLAG_AS_SUSPICIOUS` | accumulate with `\|`: `chunk['is_suspicious'] = flag_rule1 \| flag_rule2` |
 
+**Removal rules BOTH count:** `EXCLUDE_AND_LOG` removes rows exactly like `DROP_RECORD` — it only ADDS a `logging.warning`. It MUST increment `rejected_by_reason` under its rule name too (fresh `_before` → delta). Omitting it makes rows vanish from storage yet never appear in the rejection metrics (silent under-count → the panel hides that reason).
+
+**"At least one of N columns non-NULL" → `dropna(how='all')`:** a rule like *"email OR phone must be present"* drops a row ONLY when ALL listed columns are null: `chunk.dropna(subset=['email','phone'], how='all')`. The default `how='any'` (`dropna(subset=[...])`) drops when ANY is null — WRONG for OR-semantics, it over-rejects. Single-column completeness (`dropna(subset=['order_id'])`) is unaffected (one column → any == all).
+
 **Numeric comparison columns — coerce, NEVER `.astype(float)`:** a column compared numerically (`> 0`, `>= 0`, ranges) may carry dirty values (`'not_a_number'`, empty). Coerce with `pd.to_numeric(chunk[col], errors='coerce')` (assign back) **before** comparing — dirty → `NaN` → dropped as a rejected row; survivors are real numeric for the typed write. **NEVER `chunk[col].astype(float)`** — it raises `ValueError` on the first bad value and crashes the whole pipeline. (`.astype('Int64')` for the final integer cast is separate and still required — see Storage.)
 
 **Temporal/date comparison columns — coerce with `pd.to_datetime` FIRST:** a column compared to a date/`Timestamp` may arrive as a **STRING** (VARCHAR/text). `str > Timestamp` raises `TypeError: Invalid comparison between dtype=str and Timestamp` and crashes the pipeline. Coerce **before** comparing: `chunk[col] = pd.to_datetime(chunk[col], errors='coerce')` — dirty → `NaT` (dropped, never matched as "future"). Exactly like `pd.to_numeric`. ALWAYS coerce — do not rely on a source DATE type.
