@@ -16,6 +16,7 @@ code-owned artifact changes, change the render here in the same commit.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -181,8 +182,16 @@ def render_monitoring_specs(pipe_conf: dict, cloud: str) -> str:
         " project_id=~\"$project_id\"}, 1) * 100"
     )
     legend = "{{cloud_provider}} / {{project_id}}"
+    # Grafana caps the dashboard uid at 40 chars and silently REFUSES to provision a longer
+    # one ("uid too long, max 40 characters" → empty Dashboards). Keep the readable
+    # "<slug>-data-observability" form when it fits; for a long pipeline name, fall back to a
+    # stable, collision-safe id (slug prefix + short deterministic hash) that stays ≤40 and is
+    # identical across runs of the same pipeline.
+    _uid = f"{slug}-data-observability"
+    if len(_uid) > 40:
+        _uid = f"{slug[:31]}-{hashlib.sha1(slug.encode()).hexdigest()[:8]}"
     dashboard = {
-        "uid": f"{slug}-data-observability",
+        "uid": _uid,
         "title": f"{title} Data Observability",
         "schemaVersion": 37,
         "version": 1,
