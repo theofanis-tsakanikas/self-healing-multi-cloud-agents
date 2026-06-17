@@ -54,11 +54,16 @@ def test_green_ci_verifies_and_routes_to_supervisor():
 
 
 def test_green_ci_leaves_no_dangling_tool_call():
-    # The whole bug: an unanswered tool_call routes to the ToolNode, not the supervisor.
+    # The whole bug: a dangling (unanswered) tool_call at the end routes the graph to the ToolNode,
+    # not the supervisor. With the DETERMINISTIC CI poll a green run is decided in Python (the LLM
+    # is never invoked for a green run), so there is no fetch tool_call at all — and the last
+    # message must NOT be an AIMessage carrying an unanswered tool_call.
     out = _run_green_medic()
     answered = {m.tool_call_id for m in out["messages"] if isinstance(m, ToolMessage)}
     for m in out["messages"]:
         if isinstance(m, AIMessage) and m.tool_calls:
             for tc in m.tool_calls:
                 assert tc["id"] in answered, "green fetch tool_call left unanswered → EXECUTE_TOOLS loop"
-    assert isinstance(out["messages"][-1], ToolMessage)
+    _last = out["messages"][-1]
+    assert not (isinstance(_last, AIMessage) and _last.tool_calls), \
+        "dangling tool_call at end → EXECUTE_TOOLS loop instead of supervisor"
