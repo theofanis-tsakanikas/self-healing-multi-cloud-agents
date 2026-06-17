@@ -676,6 +676,19 @@ def validate_generated_code(filename: str) -> str:
                     "s3://.../processed'. See terraform_aws_s3.md Section 2.4."
                 )
 
+        # providers.tf MUST contain the provider block, not just terraform{}. The LLM
+        # intermittently emits only the terraform{} block and DROPS `provider "google" { project
+        # = var.project_id ... }`, so the GCS bucket fails apply with "project: required field is
+        # not set". Catch at write time → the medic re-adds the block BEFORE the costly terraform
+        # apply. (GCP detected via the gcs backend, so it fires regardless of CLOUD_PROVIDER.)
+        if base == "providers.tf" and 'backend "gcs"' in tf_content and 'provider "google"' not in tf_content:
+            errors.append(
+                'TERRAFORM: providers.tf has the terraform{} block but is MISSING the '
+                '`provider "google" { project = var.project_id; region = var.region }` block — '
+                'the GCS bucket then fails apply with "project: required field is not set". '
+                'providers.tf MUST contain BOTH the terraform{} AND the provider block. See terraform_gcp_bucket.md.'
+            )
+
         # Any .tf: a STRAY or MISSING brace — the LLM intermittently emits an extra `}` (e.g.
         # closing an output block twice). terraform init then fails 'Argument or block definition
         # required' (the exact error seen on Azure us_crm outputs.tf). A raw { vs } count is

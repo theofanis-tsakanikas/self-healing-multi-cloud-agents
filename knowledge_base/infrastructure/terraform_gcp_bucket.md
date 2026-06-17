@@ -13,7 +13,7 @@ This standard defines the mandatory configuration for GCP Cloud Storage (GCS) re
 
 | File | Contains | Must NOT contain |
 |---|---|---|
-| `providers.tf` | `terraform { backend "gcs" {} }` + `provider "google" {}` | resource blocks |
+| `providers.tf` | `terraform { backend "gcs" {} }` + `provider "google" { project, region }` (BOTH — provider NOT optional) | resource blocks |
 | `main.tf` | resource blocks ONLY | `terraform {}`, `provider {}` |
 | `variables.tf` | `variable` declarations | anything else |
 | `outputs.tf` | `output` declarations | anything else |
@@ -84,6 +84,8 @@ provider "google" {
   region  = var.region
 }
 ```
+
+**providers.tf MUST contain BOTH blocks — the `terraform {}` block AND the `provider "google" { project, region }` block. The provider block is NOT optional:** emitting only the `terraform {}` block and dropping the provider makes `terraform apply` fail with **`project: required field is not set`** on `google_storage_bucket` (no default project to inherit). Never generate only the `terraform {}` block and stop. (Mirrors the azure `provider "azurerm" { features {} }` rule; enforced by `validate_generated_code`.)
 
 **`var.project_id` is the GCP PROJECT ID** — the cloud project that owns the bucket, SA and Artifact Registry — supplied in context as `CLOUD_SETUP.gcp_project_id`. It is **NOT** the pipeline `project_id` (that value is the pipeline_id / dashboard label). Putting the pipeline_id here makes the bucket and the `data "google_service_account"` lookup target a non-existent project and Terraform apply fails. See §5 for the `terraform.tfvars` mapping.
 
