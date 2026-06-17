@@ -16,4 +16,4 @@ COPY dashboards/ dashboards/
 RUN useradd --no-create-home --shell /bin/false appuser
 USER appuser
 
-CMD ["python", "scripts/pipe_etl_postgres_to_adls_to_azure.py"]
+CMD ["python", "scripts/pipe_etl_pipeline_to_azure.py"]

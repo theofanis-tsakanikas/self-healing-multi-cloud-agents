@@ -1,5 +1,5 @@
 resource_group_name = "multi-cloud-agent-rg"
-storage_account_name = "etlpostgrestoadls021826"
-container_name = "etl-postgres-to-adls-insights-data"
-project_id = "pipe_etl_postgres_to_adls_to_azure"
+storage_account_name = "etlpipeline7628c3"
+container_name = "etl-pipeline-insights-data"
+project_id = "pipe_etl_pipeline_to_azure"
 managed_identity_name = "multi-cloud-pipelines-identity"

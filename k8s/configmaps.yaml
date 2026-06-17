@@ -8,8 +8,8 @@ metadata:
 data:
   setup_trino.sql: |
     CREATE SCHEMA IF NOT EXISTS hive.crm_us;
-    DROP TABLE IF EXISTS hive.crm_us.pipe_etl_postgres_to_adls_to_azure;
-    CREATE TABLE hive.crm_us.pipe_etl_postgres_to_adls_to_azure (
+    DROP TABLE IF EXISTS hive.crm_us.pipe_etl_pipeline_to_azure;
+    CREATE TABLE hive.crm_us.pipe_etl_pipeline_to_azure (
         cust_id BIGINT,
         full_name VARCHAR,
         email_address VARCHAR,
@@ -18,7 +18,7 @@ data:
         run_date DATE
     ) WITH (
         format = 'PARQUET',
-        external_location = 'abfss://etl-postgres-to-adls-insights-data@etlpostgrestoadls021826.dfs.core.windows.net/processed/',
+        external_location = 'abfss://etl-pipeline-insights-data@etlpipeline7628c3.dfs.core.windows.net/processed/',
         partitioned_by = ARRAY['run_date']
     );
 ---
@@ -33,8 +33,8 @@ data:
   hive.properties: |
     connector.name=hive
     hive.metastore=file
-    hive.metastore.catalog.dir=abfss://etl-postgres-to-adls-insights-data@etlpostgrestoadls021826.dfs.core.windows.net/metastore/
-    hive.azure.abfs-storage-account=etlpostgrestoadls021826
+    hive.metastore.catalog.dir=abfss://etl-pipeline-insights-data@etlpipeline7628c3.dfs.core.windows.net/metastore/
+    hive.azure.abfs-storage-account=etlpipeline7628c3
     hive.azure.abfs-access-key=__ABFS_KEY__
     hive.allow-drop-table=true
     hive.allow-rename-table=true
@@ -60,8 +60,8 @@ data:
         path: /etc/grafana/provisioning/dashboards
   monitoring_specs.json: |
     {
-      "uid": "etl-postgres-to-adls-data-observability",
-      "title": "Etl Postgres To Adls Data Observability",
+      "uid": "etl-pipeline-data-observability",
+      "title": "Etl Pipeline Data Observability",
       "schemaVersion": 37,
       "version": 1,
       "refresh": "5m",
@@ -71,7 +71,7 @@ data:
       },
       "tags": [
         "data-pipeline",
-        "etl-postgres-to-adls",
+        "etl-pipeline",
         "azure"
       ],
       "templating": {
