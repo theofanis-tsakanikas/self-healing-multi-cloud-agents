@@ -644,11 +644,12 @@ def _structure_messages(messages) -> list:
         if tcs:
             for tc in tcs:
                 tid = _tc_field(tc, "id", None)
-                steps.append({"kind": "call", "name": _tc_field(tc, "name", "tool"),
-                              "args": _tc_field(tc, "args", {}) or {}})
-                if tid in results_by_id:          # interleave: result right after its call
-                    steps.append(results_by_id[tid])
+                call = {"kind": "call", "name": _tc_field(tc, "name", "tool"),
+                        "args": _tc_field(tc, "args", {}) or {}}
+                if tid in results_by_id:          # NEST the result INSIDE its call (one click = in+out)
+                    call["result"] = results_by_id[tid]
                     consumed.add(tid)
+                steps.append(call)
             txt = (getattr(msg, "content", "") or "")
             if isinstance(txt, str) and txt.strip():
                 steps.append({"kind": "text", "text": txt.strip()})
@@ -703,9 +704,25 @@ def _render_substep_html(s: dict) -> str:
             rows.append(f"<b style='color:#7dd3fc;'>{_html.escape(str(k))}</b>: "
                         f"{_html.escape(vs)}")
         body = "<br>".join(rows) if rows else "<span style='color:#475569;'>(no input)</span>"
+        # Result nested INSIDE the call expander: one click shows BOTH the input args and the
+        # tool output. A call whose result is not in this super-step (e.g. a cross-node split)
+        # shows a note instead of silently dropping the tool.
+        res = s.get("result")
+        if res is not None:
+            rtxt = str(res.get("text", ""))
+            if len(rtxt) > 6000:
+                rtxt = rtxt[:6000] + "\n…(truncated)"
+            result_html = (
+                '<div style="margin:0.5rem 0 0.1rem;color:#4ade80;font-size:0.74rem;'
+                'font-weight:600;">↳ result</div>'
+                f'<pre style="{pre}">{_html.escape(rtxt)}</pre>')
+        else:
+            result_html = (
+                '<div style="margin-top:0.5rem;color:#64748b;font-size:0.72rem;">'
+                '↳ result not captured in this step — see the full trace in LangSmith</div>')
         return (f'<details style="{det}"><summary style="{summ}color:#38bdf8;">'
                 f'🔧 <span style="color:#e2e8f0;">{name}</span></summary>'
-                f'<div style="{pre}">{body}</div></details>')
+                f'<div style="{pre}">{body}</div>{result_html}</details>')
 
     if s["kind"] == "result":
         name = _html.escape(str(s.get("name", "")))
