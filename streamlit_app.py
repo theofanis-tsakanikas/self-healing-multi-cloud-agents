@@ -649,6 +649,11 @@ def _structure_messages(messages) -> list:
                 if tid in results_by_id:          # NEST the result INSIDE its call (one click = in+out)
                     call["result"] = results_by_id[tid]
                     consumed.add(tid)
+                # Hide redundant no-op calls (e.g. a 2nd read_data_schema / a write the tool
+                # skipped because it already ran) — the result starts with "Skipped:". Pure noise.
+                _r = call.get("result")
+                if _r and str(_r.get("text", "")).lstrip().startswith("Skipped:"):
+                    continue
                 steps.append(call)
             txt = (getattr(msg, "content", "") or "")
             if isinstance(txt, str) and txt.strip():
@@ -681,6 +686,21 @@ def _summarize_calls(names: list) -> str:
     return " · ".join(n + (f" ×{counts[n]}" if counts[n] > 1 else "") for n in seen)
 
 
+def _cell(txt, limit: int = 6000) -> str:
+    """Truncate + collapse blank lines + escape, for safe embedding in the st.markdown HTML.
+    CRITICAL: a BLANK line inside embedded HTML makes Streamlit's markdown renderer EXIT html
+    mode and dump the rest of the timeline as literal <details>/<pre> tags (seen when a large
+    query_vector_store result — a full standard with blank lines — is shown). Collapsing blank
+    lines keeps the HTML one continuous block. Single newlines stay (pre-wrap shows them)."""
+    import html as _html
+    import re as _re
+    s = str(txt)
+    if len(s) > limit:
+        s = s[:limit] + "\n…(truncated)"
+    s = _re.sub(r"\n[ \t]*\n+", "\n", s)   # drop blank lines — the markdown-in-HTML killer
+    return _html.escape(s)
+
+
 def _render_substep_html(s: dict) -> str:
     """One nested, expandable sub-step (LangSmith-style): a tool call shows its input args,
     a result shows the tool output, plain text renders inline."""
@@ -699,23 +719,18 @@ def _render_substep_html(s: dict) -> str:
         rows = []
         for k, v in (args.items() if isinstance(args, dict) else []):
             vs = v if isinstance(v, str) else _json.dumps(v, default=str, ensure_ascii=False)
-            if len(vs) > 4000:
-                vs = vs[:4000] + "  …(truncated)"
             rows.append(f"<b style='color:#7dd3fc;'>{_html.escape(str(k))}</b>: "
-                        f"{_html.escape(vs)}")
+                        f"{_cell(vs, 4000)}")
         body = "<br>".join(rows) if rows else "<span style='color:#475569;'>(no input)</span>"
         # Result nested INSIDE the call expander: one click shows BOTH the input args and the
         # tool output. A call whose result is not in this super-step (e.g. a cross-node split)
         # shows a note instead of silently dropping the tool.
         res = s.get("result")
         if res is not None:
-            rtxt = str(res.get("text", ""))
-            if len(rtxt) > 6000:
-                rtxt = rtxt[:6000] + "\n…(truncated)"
             result_html = (
                 '<div style="margin:0.5rem 0 0.1rem;color:#4ade80;font-size:0.74rem;'
                 'font-weight:600;">↳ result</div>'
-                f'<pre style="{pre}">{_html.escape(rtxt)}</pre>')
+                f'<pre style="{pre}">{_cell(res.get("text", ""))}</pre>')
         else:
             result_html = (
                 '<div style="margin-top:0.5rem;color:#64748b;font-size:0.72rem;">'
@@ -726,20 +741,14 @@ def _render_substep_html(s: dict) -> str:
 
     if s["kind"] == "result":
         name = _html.escape(str(s.get("name", "")))
-        txt = str(s.get("text", ""))
-        if len(txt) > 6000:
-            txt = txt[:6000] + "\n…(truncated)"
         head = f' <span style="color:#94a3b8;">{name}</span>' if name else ""
         return (f'<details style="{det}"><summary style="{summ}color:#4ade80;">'
                 f'↳ result{head}</summary>'
-                f'<pre style="{pre}">{_html.escape(txt)}</pre></details>')
+                f'<pre style="{pre}">{_cell(s.get("text", ""))}</pre></details>')
 
-    txt = str(s.get("text", ""))
-    if len(txt) > 6000:
-        txt = txt[:6000] + "\n…(truncated)"
     return (f'<div style="margin:0.28rem 0 0.28rem 0.4rem;font-size:0.78rem;color:#cbd5e1;">'
             f'💬 <span style="color:#94a3b8;">agent</span>'
-            f'<pre style="{pre}">{_html.escape(txt)}</pre></div>')
+            f'<pre style="{pre}">{_cell(s.get("text", ""))}</pre></div>')
 
 
 def _render_agent_log_html(agent_events: list) -> str:
