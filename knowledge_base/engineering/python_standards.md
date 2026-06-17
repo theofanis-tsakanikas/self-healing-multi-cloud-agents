@@ -113,7 +113,7 @@ The config expresses rules in business language. The architect resolves them to 
 **Worked example** — EU Sales (6 rules → 5 columns). **Each row-removing rule MUST take a FRESH `_before = len(chunk)` immediately before ITS OWN filter** — a single shared `_before` makes every rule report the *cumulative* drop, so the deltas double-count and `sum(by_reason)` explodes. Fresh-per-rule guarantees `sum(rejected_by_reason.values()) == rejected_rows`.
 ```python
 # monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
-chunk['unit_price'] = pd.to_numeric(chunk['unit_price'], errors='coerce')  # dirty/non-numeric → NaN
+chunk['unit_price'] = chunk['unit_price'].astype(float)  # dirty/non-numeric → NaN
 _before = len(chunk)
 chunk = chunk[chunk['unit_price'] > 0.0]    # NaN (coerced dirty) and <=0 dropped → counted as rejected
 rejected_by_reason['monetary_integrity'] = \
@@ -176,7 +176,7 @@ Omit this block entirely when `pii_sensitive` is absent or false.
 int_cols = [c for c in chunk.select_dtypes(include='float64').columns
             if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
 for col in int_cols:
-    chunk[col] = chunk[col].astype('Int64')
+    chunk[col] = chunk[col].astype(int)
 ```
 - Omitting this step causes a type mismatch: Trino reads the column as `double` instead of `INTEGER`/`BIGINT`, silently breaking downstream aggregations.
 
@@ -350,7 +350,7 @@ def run():
             int_cols = [c for c in chunk.select_dtypes(include='float64').columns
                         if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
             for col in int_cols:
-                chunk[col] = chunk[col].astype('Int64')
+                chunk[col] = chunk[col].astype(int)
 
             # 3d. Write — storage_options is MANDATORY, do not omit it. Use dict() (NOT {})
             # so the empty-dict literal has no braces to accidentally double-brace into {{}}.
