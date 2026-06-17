@@ -1,17 +1,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pipe-etl-pipeline-to-azure-job
+  name: pipe-etl-pipeline-postgres-adls-to-azure-job
   namespace: analytics
   labels:
-    project_id: pipe_etl_pipeline_to_azure
+    project_id: pipe_etl_pipeline_postgres_adls_to_azure
     component: pipeline-job
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        project_id: pipe_etl_pipeline_to_azure
+        project_id: pipe_etl_pipeline_postgres_adls_to_azure
         component: pipeline-job
         azure.workload.identity/use: "true"
     spec:
@@ -33,21 +33,21 @@ spec:
           mountPath: /scripts
       containers:
       - name: pipeline
-        image: mcselfhealagentacr.azurecr.io/pipe-etl-pipeline-to-azure:latest
+        image: mcselfhealagentacr.azurecr.io/pipe-etl-pipeline-postgres-adls-to-azure:latest
         env:
         - name: PROJECT_ID
-          value: "pipe_etl_pipeline_to_azure"
+          value: "pipe_etl_pipeline_postgres_adls_to_azure"
         - name: CLOUD_PROVIDER
           value: "azure"
         - name: DESTINATION_URI
-          value: "abfss://etl-pipeline-insights-data@etlpipeline7628c3.dfs.core.windows.net/processed/"
+          value: "abfss://etl-pipeline-postgres-adls-insights-data@etlpipelinepostgre093966.dfs.core.windows.net/processed/"
         - name: TRINO_HOST
           value: "trino.analytics.svc.cluster.local"
         - name: PUSHGATEWAY_URL
           value: "http://pushgateway.monitoring.svc.cluster.local:9091"
         envFrom:
         - secretRef:
-            name: pipe-etl-pipeline-to-azure-db-credentials
+            name: pipe-etl-pipeline-postgres-adls-to-azure-db-credentials
         resources:
           requests:
             memory: "1Gi"

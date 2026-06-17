@@ -12,7 +12,7 @@ terraform {
     resource_group_name  = "multi-cloud-agent-rg"
     storage_account_name = "multicloudagenttfstate"
     container_name       = "tfstate"
-    key                  = "azure/etl-pipeline-insights/terraform.tfstate"
+    key                  = "azure/etl-pipeline-postgres-adls-insights/terraform.tfstate"
   }
 }
 
