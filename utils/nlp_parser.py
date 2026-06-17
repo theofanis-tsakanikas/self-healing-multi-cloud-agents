@@ -628,8 +628,14 @@ def _resource_names(slug: str, cloud: str, cloud_outputs: dict) -> dict:
             if project_id
             else f"{sa_id}@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
         )
+        # GCS bucket names are GLOBALLY unique across ALL of GCP (like azure storage accounts),
+        # so a bare slug collides → 409 "bucket already exists" on a fresh NL pipeline. Append a
+        # short, stable, tenant-derived hash (mirrors the azure storage-account fix): unique
+        # across projects, yet IDEMPOTENT for the same operator on re-runs. (≤63-char GCS limit.)
+        _seed = project_id or os.getenv("GCP_PROJECT_ID") or ""
+        _suffix = hashlib.sha1(f"{_seed}:{slug}".encode()).hexdigest()[:6]
         return {
-            "bucket_name": f"{dash}-insights-data",
+            "bucket_name": f"{dash[:40]}-insights-data-{_suffix}",
             "service_account_id": sa_id,
             "service_account_email": sa_email,
             "k8s_service_account_name": f"{dash}-insights-sa",
