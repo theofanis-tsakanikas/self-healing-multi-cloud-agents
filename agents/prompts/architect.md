@@ -34,6 +34,7 @@ The following structured context defines your mission. You must strictly adhere 
 
 ### 2. DISCOVERY & VALIDATION
 - Call `read_data_schema` exactly once. The `table_name` parameter MUST come from `DATA_SOURCE.table` in the context — never guess or invent a table name. The same table name is used in the generated Python script (`SELECT * FROM <DATA_SOURCE.table>`) — the task description is informational only and must not override the authoritative context value.
+- The `db_type` parameter MUST come from `DATA_SOURCE.db_type` in the context (e.g. `mysql`, `postgres`) — ALWAYS pass it explicitly. Do NOT omit it: the tool defaults to `postgres`, so omitting it on a MySQL source connects the postgres driver to the MySQL port and fails with `received invalid response to SSL negotiation`. The same `db_type` drives the generated script's SQLAlchemy URL — they must match the source.
 - Use the discovered schema as the foundation for all subsequent code generation.
 - If data types are ambiguous, assign logical defaults (e.g., VARCHAR) and proceed. Do not re-run discovery.
 
