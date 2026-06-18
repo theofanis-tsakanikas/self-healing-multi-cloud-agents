@@ -341,6 +341,30 @@ def validate_generated_code(filename: str) -> str:
                 "rejected row) BEFORE comparing. See python_standards.md Business Rules section."
             )
 
+        # Cross-check column READS against the discovered source schema (FAIL-OPEN). Catches the
+        # LLM reading a column that does not exist — e.g. a business rule's `target_criteria`
+        # column 'campaign' used literally instead of being resolved to the real 'campaign_id' —
+        # a KeyError that otherwise only surfaces at CI runtime. Runs ONLY when read_data_schema
+        # cached a schema whose table matches THIS script's SELECT, so it never false-positives on
+        # a pipeline whose schema we don't hold (the validated runs are protected).
+        _cached_cols = _LAST_SCHEMA_CACHE.get("columns")
+        _cached_table = _LAST_SCHEMA_CACHE.get("table")
+        if _cached_cols and _cached_table:
+            _sel = re.search(r"\bFROM\s+([A-Za-z0-9_.\"`]+)", py_content)
+            _script_table = _sel.group(1).strip('"`').split(".")[-1] if _sel else None
+            if _script_table and _script_table == str(_cached_table).split(".")[-1]:
+                _unknown_cols = _columns_read_not_in_schema(py_content, set(_cached_cols))
+                if _unknown_cols:
+                    errors.append(
+                        "BUSINESS RULES: the script reads source column(s) that do NOT exist in "
+                        f"the table schema: {', '.join(sorted(_unknown_cols))}. A business rule's "
+                        "`target_criteria` column is BUSINESS LANGUAGE — resolve it to the real "
+                        "column from read_data_schema (case-insensitive substring match, e.g. "
+                        "'campaign' → 'campaign_id'), never use it as a literal column name. "
+                        "Reading a non-existent column raises KeyError at runtime. "
+                        "See python_standards.md Business Rules section."
+                    )
+
         # Trino partition sync: sync_partition_metadata takes EXACTLY 3 string args
         # (schema, table, mode); the catalog (`hive`) belongs ONLY in the `hive.system.` prefix.
         # The architect injects the catalog into the args two ways — a dotted first arg
@@ -1727,6 +1751,46 @@ def patch_project_file(filename: str, replacements: list) -> str:
     )
 
 
+# Schema cross-check support. read_data_schema caches the source table's real column names here
+# so validate_generated_code can flag a chunk['<col>'] the script READS that is neither a real
+# source column nor one the script itself created — e.g. 'campaign' instead of 'campaign_id', a
+# KeyError that otherwise only surfaces at CI runtime. FAIL-OPEN by design: the check is skipped
+# unless the cached table matches the script's SELECT, so it can NEVER false-positive on a
+# pipeline whose schema we don't hold (protects the validated AWS/Azure/GCP/Databricks runs).
+_LAST_SCHEMA_CACHE = {"table": None, "columns": None}
+
+
+def _columns_read_not_in_schema(py_content: str, schema_cols: set) -> set:
+    """Return the chunk['<col>'] columns READ in the script that are neither in `schema_cols` nor
+    CREATED (assigned) by the script on an EARLIER line. Order-aware via line numbers so an
+    accumulator created on a prior line — `chunk['is_suspicious'] = chunk['is_suspicious'] | …`
+    — is NOT flagged, while a never-created self-reference — `chunk['campaign'] =
+    chunk['campaign']…` — IS. Only inspects subscripts on the `chunk` dataframe with string-literal
+    keys. Fail-open: returns an empty set on any parse error."""
+    import ast as _ast
+    try:
+        _tree = _ast.parse(py_content)
+    except Exception:
+        return set()
+    _stores, _loads = [], []
+    for _n in _ast.walk(_tree):
+        if (isinstance(_n, _ast.Subscript) and isinstance(_n.value, _ast.Name)
+                and _n.value.id == "chunk"
+                and isinstance(_n.slice, _ast.Constant) and isinstance(_n.slice.value, str)):
+            if isinstance(_n.ctx, _ast.Store):
+                _stores.append((_n.slice.value, _n.lineno))
+            elif isinstance(_n.ctx, _ast.Load):
+                _loads.append((_n.slice.value, _n.lineno))
+    _unknown = set()
+    for _col, _ln in _loads:
+        if _col in schema_cols:
+            continue
+        if any(_sc == _col and _sl < _ln for _sc, _sl in _stores):
+            continue  # created by the script on an earlier line (a derived column)
+        _unknown.add(_col)
+    return _unknown
+
+
 @tool
 def read_data_schema(table_name: str, db_type: str = "postgres"):
     """
@@ -1776,6 +1840,15 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
             return f"Table '{table_name}' not found in {db_type}."
 
         schema_desc = [f"{col['name']} ({col['type']})" for col in columns]
+
+        # Cache the real column names so validate_generated_code can cross-check that every
+        # chunk['<col>'] the generated script reads actually exists (catches e.g. 'campaign'
+        # vs 'campaign_id' locally, before it crashes at CI). See _LAST_SCHEMA_CACHE.
+        try:
+            _LAST_SCHEMA_CACHE["table"] = table_name
+            _LAST_SCHEMA_CACHE["columns"] = [col["name"] for col in columns]
+        except Exception:
+            pass
 
         # 3. Fetch sample data
         with engine.connect() as conn:
