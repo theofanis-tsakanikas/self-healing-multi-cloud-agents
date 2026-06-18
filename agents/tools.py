@@ -306,6 +306,27 @@ def validate_generated_code(filename: str) -> str:
                 "Business Rules section."
             )
 
+        # A numeric comparison/clamp CHAINED directly onto a coercion reads the PRE-coercion column.
+        # `pd.to_numeric(chunk['x'], ...).where(chunk['x'] >= 0, ...)` evaluates the `.where` condition
+        # against the ORIGINAL chunk['x'] (still the source str/text dtype — the coerced value isn't
+        # assigned yet) → `TypeError: Invalid comparison between dtype=str and int` at RUNTIME (the
+        # validator can't see it otherwise — it's pd.to_numeric, not .astype(float)). Coerce + assign
+        # back FIRST, THEN clamp on a separate statement.
+        if re.search(
+            r"(?:pd\.to_numeric\([^\n]*?\)|\.astype\(\s*['\"]?float[^\n]*?\))\s*\.where\("
+            r"[^\n]*?chunk\[[^\]]+\]\s*(?:>=|<=|>|<)",
+            py_content,
+        ):
+            errors.append(
+                "BUSINESS RULES: a numeric comparison is chained onto `pd.to_numeric()`/`.astype()` "
+                "(e.g. `pd.to_numeric(chunk['x'], errors='coerce').where(chunk['x'] >= 0, …)`) — the "
+                "`.where`/comparison reads the ORIGINAL `str`/text column (the coerced value isn't "
+                "assigned yet) → `TypeError: Invalid comparison between dtype=str and int` at runtime. "
+                "Coerce + assign back on its OWN statement FIRST, THEN clamp on the now-numeric column "
+                "(`chunk['x'] = pd.to_numeric(chunk['x'], errors='coerce')` then "
+                "`chunk['x'] = chunk['x'].fillna(0).clip(lower=0)`). See python_standards.md Business Rules."
+            )
+
         # A column compared to a date/Timestamp (e.g. order_date > pd.Timestamp.now()) must first be
         # coerced with pd.to_datetime(col, errors='coerce'): a VARCHAR source column arrives as a
         # pandas string and `str > Timestamp` raises TypeError ('Invalid comparison between
