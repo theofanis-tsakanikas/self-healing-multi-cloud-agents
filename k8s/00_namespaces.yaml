@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: analytics
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipelines-insights-sa
+  namespace: analytics
+  annotations:
+    iam.gke.io/gcp-service-account: "pipelines-insights-sa@multi-cloud-self-healing-agent.iam.gserviceaccount.com"

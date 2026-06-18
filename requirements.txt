@@ -1,0 +1,8 @@
+pandas
+sqlalchemy
+pyarrow
+trino
+prometheus-client
+google-cloud-storage
+gcsfs
+pymysql
