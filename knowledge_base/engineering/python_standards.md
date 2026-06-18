@@ -102,18 +102,26 @@ The config expresses rules in business language. The architect resolves them to 
 | `DEFAULT_VALUE` | `chunk[col] = chunk[col].where(condition, other=default)` |
 | `FLAG_AS_SUSPICIOUS` | accumulate with `\|`: `chunk['is_suspicious'] = flag_rule1 \| flag_rule2` |
 
-**Removal rules BOTH count:** `EXCLUDE_AND_LOG` removes rows exactly like `DROP_RECORD` — it only ADDS a `logging.warning`. It MUST increment `rejected_by_reason` under its rule name too (fresh `_before` → delta). Omitting it makes rows vanish from storage yet never appear in the rejection metrics (silent under-count → the panel hides that reason).
+**Removal rules BOTH count:** `EXCLUDE_AND_LOG` removes rows exactly like `DROP_RECORD` (only ADDS a `logging.warning`) — it MUST also increment `rejected_by_reason` under its rule name (fresh `_before` → delta). Omitting it → rows vanish from storage but never appear in the rejection metrics (silent under-count).
 
-**"At least one of N columns non-NULL" → `dropna(how='all')`:** a rule like *"email OR phone must be present"* drops a row ONLY when ALL listed columns are null: `chunk.dropna(subset=['email','phone'], how='all')`. The default `how='any'` (`dropna(subset=[...])`) drops when ANY is null — WRONG for OR-semantics, it over-rejects. Single-column completeness (`dropna(subset=['order_id'])`) is unaffected (one column → any == all).
+**"At least one of N columns non-NULL" → `dropna(how='all')`:** *"email OR phone must be present"* drops a row only when ALL listed columns are null: `chunk.dropna(subset=['email','phone'], how='all')`. The default `how='any'` over-rejects (drops when ANY is null) — WRONG for OR-semantics. Single-column completeness is unaffected (any == all).
 
-**Numeric comparison columns — cast with `.astype(float)`:** a column compared numerically (`> 0`, `>= 0`, ranges) must be a real `float` dtype before the comparison. Cast it with `chunk[col] = chunk[col].astype(float)` (assign back) **before** comparing — this normalises the source values to float for the typed write. (`.astype('Int64')` for the final integer cast is separate and still required — see Storage.)
+**Numeric columns — coerce with `pd.to_numeric` (NEVER `.astype(float)`), in a SEPARATE statement before comparing.** A numerically compared/clamped column may carry dirty values. Coerce, **assign back FIRST**, THEN compare/clamp on the now-numeric column. `.astype(float)` raises `ValueError` on the first bad value (validator catches it). Chaining the comparison onto the coerce reads the ORIGINAL `str` column (not yet assigned) → `TypeError: Invalid comparison between dtype=str and int` — a RUNTIME-only crash the validator can't see.
+```python
+# ❌ .where reads the un-coerced (string) column → TypeError at runtime
+chunk['ad_spend'] = pd.to_numeric(chunk['ad_spend'], errors='coerce').where(chunk['ad_spend'] >= 0, other=0)
+# ✅ coerce + assign back FIRST, THEN clamp
+chunk['ad_spend'] = pd.to_numeric(chunk['ad_spend'], errors='coerce')
+chunk['ad_spend'] = chunk['ad_spend'].fillna(0).clip(lower=0)   # non-numeric→NaN→0, negative→0
+```
+(`.astype('Int64')` for the final integer cast is separate — see Storage.)
 
-**Temporal/date comparison columns — coerce with `pd.to_datetime` FIRST:** a column compared to a date/`Timestamp` may arrive as a **STRING** (VARCHAR/text). `str > Timestamp` raises `TypeError: Invalid comparison between dtype=str and Timestamp` and crashes the pipeline. Coerce **before** comparing: `chunk[col] = pd.to_datetime(chunk[col], errors='coerce')` — dirty → `NaT` (dropped, never matched as "future"). ALWAYS coerce — do not rely on a source DATE type.
+**Temporal/date comparison columns — coerce with `pd.to_datetime` FIRST:** a column compared to a `Timestamp` may arrive as a STRING. `str > Timestamp` raises `TypeError: Invalid comparison between dtype=str and Timestamp`. Coerce **before** comparing: `chunk[col] = pd.to_datetime(chunk[col], errors='coerce')` — dirty → `NaT` (dropped). Like `pd.to_numeric`, ALWAYS coerce — never rely on a source DATE type.
 
 **Worked example** — EU Sales (6 rules → 5 columns). **Each row-removing rule MUST take a FRESH `_before = len(chunk)` immediately before ITS OWN filter** — a single shared `_before` makes every rule report the *cumulative* drop, so the deltas double-count and `sum(by_reason)` explodes. Fresh-per-rule guarantees `sum(rejected_by_reason.values()) == rejected_rows`.
 ```python
 # monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
-chunk['unit_price'] = chunk['unit_price'].astype(float)  # dirty/non-numeric → NaN
+chunk['unit_price'] = pd.to_numeric(chunk['unit_price'], errors='coerce')  # dirty/non-numeric → NaN
 _before = len(chunk)
 chunk = chunk[chunk['unit_price'] > 0.0]    # NaN (coerced dirty) and <=0 dropped → counted as rejected
 rejected_by_reason['monetary_integrity'] = \
@@ -165,7 +173,7 @@ chunk['<email_col>'] = chunk['<email_col>'].str.replace(r'(?<=.).*?(?=@)', '***'
 chunk['<phone_col>'] = chunk['<phone_col>'].astype(str).str.replace(r'\d(?=\d{4})', '*', regex=True)
 ```
 **Copy the mask patterns above VERBATIM — never improvise your own.** For phone numbers use the exact `r'\d(?=\d{4})'` pattern shown (a simple look-ahead that stars every digit followed by 4+ more). Do NOT invent a `\b`-based look-behind like `r'(?<=\b)\b(\b\d{3})...'` — it reliably mangles into an unterminated string or invalid syntax and breaks the whole file.
-**Every `.str.replace()` that takes a regex pattern MUST pass `regex=True`.** In pandas 2.x the default is `regex=False`, so the pattern is treated as a literal string — the mask matches nothing and **silently no-ops**, leaving the PII column fully exposed with no error. This applies to any masked column you add (phone, SSN, …), not just email. Validate the pattern is a real regex, not a `\b`-mangled literal.
+**Every `.str.replace()` that takes a regex pattern MUST pass `regex=True`.** In pandas 2.x the default is `regex=False`, so the pattern is a literal — the mask matches nothing and **silently no-ops**, leaving the PII column exposed with no error. Applies to any masked column (phone, SSN, …), not just email.
 Omit this block entirely when `pii_sensitive` is absent or false.
 
 ### Type Casting
