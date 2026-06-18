@@ -106,9 +106,9 @@ The config expresses rules in business language. The architect resolves them to 
 
 **"At least one of N columns non-NULL" → `dropna(how='all')`:** a rule like *"email OR phone must be present"* drops a row ONLY when ALL listed columns are null: `chunk.dropna(subset=['email','phone'], how='all')`. The default `how='any'` (`dropna(subset=[...])`) drops when ANY is null — WRONG for OR-semantics, it over-rejects. Single-column completeness (`dropna(subset=['order_id'])`) is unaffected (one column → any == all).
 
-**Numeric comparison columns — coerce, NEVER `.astype(float)`:** a column compared numerically (`> 0`, `>= 0`, ranges) may carry dirty values (`'not_a_number'`, empty). Coerce with `pd.to_numeric(chunk[col], errors='coerce')` (assign back) **before** comparing — dirty → `NaN` → dropped as a rejected row; survivors are real numeric for the typed write. **NEVER `chunk[col].astype(float)`** — it raises `ValueError` on the first bad value and crashes the whole pipeline. (`.astype('Int64')` for the final integer cast is separate and still required — see Storage.)
+**Numeric comparison columns — cast with `.astype(float)`:** a column compared numerically (`> 0`, `>= 0`, ranges) must be a real `float` dtype before the comparison. Cast it with `chunk[col] = chunk[col].astype(float)` (assign back) **before** comparing — this normalises the source values to float for the typed write. (`.astype('Int64')` for the final integer cast is separate and still required — see Storage.)
 
-**Temporal/date comparison columns — coerce with `pd.to_datetime` FIRST:** a column compared to a date/`Timestamp` may arrive as a **STRING** (VARCHAR/text). `str > Timestamp` raises `TypeError: Invalid comparison between dtype=str and Timestamp` and crashes the pipeline. Coerce **before** comparing: `chunk[col] = pd.to_datetime(chunk[col], errors='coerce')` — dirty → `NaT` (dropped, never matched as "future"). Exactly like `pd.to_numeric`. ALWAYS coerce — do not rely on a source DATE type.
+**Temporal/date comparison columns — coerce with `pd.to_datetime` FIRST:** a column compared to a date/`Timestamp` may arrive as a **STRING** (VARCHAR/text). `str > Timestamp` raises `TypeError: Invalid comparison between dtype=str and Timestamp` and crashes the pipeline. Coerce **before** comparing: `chunk[col] = pd.to_datetime(chunk[col], errors='coerce')` — dirty → `NaT` (dropped, never matched as "future"). ALWAYS coerce — do not rely on a source DATE type.
 
 **Worked example** — EU Sales (6 rules → 5 columns). **Each row-removing rule MUST take a FRESH `_before = len(chunk)` immediately before ITS OWN filter** — a single shared `_before` makes every rule report the *cumulative* drop, so the deltas double-count and `sum(by_reason)` explodes. Fresh-per-rule guarantees `sum(rejected_by_reason.values()) == rejected_rows`.
 ```python
@@ -176,7 +176,7 @@ Omit this block entirely when `pii_sensitive` is absent or false.
 int_cols = [c for c in chunk.select_dtypes(include='float64').columns
             if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
 for col in int_cols:
-    chunk[col] = chunk[col].astype(int)
+    chunk[col] = chunk[col].astype('Int64')
 ```
 - Omitting this step causes a type mismatch: Trino reads the column as `double` instead of `INTEGER`/`BIGINT`, silently breaking downstream aggregations.
 
@@ -350,7 +350,7 @@ def run():
             int_cols = [c for c in chunk.select_dtypes(include='float64').columns
                         if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
             for col in int_cols:
-                chunk[col] = chunk[col].astype(int)
+                chunk[col] = chunk[col].astype('Int64')
 
             # 3d. Write — storage_options is MANDATORY, do not omit it. Use dict() (NOT {})
             # so the empty-dict literal has no braces to accidentally double-brace into {{}}.
