@@ -8,11 +8,11 @@ metadata:
 data:
   setup_trino.sql: |
     CREATE SCHEMA IF NOT EXISTS hive.marketing_global;
-    DROP TABLE IF EXISTS hive.marketing_global.pipe_etl_gcp_pipeline_to_gcp;
-    CREATE TABLE hive.marketing_global.pipe_etl_gcp_pipeline_to_gcp (
+    DROP TABLE IF EXISTS hive.marketing_global.pipe_etl_pipeline_gcp_to_gcp;
+    CREATE TABLE hive.marketing_global.pipe_etl_pipeline_gcp_to_gcp (
         campaign_id VARCHAR,
         platform_name VARCHAR,
-        ad_spend DOUBLE,
+        ad_spend DECIMAL(18,2),
         clicks BIGINT,
         impressions DOUBLE,
         event_timestamp TIMESTAMP,
@@ -20,10 +20,9 @@ data:
         run_date DATE
     ) WITH (
         format = 'PARQUET',
-        external_location = 'gs://etl-gcp-pipeline-insights-data-26c3da/processed/',
+        external_location = 'gs://etl-pipeline-gcp-insights-data-9da821/processed/',
         partitioned_by = ARRAY['run_date']
     );
-    CALL hive.system.sync_partition_metadata('marketing_global', 'pipe_etl_gcp_pipeline_to_gcp', 'ADD');
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -36,7 +35,7 @@ data:
   hive.properties: |
     connector.name=hive
     hive.metastore=file
-    hive.metastore.catalog.dir=gs://etl-gcp-pipeline-insights-data-26c3da/metastore/
+    hive.metastore.catalog.dir=gs://etl-pipeline-gcp-insights-data-9da821/metastore/
     hive.gcs.use-access-token=false
     hive.allow-drop-table=true
     hive.allow-rename-table=true
@@ -62,8 +61,8 @@ data:
         path: /etc/grafana/provisioning/dashboards
   monitoring_specs.json: |
     {
-      "uid": "etl-gcp-pipeline-data-observability",
-      "title": "Etl Gcp Pipeline Data Observability",
+      "uid": "etl-pipeline-gcp-data-observability",
+      "title": "Etl Pipeline Gcp Data Observability",
       "schemaVersion": 37,
       "version": 1,
       "refresh": "5m",
@@ -73,7 +72,7 @@ data:
       },
       "tags": [
         "data-pipeline",
-        "etl-gcp-pipeline",
+        "etl-pipeline-gcp",
         "gcp"
       ],
       "templating": {

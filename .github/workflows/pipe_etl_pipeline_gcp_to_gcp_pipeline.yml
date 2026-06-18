@@ -35,10 +35,10 @@ jobs:
 
       - name: Build & Push Image
         run: |
-          docker build -t europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-etl-gcp-pipeline-to-gcp-20260618-0340:${{ github.sha }} -f Dockerfile .
-          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-etl-gcp-pipeline-to-gcp-20260618-0340:${{ github.sha }}
-          docker tag europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-etl-gcp-pipeline-to-gcp-20260618-0340:${{ github.sha }} europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-etl-gcp-pipeline-to-gcp-20260618-0340:latest
-          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-etl-gcp-pipeline-to-gcp-20260618-0340:latest
+          docker build -t europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-etl-pipeline-gcp-to-gcp-20260618-0458:${{ github.sha }} -f Dockerfile .
+          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-etl-pipeline-gcp-to-gcp-20260618-0458:${{ github.sha }}
+          docker tag europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-etl-pipeline-gcp-to-gcp-20260618-0458:${{ github.sha }} europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-etl-pipeline-gcp-to-gcp-20260618-0458:latest
+          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-etl-pipeline-gcp-to-gcp-20260618-0458:latest
 
       - name: Update Kubeconfig
         run: gcloud container clusters get-credentials multi-cloud-agent-gke --region europe-west3 --project ${{ vars.GCP_PROJECT_ID }}
@@ -66,7 +66,7 @@ jobs:
 
       - name: Create DB Credentials Secret
         run: |
-          kubectl create secret generic pipe-etl-gcp-pipeline-to-gcp-db-credentials -n analytics \
+          kubectl create secret generic pipe-etl-pipeline-gcp-to-gcp-db-credentials -n analytics \
             --from-literal=MYSQL_DB_HOST=${{ vars.MYSQL_DB_HOST }} \
             --from-literal=MYSQL_DB_PORT=${{ vars.MYSQL_DB_PORT }} \
             --from-literal=MYSQL_DB_USER=${{ vars.MYSQL_DB_USER }} \
