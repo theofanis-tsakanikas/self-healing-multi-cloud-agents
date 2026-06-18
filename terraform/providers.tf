@@ -10,7 +10,7 @@ terraform {
 
   backend "gcs" {
     bucket = "multi-cloud-agent-tfstate"
-    prefix = "gcp/mysqp-to-gcp-etl-pipeline-insights/terraform.tfstate"
+    prefix = "gcp/mysql-etl-to-gcp-insights/terraform.tfstate"
   }
 }
 

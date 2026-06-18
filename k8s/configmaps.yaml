@@ -8,11 +8,11 @@ metadata:
 data:
   setup_trino.sql: |
     CREATE SCHEMA IF NOT EXISTS hive.marketing_global;
-    DROP TABLE IF EXISTS hive.marketing_global.pipe_mysqp_to_gcp_etl_pipeline_to_gcp;
-    CREATE TABLE hive.marketing_global.pipe_mysqp_to_gcp_etl_pipeline_to_gcp (
+    DROP TABLE IF EXISTS hive.marketing_global.pipe_mysql_etl_to_gcp_to_gcp;
+    CREATE TABLE hive.marketing_global.pipe_mysql_etl_to_gcp_to_gcp (
         campaign_id VARCHAR,
         platform_name VARCHAR,
-        ad_spend DOUBLE,
+        ad_spend DECIMAL(18,2),
         clicks BIGINT,
         impressions DOUBLE,
         event_timestamp TIMESTAMP,
@@ -20,9 +20,10 @@ data:
         run_date DATE
     ) WITH (
         format = 'PARQUET',
-        external_location = 'gs://mysqp-to-gcp-etl-pipeline-insights-data-dcdac2/processed/',
+        external_location = 'gs://mysql-etl-to-gcp-insights-data-512434/processed/',
         partitioned_by = ARRAY['run_date']
     );
+    CALL hive.system.sync_partition_metadata('marketing_global', 'pipe_mysql_etl_to_gcp_to_gcp', 'ADD');
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -35,7 +36,7 @@ data:
   hive.properties: |
     connector.name=hive
     hive.metastore=file
-    hive.metastore.catalog.dir=gs://mysqp-to-gcp-etl-pipeline-insights-data-dcdac2/metastore/
+    hive.metastore.catalog.dir=gs://mysql-etl-to-gcp-insights-data-512434/metastore/
     hive.gcs.use-access-token=false
     hive.allow-drop-table=true
     hive.allow-rename-table=true
@@ -61,8 +62,8 @@ data:
         path: /etc/grafana/provisioning/dashboards
   monitoring_specs.json: |
     {
-      "uid": "mysqp-to-gcp-etl-pipeline-3ebb7ef5",
-      "title": "Mysqp To Gcp Etl Pipeline Data Observability",
+      "uid": "mysql-etl-to-gcp-data-observability",
+      "title": "Mysql Etl To Gcp Data Observability",
       "schemaVersion": 37,
       "version": 1,
       "refresh": "5m",
@@ -72,7 +73,7 @@ data:
       },
       "tags": [
         "data-pipeline",
-        "mysqp-to-gcp-etl-pipeline",
+        "mysql-etl-to-gcp",
         "gcp"
       ],
       "templating": {
