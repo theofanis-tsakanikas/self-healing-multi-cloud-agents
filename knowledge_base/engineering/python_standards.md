@@ -106,10 +106,12 @@ The config expresses rules in business language. The architect resolves them to 
 
 **"At least one of N columns non-NULL" → `dropna(how='all')`:** *"email OR phone must be present"* drops a row only when ALL listed columns are null: `chunk.dropna(subset=['email','phone'], how='all')`. The default `how='any'` over-rejects (drops when ANY is null) — WRONG for OR-semantics. Single-column completeness is unaffected (any == all).
 
-**Numeric columns — cast with `.astype(float)`, in a SEPARATE statement before comparing/clamping.** A numerically compared/clamped column must be a real `float` first. Cast with `chunk[col] = chunk[col].astype(float)` on its OWN statement (assign back), THEN compare/clamp on the now-float column — NEVER chain the comparison onto the cast. For a "replace negative/non-numeric with 0" rule, follow the cast with `.fillna(0).clip(lower=0)`.
+**Numeric columns — coerce with `pd.to_numeric` (NEVER `.astype(float)`), in a SEPARATE statement before comparing.** A numerically compared/clamped column may carry dirty values. Coerce, **assign back FIRST**, THEN compare/clamp on the now-numeric column. `.astype(float)` raises `ValueError` on the first bad value (validator catches it). Chaining the comparison onto the coerce reads the ORIGINAL `str` column (not yet assigned) → `TypeError: Invalid comparison between dtype=str and int` — a RUNTIME-only crash the validator can't see.
 ```python
-# cast on its OWN statement (assign back), THEN clamp — never chain a comparison onto the cast
-chunk['ad_spend'] = chunk['ad_spend'].astype(float)
+# ❌ .where reads the un-coerced (string) column → TypeError at runtime
+chunk['ad_spend'] = pd.to_numeric(chunk['ad_spend'], errors='coerce').where(chunk['ad_spend'] >= 0, other=0)
+# ✅ coerce + assign back FIRST, THEN clamp
+chunk['ad_spend'] = pd.to_numeric(chunk['ad_spend'], errors='coerce')
 chunk['ad_spend'] = chunk['ad_spend'].fillna(0).clip(lower=0)   # non-numeric→NaN→0, negative→0
 ```
 (`.astype('Int64')` for the final integer cast is separate — see Storage.)
@@ -119,7 +121,7 @@ chunk['ad_spend'] = chunk['ad_spend'].fillna(0).clip(lower=0)   # non-numeric→
 **Worked example** — EU Sales (6 rules → 5 columns). **Each row-removing rule MUST take a FRESH `_before = len(chunk)` immediately before ITS OWN filter** — a single shared `_before` makes every rule report the *cumulative* drop, so the deltas double-count and `sum(by_reason)` explodes. Fresh-per-rule guarantees `sum(rejected_by_reason.values()) == rejected_rows`.
 ```python
 # monetary_integrity: target_criteria 'price' → unit_price column → DROP_RECORD, logic > 0.0
-chunk['unit_price'] = chunk['unit_price'].astype(float)  # dirty/non-numeric → NaN
+chunk['unit_price'] = pd.to_numeric(chunk['unit_price'], errors='coerce')  # dirty/non-numeric → NaN
 _before = len(chunk)
 chunk = chunk[chunk['unit_price'] > 0.0]    # NaN (coerced dirty) and <=0 dropped → counted as rejected
 rejected_by_reason['monetary_integrity'] = \
