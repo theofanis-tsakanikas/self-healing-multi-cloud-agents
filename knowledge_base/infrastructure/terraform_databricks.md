@@ -101,12 +101,6 @@ resource "databricks_job" "pipeline" {
     task_key            = "etl"
     existing_cluster_id = data.databricks_cluster.jobs.id
 
-    # The cluster ships NO source-DB JDBC driver — attach it, or spark.read.format("jdbc")
-    # fails ClassNotFoundException. Postgres source → postgresql; MySQL source → mysql-connector-j.
-    library {
-      maven { coordinates = "org.postgresql:postgresql:42.7.3" }
-    }
-
     spark_python_task {
       python_file = "dbfs:/pipelines/<pipeline_id>/<script_name>.py"   # CI uploads the script here first
       parameters = [

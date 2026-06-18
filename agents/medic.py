@@ -193,6 +193,35 @@ def _extract_ci_failed_file(messages: list) -> str:
     return ""
 
 
+# CI-runtime error signatures whose owner is UNAMBIGUOUS = infra. A CI-LOG failure (no validation
+# result) is normally routed to the architect via the failing scripts/*.py frame in the traceback —
+# but a missing-dependency failure (a JVM class/Maven library the job needs is not attached) surfaces
+# AT the script's read line yet the fix is the Terraform job `library` block, NOT the script. These
+# signatures never appear in the object-storage clouds' pandas tracebacks (they are JVM/Databricks
+# only), so matching them is additive — it cannot mis-route an AWS/GCP/Azure script error. Anything
+# NOT matched here keeps the existing script-file routing / the LLM's target_agent (judgment intact).
+_CI_INFRA_SIGNATURES = (
+    "classnotfoundexception",      # e.g. org.postgresql.Driver — JDBC driver library missing
+    "noclassdeffounderror",
+    "library installation failed",
+    "failed to install library",
+)
+
+
+def _ci_error_owner(messages: list) -> str:
+    """Return 'infra' when the CI logs carry an UNAMBIGUOUS infra/dependency signature (the fix is
+    the Terraform job library block, not the script); '' otherwise (→ keep script-file routing).
+    Scans the most recent messages (the fetch_github_action_logs output)."""
+    for msg in reversed(messages[-12:]):
+        content = getattr(msg, "content", "") or ""
+        if not isinstance(content, str):
+            content = str(content)
+        low = content.lower()
+        if any(sig in low for sig in _CI_INFRA_SIGNATURES):
+            return "infra"
+    return ""
+
+
 def _accumulate_healing_context(existing: str, new_chunk: str) -> str:
     """Append a new fix chunk to the running healing_context WITHOUT overwriting.
     Multiple request_fix calls in one medic turn must ALL reach the target agent, so
@@ -560,6 +589,24 @@ def medic_node(state: AgentState):
                     "Target file(s) to fix: " + ", ".join(_failed_files) + "\n\n" + healing_context
                 )
                 logger.info("🩹 Injected FAILED filename(s) into healing_context for patch targeting.")
+        elif _ci_error_owner(state["messages"]) == "infra":
+            # CI-LOG failure with an UNAMBIGUOUS infra/dependency signature (e.g. a missing JDBC
+            # driver → ClassNotFoundException). The error surfaces AT the script's read line, but
+            # the fix is the Terraform job `library` block, NOT the script — so route to infra
+            # deterministically (overriding the LLM's target_agent and the script-frame heuristic)
+            # and point healing_context at the Terraform. Mirrors the generation-phase ownership
+            # routing, but keyed on the ERROR TYPE rather than the file location.
+            deterministic_fix_target = "infra"
+            _ci_file = _extract_ci_failed_file(state["messages"])
+            healing_context = (
+                "Target: the pipeline Terraform (terraform/main.tf) — this is a missing-dependency "
+                "RUNTIME failure: a class/library the job needs is not attached (see the "
+                "ClassNotFoundException/NoClassDefFoundError below). Fix the `databricks_job` "
+                "`library { maven { coordinates = ... } }` block (add/correct the JDBC driver). Do "
+                "NOT edit the Spark script" + (f" `{_ci_file}`" if _ci_file else "") + " — it is correct.\n\n"
+                + healing_context
+            )
+            logger.info("🧭 CI-runtime infra signature (missing library) → routing fix to infra (Terraform).")
         else:
             # CI-LOG failure (a runtime error surfaced by fetch_github_action_logs) — there is no
             # validate_generated_code result to map to a file. Pull the failing artifact straight
