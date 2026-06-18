@@ -701,6 +701,28 @@ def _cell(txt, limit: int = 6000) -> str:
     return _html.escape(s)
 
 
+def _scroll_to_top():
+    """Scroll the main view back to the top. Used on wizard step ENTRY so the user lands on the
+    section heading/summary, not wherever the previous step left the scroll (e.g. the deploy
+    button at the bottom). Targets the Streamlit main scroll container across versions + the
+    window itself; a tiny random query keeps the iframe unique so it re-fires on each entry."""
+    import random
+    components.html(
+        f"""
+        <script>
+          const _t = {random.random()};
+          const d = window.parent.document;
+          const main = d.querySelector(
+            'section.main, section[data-testid="stMain"], .stMain, [data-testid="stAppViewContainer"] > .main'
+          );
+          if (main) {{ main.scrollTo({{top: 0, behavior: 'auto'}}); }}
+          window.parent.scrollTo({{top: 0, behavior: 'auto'}});
+        </script>
+        """,
+        height=0,
+    )
+
+
 def _render_substep_html(s: dict) -> str:
     """One nested, expandable sub-step (LangSmith-style): a tool call shows its input args,
     a result shows the tool output, plain text renders inline."""
@@ -1744,6 +1766,13 @@ with tab_nl:
             st.session_state[_k] = _v
 
     _nl_step = st.session_state.nl_step
+
+    # On landing the Confirm/deploy step (3), scroll to the top so the summary + cost preview are
+    # seen first — otherwise the page keeps the previous step's scroll and lands on the
+    # "Confirm & Deploy" button at the bottom. One-shot: only on the transition INTO step 3.
+    if _nl_step == 3 and st.session_state.get("_nl_prev_step") != 3:
+        _scroll_to_top()
+    st.session_state["_nl_prev_step"] = _nl_step
 
     # ── Step progress bar ─────────────────────────────────────────────────
     _STEP_LABELS = ["📝 Describe", "⚙️ Fields", "📋 Rules", "✅ Confirm", "🚀 Deploy"]
