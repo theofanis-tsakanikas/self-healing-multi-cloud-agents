@@ -16,4 +16,4 @@ COPY dashboards/ dashboards/
 RUN useradd --no-create-home --shell /bin/false appuser
 USER appuser
 
-CMD ["python", "scripts/pipe_etl_pipeline_gcp_to_gcp.py"]
+CMD ["python", "scripts/pipe_mysqp_to_gcp_etl_pipeline_to_gcp.py"]

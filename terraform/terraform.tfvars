@@ -1,5 +1,5 @@
-project_id = "multi-cloud-self-healing-agent"
+project_id = ""
 region = "europe-west3"
-bucket_name = "etl-pipeline-gcp-insights-data-9da821"
+bucket_name = "mysqp-to-gcp-etl-pipeline-insights-data-dcdac2"
 service_account_id = "pipelines-insights-sa"
 k8s_service_account_name = "pipelines-insights-sa"

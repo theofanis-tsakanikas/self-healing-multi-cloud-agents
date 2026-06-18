@@ -1,17 +1,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pipe-etl-pipeline-gcp-to-gcp-job
+  name: pipe-mysqp-to-gcp-etl-pipeline-to-gcp-job
   namespace: analytics
   labels:
-    project_id: pipe_etl_pipeline_gcp_to_gcp
+    project_id: pipe_mysqp_to_gcp_etl_pipeline_to_gcp
     component: pipeline-job
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        project_id: pipe_etl_pipeline_gcp_to_gcp
+        project_id: pipe_mysqp_to_gcp_etl_pipeline_to_gcp
         component: pipeline-job
     spec:
       serviceAccountName: pipelines-insights-sa
@@ -32,21 +32,21 @@ spec:
           mountPath: /scripts
       containers:
       - name: pipeline
-        image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-etl-pipeline-gcp-to-gcp-20260618-0458:latest
+        image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mysqp-to-gcp-etl-pipeline-to-gcp-20260618-0755:latest
         env:
         - name: PROJECT_ID
-          value: "pipe_etl_pipeline_gcp_to_gcp"
+          value: "pipe_mysqp_to_gcp_etl_pipeline_to_gcp"
         - name: CLOUD_PROVIDER
           value: "gcp"
         - name: DESTINATION_URI
-          value: "gs://etl-pipeline-gcp-insights-data-9da821/processed/"
+          value: "gs://mysqp-to-gcp-etl-pipeline-insights-data-dcdac2/processed/"
         - name: TRINO_HOST
           value: "trino.analytics.svc.cluster.local"
         - name: PUSHGATEWAY_URL
           value: "http://pushgateway.monitoring.svc.cluster.local:9091"
         envFrom:
         - secretRef:
-            name: pipe-etl-pipeline-gcp-to-gcp-db-credentials
+            name: pipe-mysqp-to-gcp-etl-pipeline-to-gcp-db-credentials
         resources:
           requests:
             memory: "1Gi"

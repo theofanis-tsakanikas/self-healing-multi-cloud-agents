@@ -8,11 +8,11 @@ metadata:
 data:
   setup_trino.sql: |
     CREATE SCHEMA IF NOT EXISTS hive.marketing_global;
-    DROP TABLE IF EXISTS hive.marketing_global.pipe_etl_pipeline_gcp_to_gcp;
-    CREATE TABLE hive.marketing_global.pipe_etl_pipeline_gcp_to_gcp (
+    DROP TABLE IF EXISTS hive.marketing_global.pipe_mysqp_to_gcp_etl_pipeline_to_gcp;
+    CREATE TABLE hive.marketing_global.pipe_mysqp_to_gcp_etl_pipeline_to_gcp (
         campaign_id VARCHAR,
         platform_name VARCHAR,
-        ad_spend DECIMAL(18,2),
+        ad_spend DOUBLE,
         clicks BIGINT,
         impressions DOUBLE,
         event_timestamp TIMESTAMP,
@@ -20,7 +20,7 @@ data:
         run_date DATE
     ) WITH (
         format = 'PARQUET',
-        external_location = 'gs://etl-pipeline-gcp-insights-data-9da821/processed/',
+        external_location = 'gs://mysqp-to-gcp-etl-pipeline-insights-data-dcdac2/processed/',
         partitioned_by = ARRAY['run_date']
     );
 ---
@@ -35,7 +35,7 @@ data:
   hive.properties: |
     connector.name=hive
     hive.metastore=file
-    hive.metastore.catalog.dir=gs://etl-pipeline-gcp-insights-data-9da821/metastore/
+    hive.metastore.catalog.dir=gs://mysqp-to-gcp-etl-pipeline-insights-data-dcdac2/metastore/
     hive.gcs.use-access-token=false
     hive.allow-drop-table=true
     hive.allow-rename-table=true
@@ -61,8 +61,8 @@ data:
         path: /etc/grafana/provisioning/dashboards
   monitoring_specs.json: |
     {
-      "uid": "etl-pipeline-gcp-data-observability",
-      "title": "Etl Pipeline Gcp Data Observability",
+      "uid": "mysqp-to-gcp-etl-pipeline-3ebb7ef5",
+      "title": "Mysqp To Gcp Etl Pipeline Data Observability",
       "schemaVersion": 37,
       "version": 1,
       "refresh": "5m",
@@ -72,7 +72,7 @@ data:
       },
       "tags": [
         "data-pipeline",
-        "etl-pipeline-gcp",
+        "mysqp-to-gcp-etl-pipeline",
         "gcp"
       ],
       "templating": {

@@ -1,6 +1,6 @@
 {
-  "uid": "etl-pipeline-gcp-data-observability",
-  "title": "Etl Pipeline Gcp Data Observability",
+  "uid": "mysqp-to-gcp-etl-pipeline-3ebb7ef5",
+  "title": "Mysqp To Gcp Etl Pipeline Data Observability",
   "schemaVersion": 37,
   "version": 1,
   "refresh": "5m",
@@ -10,7 +10,7 @@
   },
   "tags": [
     "data-pipeline",
-    "etl-pipeline-gcp",
+    "mysqp-to-gcp-etl-pipeline",
     "gcp"
   ],
   "templating": {
