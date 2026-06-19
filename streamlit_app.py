@@ -1295,7 +1295,7 @@ def _render_rules_selector(key_prefix: str):
 
     mode = st.radio(
         "Rules source",
-        ["📋 Demo rules", "📝 Extract from description", "📁 Upload file"],
+        ["📋 Demo rules", "📝 Extract from description", "✍️ Build rules", "📁 Upload file"],
         key=f"rules_mode_{key_prefix}",
         horizontal=True,
         label_visibility="collapsed",
@@ -1337,6 +1337,79 @@ def _render_rules_selector(key_prefix: str):
             except ValueError as e:
                 st.error(str(e))
                 rules_conf = None
+
+    elif mode == "✍️ Build rules":
+        # Author rules in-place — no file upload. Two sub-modes: a structured FORM
+        # ("Add rule" with fields + on-failure dropdown, spreadsheet-style) and a
+        # NATURAL-LANGUAGE box (typed rules → structured via extract_rules_from_nl).
+        # Built rules accumulate in session_state and feed the same rules_conf shape.
+        _bk = f"built_rules_{key_prefix}"
+        st.session_state.setdefault(_bk, [])
+        _ACTIONS = ["DROP_RECORD", "EXCLUDE_AND_LOG", "DEFAULT_VALUE", "FLAG_AS_SUSPICIOUS"]
+        _sub = st.radio(
+            "Build mode",
+            ["🧱 Fields", "🗣️ Natural language"],
+            key=f"build_sub_{key_prefix}", horizontal=True, label_visibility="collapsed",
+        )
+
+        if _sub == "🧱 Fields":
+            with st.form(key=f"rule_form_{key_prefix}", clear_on_submit=True):
+                _fc1, _fc2 = st.columns(2)
+                with _fc1:
+                    _name   = st.text_input("Rule name", placeholder="monetary_integrity")
+                    _target = st.text_input("Target column / criteria", placeholder="unit_price")
+                with _fc2:
+                    _action  = st.selectbox("On failure", _ACTIONS)
+                    _default = st.text_input("Default (DEFAULT_VALUE only)", placeholder="EUR")
+                _logic = st.text_input("Logic / condition", placeholder="Value must be > 0")
+                if st.form_submit_button("➕ Add rule"):
+                    if _name.strip() and _logic.strip():
+                        _r = {
+                            "capability": _name.strip(),
+                            "description": _name.strip(),
+                            "target_criteria": _target.strip(),
+                            "logic": _logic.strip(),
+                            "on_failure_action": _action,
+                        }
+                        if _action == "DEFAULT_VALUE" and _default.strip():
+                            _r["default"] = _default.strip()
+                        st.session_state[_bk].append(_r)
+                    else:
+                        st.warning("Rule name and logic are required.")
+        else:
+            _nl = st.text_area(
+                "Describe your rules in plain English",
+                placeholder=("Drop orders where unit_price is 0 or negative; exclude future-dated "
+                             "orders; replace unknown currency with EUR; flag quantity over 1000."),
+                key=f"build_nl_{key_prefix}", height=90,
+            )
+            if st.button("✨ Convert to rules", key=f"build_nl_btn_{key_prefix}") and _nl.strip():
+                from utils.rules_loader import extract_rules_from_nl
+                try:
+                    _new = extract_rules_from_nl(_nl).get("quality_standards", [])
+                    st.session_state[_bk].extend(_new)
+                    st.success(f"Added {len(_new)} rule(s) from your text.")
+                except Exception as _e:
+                    st.error(f"Could not parse: {_e}")
+
+        _built = st.session_state[_bk]
+        if _built:
+            for _i, _r in enumerate(list(_built)):
+                _rc1, _rc2 = st.columns([8, 1])
+                _rc1.markdown(
+                    f"<span style='color:#e2e8f0;font-size:0.8rem;'><b>{_r.get('capability','')}</b> — "
+                    f"{_r.get('logic','')} → <span style='color:#f97316;'>"
+                    f"{_r.get('on_failure_action','')}</span></span>",
+                    unsafe_allow_html=True,
+                )
+                if _rc2.button("🗑️", key=f"build_del_{key_prefix}_{_i}"):
+                    _built.pop(_i)
+                    st.rerun()
+            if st.button("🧹 Clear all", key=f"build_clr_{key_prefix}"):
+                st.session_state[_bk] = []
+                st.rerun()
+            from utils.rules_loader import _normalize_rules
+            rules_conf = _normalize_rules({"domain": "custom", "quality_standards": list(_built)})
 
     # Preview
     if rules_conf:
