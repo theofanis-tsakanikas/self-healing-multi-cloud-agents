@@ -1423,10 +1423,16 @@ def _render_cost_charts(size_gb: int = 50, key: str = "cost"):
     # Cost breakdown — pick ANY cloud (defaults to the cheapest).
     _bd_order  = sorted(estimates, key=lambda e: e["total"])           # cheapest first
     _bd_labels = [_labels[e["cloud"]] for e in _bd_order]
-    with st.expander("Cost breakdown — pick a cloud", expanded=False):
+    # Keep the breakdown OPEN when the user switches cloud: changing the radio triggers a rerun,
+    # and a hardcoded expanded=False would slam the expander shut. Persist an open flag in
+    # session_state (set by the radio's on_change) so the expander stays open and just swaps clouds.
+    _bd_open_key = f"{key}_bd_open"
+    with st.expander("Cost breakdown — pick a cloud",
+                     expanded=st.session_state.get(_bd_open_key, False)):
         _pick = st.radio(
             "Breakdown cloud", _bd_labels, index=0, horizontal=True,
             label_visibility="collapsed", key=f"{key}_breakdown_pick",
+            on_change=lambda k=_bd_open_key: st.session_state.update({k: True}),
         )
         _sel = _bd_order[_bd_labels.index(_pick)]
         _bd_df = pd.DataFrame(
