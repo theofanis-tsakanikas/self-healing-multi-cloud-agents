@@ -1,5 +1,5 @@
 resource "databricks_secret_scope" "pipeline" {
-  name = "pipe_sales_orders_pipeline_v3_lakehouse"
+  name = "pipe_sales_orders_pipeline_dbx_lakehouse"
 }
 
 data "aws_ssm_parameter" "db_host"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_host" }
@@ -8,7 +8,7 @@ data "aws_ssm_parameter" "db_user"     { name = "/multi-cloud-self-healing-agent
 data "aws_ssm_parameter" "db_password" { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_password" }
 
 resource "databricks_secret" "db_password" {
-  key          = "db_password"
+  key          = "postgres_password"
   string_value = data.aws_ssm_parameter.db_password.value
   scope        = databricks_secret_scope.pipeline.name
 }
@@ -18,7 +18,7 @@ data "databricks_cluster" "jobs" {
 }
 
 resource "databricks_job" "pipeline" {
-  name = "pipe_sales_orders_pipeline_v3_lakehouse"
+  name = "pipe_sales_orders_pipeline_dbx_lakehouse"
 
   run_as {
     service_principal_name = var.databricks_client_id
@@ -28,8 +28,12 @@ resource "databricks_job" "pipeline" {
     task_key            = "etl"
     existing_cluster_id = data.databricks_cluster.jobs.id
 
+    library {
+      maven { coordinates = "org.postgresql:postgresql:42.7.3" }
+    }
+
     spark_python_task {
-      python_file = "dbfs:/pipelines/pipe_sales_orders_pipeline_v3_lakehouse/pipe_sales_orders_pipeline_v3_lakehouse.py"
+      python_file = "dbfs:/pipelines/pipe_sales_orders_pipeline_dbx_lakehouse/pipe_sales_orders_pipeline_dbx_lakehouse.py"
       parameters = [
         "--catalog", var.catalog,
         "--schema", var.schema,
@@ -52,9 +56,9 @@ data "databricks_sql_warehouse" "obs" {
 }
 
 resource "databricks_dashboard" "observability" {
-  display_name      = "pipe_sales_orders_pipeline_v3_lakehouse — Observability"
+  display_name      = "pipe_sales_orders_pipeline_dbx_lakehouse — Observability"
   parent_path       = "/Shared"
   warehouse_id      = data.databricks_sql_warehouse.obs.id
-  file_path         = "${path.module}/../dashboards/pipe_sales_orders_pipeline_v3_lakehouse_lakeview.json"
+  file_path         = "${path.module}/../dashboards/pipe_sales_orders_pipeline_dbx_lakehouse_lakeview.json"
   embed_credentials = false
 }

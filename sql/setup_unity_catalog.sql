@@ -1,7 +1,7 @@
 CREATE CATALOG IF NOT EXISTS multi_cloud_agent_workspace;
 CREATE SCHEMA IF NOT EXISTS multi_cloud_agent_workspace.raw;
 
-CREATE TABLE IF NOT EXISTS multi_cloud_agent_workspace.raw.pipe_sales_orders_pipeline_v3_lakehouse (
+CREATE TABLE IF NOT EXISTS multi_cloud_agent_workspace.raw.pipe_sales_orders_pipeline_dbx_lakehouse (
     order_id TEXT,
     unit_price DOUBLE PRECISION,
     quantity DOUBLE PRECISION,
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS multi_cloud_agent_workspace.raw.pipe_sales_orders_pip
 ) USING DELTA
 PARTITIONED BY (run_date);
 
-CREATE TABLE IF NOT EXISTS multi_cloud_agent_workspace.raw.pipe_sales_orders_pipeline_v3_lakehouse_audit (
+CREATE TABLE IF NOT EXISTS multi_cloud_agent_workspace.raw.pipe_sales_orders_pipeline_dbx_lakehouse_audit (
     run_timestamp TIMESTAMP,
     run_date STRING,
     rows_processed BIGINT,
