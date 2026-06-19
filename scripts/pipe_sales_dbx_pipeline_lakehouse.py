@@ -11,10 +11,10 @@ logging.getLogger("py4j").setLevel(logging.WARNING)
 logging.getLogger("py4j.clientserver").setLevel(logging.WARNING)
 
 def run():
-    logging.info("Databricks pipeline starting: pipe_sales_orders_pipeline_dbx_lakehouse")
+    logging.info("Databricks pipeline starting: pipe_sales_dbx_pipeline_lakehouse")
     spark = SparkSession.builder.getOrCreate()
 
-    # ── 1. PARAMETERS ─────────────────────
+    # ── 1. PARAMETERS (passed by the databricks_job task) ─────────────────────
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", required=True)
     parser.add_argument("--schema", required=True)
@@ -25,24 +25,24 @@ def run():
     args, _ = parser.parse_known_args()
 
     catalog, schema = args.catalog, args.schema
-    table = f"{catalog}.{schema}.pipe_sales_orders_pipeline_dbx_lakehouse"
-    audit_table = f"{catalog}.{schema}.pipe_sales_orders_pipeline_dbx_lakehouse_audit"
+    table = f"{catalog}.{schema}.pipe_sales_dbx_pipeline_lakehouse"
+    audit_table = f"{catalog}.{schema}.pipe_sales_dbx_pipeline_lakehouse_audit"
     run_date = datetime.date.today().isoformat()
     start_time = time.time()
 
-    # ── 2. CREDENTIALS ─────────────────────
+    # ── 2. CREDENTIALS ───────────────────────────────────────────────────────
     db_host, db_name, db_user = args.db_host, args.db_name, args.db_user
     db_password = dbutils.secrets.get(args.secret_scope, "db_password")  # noqa: F821
     jdbc_url = f"jdbc:postgresql://{db_host}:5432/{db_name}?sslmode=require&connectTimeout=15&socketTimeout=120"
 
-    # ── 3. IDEMPOTENCY ─────────────────────
+    # ── 3. IDEMPOTENCY ───────────────────────────────────────────────────────
     if spark.catalog.tableExists(table):
         already = spark.table(table).where(F.col("run_date") == run_date).limit(1).count()
         if already:
             logging.info(f"run_date={run_date} already present in {table}. Skipping.")
             return
 
-    # ── 4. EXTRACT (Spark JDBC) ─────────────────────
+    # ── 4. EXTRACT (Spark JDBC) ───────────────────────────────────────────────
     df = (
         spark.read.format("jdbc")
         .option("url", jdbc_url)
@@ -54,7 +54,7 @@ def run():
         .cache()
     )
 
-    # ── 5. BUSINESS RULES ─────────────────────
+    # ── 5. BUSINESS RULES ────────────────────────────────────────────────────
     rejected_by_reason = {}
 
     # Rule 1: Unit price cannot be null, zero, or negative.
@@ -83,7 +83,7 @@ def run():
 
     rows_rejected = sum(rejected_by_reason.values())
 
-    # ── 6. WRITE to Delta ─────────────────────
+    # ── 6. WRITE to Delta (Unity Catalog, partitioned by run_date) ────────────
     out = df.withColumn("run_date", F.lit(run_date))
     rows_processed = out.count()
     (
@@ -97,7 +97,7 @@ def run():
     duration_seconds = time.time() - start_time
     logging.info(f"Wrote {rows_processed} rows to {table} (rejected={rows_rejected}).")
 
-    # ── 7. AUDIT TABLE ─────────────────────
+    # ── 7. AUDIT TABLE ───────────────────────────────────────────────────────
     audit_row = [(
         datetime.datetime.now(datetime.timezone.utc),
         run_date,
@@ -112,6 +112,7 @@ def run():
     logging.info(
         f"Audit row written: rows_processed={rows_processed}, rows_rejected={rows_rejected}, duration={duration_seconds:.1f}s, by_reason={rejected_by_reason}"
     )
+
 
 if __name__ == "__main__":
     run()

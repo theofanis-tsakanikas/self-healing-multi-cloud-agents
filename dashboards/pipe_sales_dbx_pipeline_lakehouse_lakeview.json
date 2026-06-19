@@ -4,21 +4,21 @@
       "name": "ds_summary",
       "displayName": "Latest run",
       "queryLines": [
-        "SELECT rows_processed, rows_rejected, duration_seconds, run_date, CASE WHEN (rows_processed + rows_rejected) > 0 THEN round(100.0 * rows_rejected / (rows_processed + rows_rejected), 1) ELSE 0 END AS rejection_rate_pct FROM multi_cloud_agent_workspace.raw.pipe_sales_orders_databricks_lakehouse_audit ORDER BY run_timestamp DESC LIMIT 1"
+        "SELECT rows_processed, rows_rejected, duration_seconds, run_date, CASE WHEN (rows_processed + rows_rejected) > 0 THEN round(100.0 * rows_rejected / (rows_processed + rows_rejected), 1) ELSE 0 END AS rejection_rate_pct FROM multi_cloud_agent_workspace.raw.pipe_sales_dbx_pipeline_lakehouse_audit ORDER BY run_timestamp DESC LIMIT 1"
       ]
     },
     {
       "name": "ds_trend",
       "displayName": "Per-run volume",
       "queryLines": [
-        "SELECT run_date, 'processed' AS metric, rows_processed AS value FROM multi_cloud_agent_workspace.raw.pipe_sales_orders_databricks_lakehouse_audit UNION ALL SELECT run_date, 'rejected' AS metric, rows_rejected AS value FROM multi_cloud_agent_workspace.raw.pipe_sales_orders_databricks_lakehouse_audit"
+        "SELECT run_date, 'processed' AS metric, rows_processed AS value FROM multi_cloud_agent_workspace.raw.pipe_sales_dbx_pipeline_lakehouse_audit UNION ALL SELECT run_date, 'rejected' AS metric, rows_rejected AS value FROM multi_cloud_agent_workspace.raw.pipe_sales_dbx_pipeline_lakehouse_audit"
       ]
     },
     {
       "name": "ds_reasons",
       "displayName": "Rejections by reason (latest run)",
       "queryLines": [
-        "SELECT reason, cnt FROM multi_cloud_agent_workspace.raw.pipe_sales_orders_databricks_lakehouse_audit LATERAL VIEW explode(rejected_by_reason) t AS reason, cnt WHERE run_timestamp = (SELECT MAX(run_timestamp) FROM multi_cloud_agent_workspace.raw.pipe_sales_orders_databricks_lakehouse_audit)"
+        "SELECT reason, cnt FROM multi_cloud_agent_workspace.raw.pipe_sales_dbx_pipeline_lakehouse_audit LATERAL VIEW explode(rejected_by_reason) t AS reason, cnt WHERE run_timestamp = (SELECT MAX(run_timestamp) FROM multi_cloud_agent_workspace.raw.pipe_sales_dbx_pipeline_lakehouse_audit)"
       ]
     }
   ],
