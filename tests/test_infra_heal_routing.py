@@ -88,3 +88,27 @@ def test_object_storage_heal_does_not_add_execute_terraform():
     assert "execute_terraform" not in tools, "object-storage heal must NOT change (protect validated clouds)"
     assert "patch_project_file" in tools
     assert "push_to_github" in tools
+
+
+# --- the fix-prompt injects the CURRENT file content so the patch targets real text ---
+def test_inject_current_file_contents_uses_real_text(tmp_path, monkeypatch):
+    """The LLM patched blind against the standard's `<pipeline_id>` placeholder → no-op. The fix
+    injects the REAL on-disk content so `old` matches (e.g. the wrong `postgres_password`)."""
+    import agents.infra as infra
+    (tmp_path / "terraform").mkdir()
+    (tmp_path / "terraform" / "main.tf").write_text(
+        'resource "databricks_secret" "db_password" {\n'
+        '  key   = "postgres_password"\n'
+        '  scope = databricks_secret_scope.pipeline.name\n}\n'
+    )
+    monkeypatch.setattr(infra, "REPO_ROOT", tmp_path)
+
+    hc = "Target: the pipeline Terraform (terraform/main.tf) — Secret does not exist key: db_password"
+    block = infra._inject_current_file_contents(hc)
+    assert "postgres_password" in block          # the REAL wrong value is now visible to patch
+    assert "CURRENT ON-DISK CONTENT" in block
+
+    # architect-owned files (.py / sql / dashboards / requirements) are never injected by infra
+    assert infra._inject_current_file_contents("fix scripts/pipe_x.py now") == ""
+    # no infra path named → nothing injected
+    assert infra._inject_current_file_contents("a generic message with no file path") == ""

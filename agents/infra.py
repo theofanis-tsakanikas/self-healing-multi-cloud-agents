@@ -80,6 +80,50 @@ def _is_infra_allowed_file(filename: str) -> bool:
     return True
 
 
+# Infra-owned file paths the Medic may name in a healing_context (terraform, k8s, Dockerfile,
+# the deploy workflow). Used to pull the CURRENT on-disk content into the fix prompt so the LLM
+# patches the REAL text, not a standard's placeholder.
+_INFRA_FILE_PATH_RE = re.compile(
+    r"(?:terraform/[\w./-]+\.tf"
+    r"|k8s/[\w./-]+\.ya?ml"
+    r"|\.github/workflows/[\w./-]+\.ya?ml"
+    r"|Dockerfile)",
+    re.IGNORECASE,
+)
+
+
+def _inject_current_file_contents(healing_context: str) -> str:
+    """Return a prompt block with the CURRENT on-disk content of every infra-owned file named in
+    the healing_context. In a CI-runtime heal the file was written many turns ago and trimmed from
+    context, so the LLM patches BLIND — it guessed a standard placeholder (`<pipeline_id>`) as the
+    `old` string and the patch was a no-op. The standard injected into the prompt is only a TEMPLATE
+    (placeholders + skeleton values); the real `old` must come from the actual file. Empty string
+    when no infra-owned file is named / found on disk."""
+    found: dict[str, str] = {}
+    for raw in _INFRA_FILE_PATH_RE.findall(healing_context or ""):
+        norm = raw.replace("\\", "/").lstrip("/")
+        if norm in found or not _is_infra_allowed_file(norm):
+            continue
+        path = REPO_ROOT / norm
+        if not path.is_file():
+            continue
+        try:
+            found[norm] = path.read_text()
+        except Exception:
+            continue
+    if not found:
+        return ""
+    block = (
+        "\n\n📄 CURRENT ON-DISK CONTENT of the file(s) to fix — this is the SOURCE OF TRUTH for the "
+        "`old` string in patch_project_file. The engineering standard above is only a TEMPLATE "
+        "(skeleton + `<placeholders>`); NEVER patch placeholder text like `<pipeline_id>` — it does "
+        "not exist in the real file. Copy the EXACT current text from below as `old`:\n"
+    )
+    for norm, content in found.items():
+        block += f"\n--- {norm} (current) ---\n```\n{content}\n```\n"
+    return block
+
+
 def _pin_terraform_backend(content: str, cloud: str, cloud_setup: dict) -> str:
     """Deterministic guarantee: the terraform STATE backend is mechanically determined by the
     bootstrap (CLOUD_SETUP.state_*), not a judgement call — but the LLM intermittently fills the
@@ -436,6 +480,11 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
             f"Apply this fix exactly as described. "
             f"Only call query_vector_store if the instructions above explicitly require it."
         )
+        # Inject the CURRENT on-disk content of the target file(s) so patch_project_file's `old`
+        # string matches reality — without it the LLM patches blind against the standard's
+        # placeholders (e.g. `<pipeline_id>`) and the patch is a no-op (the heal then loops on the
+        # unchanged error until it escalates).
+        system_prompt += _inject_current_file_contents(healing_context)
 
     # Inform the agent about the current operational phase
     if not has_all_standards:
@@ -655,6 +704,16 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
 
                 if "error" in result_str.lower() and t_name != "query_vector_store":
                     any_tool_error = True
+
+                # A no-op patch (every replacement skipped → "Applied:\n  (none)") is NOT success:
+                # the intended change never landed — usually a wrong `old` string (the LLM matched a
+                # standard placeholder like `<pipeline_id>` instead of the real line). Treat it as an
+                # error so the heal doesn't falsely "complete" + push nothing + loop on the unchanged
+                # CI error until it escalates. The Skipped (not-found `old`) detail stays in the
+                # message for the next turn / the Medic.
+                if t_name == "patch_project_file" and "Applied:\n  (none)" in result_str:
+                    any_tool_error = True
+                    logger.warning("🚫 No-op patch (nothing applied) — wrong `old` string; flagging as error.")
 
                 # A. Standard Capture (Smart Mapping)
                 if t_name == "query_vector_store":

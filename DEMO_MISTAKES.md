@@ -50,6 +50,15 @@ DBR cannot "save" a secret that does not exist.)
   scope stayed stale and the job failed identically. Now the Databricks push-phase heal also binds
   `execute_terraform` (gated to `is_databricks` — object-storage clouds unchanged) and the fix
   prompt instructs patch → `execute_terraform apply` → push. `tests/test_infra_heal_routing.py`.
+- **`agents/infra.py` — BLIND-PATCH fix (the 2nd run exposed this).** The infra agent never saw the
+  target file's current content (it was trimmed from context many turns earlier, and `read_file`
+  isn't even an infra tool), so it patched against the STANDARD's placeholders — it tried
+  `old="<pipeline_id>"` (a skeleton placeholder absent from the real file) → `Applied: (none)`
+  no-op → the heal looped on the unchanged error to escalation. Fix: `_inject_current_file_contents`
+  reads the on-disk content of every infra-owned file named in the healing_context and injects it
+  into the fix prompt as the SOURCE OF TRUTH for the `old` string (the standard is only a template).
+  Plus a defense-in-depth guard: a no-op patch (`Applied:\n  (none)`) is now flagged as an error
+  instead of a silent "success". `tests/test_infra_heal_routing.py`.
 
 ## Revert
 - `terraform_databricks.md`: `key = "postgres_password"` → `key = "db_password"`.
