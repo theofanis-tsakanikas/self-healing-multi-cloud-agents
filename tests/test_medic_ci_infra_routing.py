@@ -46,6 +46,21 @@ def test_library_install_failure_routes_infra():
     assert _owner("Library installation failed for library due to user error") == "infra"
 
 
+def test_secret_not_found_routes_infra():
+    # databricks_secret key ≠ dbutils.secrets.get key → fix the Terraform secret, not the script.
+    log = (
+        'py4j.protocol.Py4JJavaError: An error occurred while calling o45.get.\n'
+        ': java.lang.IllegalArgumentException: Secret does not exist with scope: '
+        'pipe_sales and key: db_password\n'
+        '  File "/databricks/.../scripts/pipe_sales_lakehouse.py", line 85, in run'
+    )
+    assert _owner(log) == "infra"
+
+
+def test_resource_does_not_exist_routes_infra():
+    assert _owner("RESOURCE_DOES_NOT_EXIST: No secret scope found") == "infra"
+
+
 # --- must NOT match (keep existing architect/script routing) — the 4-cloud safety net ---
 def test_pandas_keyerror_not_infra():
     log = (

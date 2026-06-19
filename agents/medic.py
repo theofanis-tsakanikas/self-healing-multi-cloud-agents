@@ -195,23 +195,28 @@ def _extract_ci_failed_file(messages: list) -> str:
 
 # CI-runtime error signatures whose owner is UNAMBIGUOUS = infra. A CI-LOG failure (no validation
 # result) is normally routed to the architect via the failing scripts/*.py frame in the traceback —
-# but a missing-dependency failure (a JVM class/Maven library the job needs is not attached) surfaces
-# AT the script's read line yet the fix is the Terraform job `library` block, NOT the script. These
-# signatures never appear in the object-storage clouds' pandas tracebacks (they are JVM/Databricks
-# only), so matching them is additive — it cannot mis-route an AWS/GCP/Azure script error. Anything
-# NOT matched here keeps the existing script-file routing / the LLM's target_agent (judgment intact).
+# but a missing PROVISIONED-RESOURCE failure surfaces AT the script's line yet the fix is the
+# Terraform, NOT the script:
+#   • a JVM class / Maven library the job needs is not attached  → fix the databricks_job `library`;
+#   • a Databricks secret the script reads (dbutils.secrets.get) does not exist → fix the
+#     `databricks_secret` key in the Terraform so it matches what the script requests.
+# These signatures never appear in the object-storage clouds' pandas tracebacks (they are
+# JVM/Databricks only), so matching them is additive — it cannot mis-route an AWS/GCP/Azure script
+# error. Anything NOT matched here keeps the existing script-file routing / the LLM's target_agent.
 _CI_INFRA_SIGNATURES = (
     "classnotfoundexception",      # e.g. org.postgresql.Driver — JDBC driver library missing
     "noclassdeffounderror",
     "library installation failed",
     "failed to install library",
+    "secret does not exist",       # dbutils.secrets.get key ≠ databricks_secret key → fix Terraform
+    "resource_does_not_exist",     # Databricks API code accompanying a missing secret/scope
 )
 
 
 def _ci_error_owner(messages: list) -> str:
     """Return 'infra' when the CI logs carry an UNAMBIGUOUS infra/dependency signature (the fix is
-    the Terraform job library block, not the script); '' otherwise (→ keep script-file routing).
-    Scans the most recent messages (the fetch_github_action_logs output)."""
+    the Terraform — job library OR secret key — not the script); '' otherwise (→ keep script-file
+    routing). Scans the most recent messages (the fetch_github_action_logs output)."""
     for msg in reversed(messages[-12:]):
         content = getattr(msg, "content", "") or ""
         if not isinstance(content, str):
@@ -599,14 +604,18 @@ def medic_node(state: AgentState):
             deterministic_fix_target = "infra"
             _ci_file = _extract_ci_failed_file(state["messages"])
             healing_context = (
-                "Target: the pipeline Terraform (terraform/main.tf) — this is a missing-dependency "
-                "RUNTIME failure: a class/library the job needs is not attached (see the "
-                "ClassNotFoundException/NoClassDefFoundError below). Fix the `databricks_job` "
-                "`library { maven { coordinates = ... } }` block (add/correct the JDBC driver). Do "
-                "NOT edit the Spark script" + (f" `{_ci_file}`" if _ci_file else "") + " — it is correct.\n\n"
+                "Target: the pipeline Terraform (terraform/main.tf) — this is a missing PROVISIONED-"
+                "RESOURCE runtime failure (see the error below), NOT a script bug. Fix it in the "
+                "Terraform:\n"
+                "  • ClassNotFoundException / NoClassDefFoundError → add/correct the `databricks_job` "
+                "`library { maven { coordinates = ... } }` (the source JDBC driver);\n"
+                "  • 'Secret does not exist … key: <k>' → the `databricks_secret` `key` must EXACTLY "
+                "match the key the script reads in `dbutils.secrets.get(scope, \"<k>\")` — set it to "
+                "the key named in the error.\n"
+                "Do NOT edit the Spark script" + (f" `{_ci_file}`" if _ci_file else "") + " — it is correct.\n\n"
                 + healing_context
             )
-            logger.info("🧭 CI-runtime infra signature (missing library) → routing fix to infra (Terraform).")
+            logger.info("🧭 CI-runtime infra signature (missing library/secret) → routing fix to infra (Terraform).")
         else:
             # CI-LOG failure (a runtime error surfaced by fetch_github_action_logs) — there is no
             # validate_generated_code result to map to a file. Pull the failing artifact straight
