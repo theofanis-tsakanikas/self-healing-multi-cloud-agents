@@ -5,7 +5,7 @@ terraform {
   }
   backend "s3" {
     bucket = "multi-cloud-agent-bootstrap-state"
-    key    = "terraform/sales-dbx-pipeline-data-lakehouse/terraform.tfstate"
+    key    = "terraform/sales-orders-dbx-pipeline-lakehouse/terraform.tfstate"
     region = "eu-central-1"
   }
 }
