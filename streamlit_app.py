@@ -1998,11 +1998,12 @@ with tab_nl:
             st.session_state.nl_rules_desc        = st.session_state.nl_description
 
         if not st.session_state.nl_rules_initialized:
-            # Seed from the NL-extracted rules ONLY if we don't already hold rules. Re-entering
-            # via step-3 "Edit rules" resets this flag, but must NOT wipe rules that came from a
-            # file or domain suggestions (or edits made to them) — _raw_rules is empty for those.
-            if not st.session_state.nl_rules:
-                st.session_state.nl_rules = list(_raw_rules)
+            # Do NOT auto-apply the NL-extracted rules. The user asked to ALWAYS land on the source
+            # picker (build own / suggest / file / none) and choose explicitly — never to arrive at
+            # pre-filled rules they didn't ask for (e.g. the auto PII flags derived from the schema).
+            # The extracted rules are not lost: they are offered on demand as the "Suggest" proposal
+            # (_raw_rules) below. Rules ALREADY held (a picker choice followed by a step-3 re-entry)
+            # are preserved untouched — only the first-entry auto-seed is removed.
             st.session_state.nl_rules_initialized   = True
             st.session_state.nl_wizard_editing_idx  = None
             st.session_state.nl_wizard_adding_rule  = False
@@ -2249,9 +2250,13 @@ with tab_nl:
                 if st.button("✨ Generate suggestions", key="nl_wizard_suggest_btn",
                              type="primary"):
                     with st.spinner(f"Generating rules for '{_domain}' domain…"):
+                        # Prefer the rules extracted from the user's OWN description (schema-aware —
+                        # e.g. the auto PII flags); fall back to generic domain rules only if the
+                        # description yielded none. Either way the user PICKS which to keep below —
+                        # nothing is auto-applied.
                         from utils.nlp_parser import suggest_rules_for_domain
                         st.session_state.nl_wizard_suggested_rules = \
-                            suggest_rules_for_domain(_domain)
+                            list(_raw_rules) or suggest_rules_for_domain(_domain)
                     st.rerun()
 
                 _suggestions = st.session_state.nl_wizard_suggested_rules
