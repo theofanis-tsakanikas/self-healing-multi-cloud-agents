@@ -684,8 +684,13 @@ def validate_generated_code(filename: str) -> str:
             # AWS: Glue permissions are mandatory — Trino uses Glue Data Catalog as metastore.
             # Without them, CREATE TABLE, DROP TABLE, and CALL sync_partition_metadata all fail.
             # Azure and GCP use file-based metastore on their storage, covered by existing permissions.
+            # Databricks is the AWS-HOSTED exception: its pipeline terraform uses AWS data sources
+            # (SSM for the lakehouse DB) so CLOUD_PROVIDER reads "aws", but it is Spark + Delta +
+            # Unity Catalog — NO Trino, NO Glue. Detect it by its databricks_* resources and skip.
             _tf_cloud = os.getenv("CLOUD_PROVIDER", "").lower()
-            if _tf_cloud == "aws" and "glue:GetTable" not in tf_content:
+            _is_databricks_tf = _is_databricks_run() or "databricks_" in tf_content
+            if (_tf_cloud == "aws" and not _is_databricks_tf
+                    and "glue:GetTable" not in tf_content):
                 errors.append(
                     "IAM [project policy]: AWS Glue permissions missing from IAM policy — "
                     "Trino uses Glue Data Catalog as metastore; glue:GetTable, glue:CreateTable, "
