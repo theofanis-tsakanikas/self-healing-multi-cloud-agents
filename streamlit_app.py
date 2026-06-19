@@ -1538,30 +1538,55 @@ _EXEC_PLAN_CLOUD = {
 
 def _render_execution_plan(cloud: str, pipeline_id: str):
     """Illustrative pre-deploy plan: the deterministic deliverable set for `cloud`. No agent run."""
-    c = _EXEC_PLAN_CLOUD.get(cloud)
-    if not c:
-        return
-    groups = [
-        ("Pipeline code", [
-            f"scripts/{pipeline_id}.py — extract → business rules → parquet → {c['store']}",
-            f"requirements.txt — pandas, pyarrow, {c['fsdriver']}, sqlalchemy, trino, prometheus-client",
-        ]),
-        ("Catalog & observability", [
-            "sql/setup_trino.sql — Trino external table, run_date-partitioned",
-            "dashboards/monitoring_specs.json — Grafana dashboard (5 panels)",
-        ]),
-        ("Kubernetes", [
-            "k8s/ — namespaces · configmaps · trino · grafana · prometheus(+pushgateway) · job",
-            "Dockerfile — pipeline image",
-        ]),
-        ("Infrastructure (Terraform)", [
-            "terraform/ — providers · main · variables · outputs · tfvars",
-            f"provisions: {c['iac']}",
-        ]),
-        ("CI/CD", [
-            f".github/workflows/{pipeline_id}_pipeline.yml — build → {c['registry']} → deploy to {c['k8s']}",
-        ]),
-    ]
+    if cloud == "databricks":
+        # Distinct execution model: Spark + Delta + Unity Catalog — NO Docker/K8s/Grafana/Trino/ECR.
+        groups = [
+            ("Pipeline code", [
+                f"scripts/{pipeline_id}.py — Spark JDBC read → business rules → Delta saveAsTable "
+                "(Unity Catalog) + a _audit Delta table (one row per run)",
+            ]),
+            ("Catalog & observability", [
+                "sql/setup_unity_catalog.sql — Unity Catalog Delta table",
+                f"dashboards/{pipeline_id}_lakeview.json — Databricks Lakeview (AI/BI) dashboard",
+            ]),
+            ("Infrastructure (Terraform)", [
+                "terraform/ — providers · main · variables · outputs · tfvars",
+                "provisions: databricks_secret_scope · databricks_job (Spark task + JDBC driver "
+                "library) · databricks_dashboard (Lakeview)",
+            ]),
+            ("CI/CD", [
+                f".github/workflows/{pipeline_id}_pipeline.yml — upload script to DBFS → "
+                "terraform apply → jobs run-now",
+            ]),
+        ]
+        _extra_note = (" No Docker / Kubernetes / Grafana — the cluster runtime provides Spark + "
+                       "Delta; observability is the Lakeview dashboard.")
+    else:
+        c = _EXEC_PLAN_CLOUD.get(cloud)
+        if not c:
+            return
+        groups = [
+            ("Pipeline code", [
+                f"scripts/{pipeline_id}.py — extract → business rules → parquet → {c['store']}",
+                f"requirements.txt — pandas, pyarrow, {c['fsdriver']}, sqlalchemy, trino, prometheus-client",
+            ]),
+            ("Catalog & observability", [
+                "sql/setup_trino.sql — Trino external table, run_date-partitioned",
+                "dashboards/monitoring_specs.json — Grafana dashboard (5 panels)",
+            ]),
+            ("Kubernetes", [
+                "k8s/ — namespaces · configmaps · trino · grafana · prometheus(+pushgateway) · job",
+                "Dockerfile — pipeline image",
+            ]),
+            ("Infrastructure (Terraform)", [
+                "terraform/ — providers · main · variables · outputs · tfvars",
+                f"provisions: {c['iac']}",
+            ]),
+            ("CI/CD", [
+                f".github/workflows/{pipeline_id}_pipeline.yml — build → {c['registry']} → deploy to {c['k8s']}",
+            ]),
+        ]
+        _extra_note = ""
     blocks = ""
     for title, items in groups:
         lis = "".join(f'<li style="margin:0.12rem 0;color:#94a3b8;">{it}</li>' for it in items)
@@ -1575,7 +1600,7 @@ def _render_execution_plan(cloud: str, pipeline_id: str):
         f'border-radius:12px;padding:0.85rem 1.1rem;margin:0.2rem 0 0.7rem;">{blocks}'
         f'<p style="margin:0.55rem 0 0;color:#334155;font-size:0.7rem;">'
         f'Illustrative — the agents generate the exact contents at deploy time. '
-        f'Self-healing (Medic) repairs any CI/CD failure automatically.</p></div>',
+        f'Self-healing (Medic) repairs any CI/CD failure automatically.{_extra_note}</p></div>',
         unsafe_allow_html=True,
     )
 
@@ -2419,6 +2444,12 @@ with tab_nl:
             '(Upload tab → cloud: databricks).</p>',
             unsafe_allow_html=True,
         )
+        # Parity with the cloud execution plan above — what the Databricks lakehouse deploy creates.
+        with st.expander("📋 What the Databricks lakehouse deploy creates", expanded=False):
+            _render_execution_plan(
+                "databricks",
+                f"pipe_{_ans.get('pipeline_slug', 'pipeline')}_to_databricks",
+            )
         _db1, _ = st.columns([1, 2])
         with _db1:
             if st.button("⚡ Or: deploy as a Databricks lakehouse instead",
