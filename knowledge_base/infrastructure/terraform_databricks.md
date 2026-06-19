@@ -101,6 +101,13 @@ resource "databricks_job" "pipeline" {
     task_key            = "etl"
     existing_cluster_id = data.databricks_cluster.jobs.id
 
+    # Attach the source-DB JDBC driver explicitly (best practice). Most Databricks Runtimes already
+    # bundle the Postgres/MySQL drivers, so this is belt-and-suspenders — but pin it so the job does
+    # not depend on the DBR version. Postgres source → postgresql; MySQL source → mysql-connector-j.
+    library {
+      maven { coordinates = "org.postgresql:postgresql:42.7.3" }
+    }
+
     spark_python_task {
       python_file = "dbfs:/pipelines/<pipeline_id>/<script_name>.py"   # CI uploads the script here first
       parameters = [
