@@ -1,13 +1,10 @@
 resource "databricks_secret_scope" "pipeline" {
-  name = "pipe_sales_orders_pipeline_v2_lakehouse"
+  name = "pipe_sales_orders_pipeline_v3_lakehouse"
 }
 
 data "aws_ssm_parameter" "db_host"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_host" }
-
 data "aws_ssm_parameter" "db_name"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_name" }
-
 data "aws_ssm_parameter" "db_user"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_user" }
-
 data "aws_ssm_parameter" "db_password" { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_password" }
 
 resource "databricks_secret" "db_password" {
@@ -21,7 +18,7 @@ data "databricks_cluster" "jobs" {
 }
 
 resource "databricks_job" "pipeline" {
-  name = "pipe_sales_orders_pipeline_v2_lakehouse"
+  name = "pipe_sales_orders_pipeline_v3_lakehouse"
 
   run_as {
     service_principal_name = var.databricks_client_id
@@ -32,7 +29,7 @@ resource "databricks_job" "pipeline" {
     existing_cluster_id = data.databricks_cluster.jobs.id
 
     spark_python_task {
-      python_file = "dbfs:/pipelines/pipe_sales_orders_pipeline_v2_lakehouse/pipe_sales_orders_pipeline_v2_lakehouse.py"
+      python_file = "dbfs:/pipelines/pipe_sales_orders_pipeline_v3_lakehouse/pipe_sales_orders_pipeline_v3_lakehouse.py"
       parameters = [
         "--catalog", var.catalog,
         "--schema", var.schema,
@@ -55,9 +52,9 @@ data "databricks_sql_warehouse" "obs" {
 }
 
 resource "databricks_dashboard" "observability" {
-  display_name      = "pipe_sales_orders_pipeline_v2_lakehouse — Observability"
+  display_name      = "pipe_sales_orders_pipeline_v3_lakehouse — Observability"
   parent_path       = "/Shared"
   warehouse_id      = data.databricks_sql_warehouse.obs.id
-  file_path         = "${path.module}/../dashboards/pipe_sales_orders_pipeline_v2_lakehouse_lakeview.json"
+  file_path         = "${path.module}/../dashboards/pipe_sales_orders_pipeline_v3_lakehouse_lakeview.json"
   embed_credentials = false
 }
