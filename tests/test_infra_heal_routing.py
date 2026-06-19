@@ -112,3 +112,69 @@ def test_inject_current_file_contents_uses_real_text(tmp_path, monkeypatch):
     assert infra._inject_current_file_contents("fix scripts/pipe_x.py now") == ""
     # no infra path named → nothing injected
     assert infra._inject_current_file_contents("a generic message with no file path") == ""
+
+
+# --- deterministic heal completion: a clean patch forces terraform apply + push ---
+def _run_heal_with_llm_response(monkeypatch, provider, tool_calls):
+    """Drive infra_node with a mocked LLM that emits exactly `tool_calls`, mocking the side-effect
+    tools so nothing touches real infra. Returns (recorded_tool_calls, output_state)."""
+    import agents.infra as infra
+    import agents.tools as tools
+    from langchain_core.messages import AIMessage
+
+    recorded: list[str] = []
+
+    def _tool(name, ret):
+        m = MagicMock()
+        def _inv(args):
+            recorded.append(name)
+            return ret
+        m.invoke.side_effect = _inv
+        return m
+
+    def fake_bind_tools(t, **kw):
+        bound = MagicMock()
+        bound.invoke.return_value = AIMessage(content="", tool_calls=tool_calls)
+        return bound
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.side_effect = fake_bind_tools
+
+    monkeypatch.setattr(infra, "get_llm", lambda **kw: mock_llm)
+    monkeypatch.setattr(infra, "build_databricks_infra_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(infra, "build_infra_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(infra, "patch_project_file",
+                        _tool("patch", "PATCH APPLIED to 'terraform/main.tf'.\nApplied:\n  key change\nSkipped:\n  (none)"))
+    monkeypatch.setattr(infra, "execute_terraform",
+                        _tool("apply", "SUCCESS: Terraform apply\nApply complete! Resources: 1 changed."))
+    monkeypatch.setattr(infra, "push_to_github",
+                        _tool("push", "STATUS: SUCCESS\nSHA: " + "a" * 40))
+    # keep auto-validation deterministic + side-effect-free
+    monkeypatch.setattr(tools, "validate_generated_code", MagicMock(invoke=lambda a: "CLEAN ✓"))
+
+    out = infra.infra_node(_heal_state(provider))
+    return recorded, out
+
+
+_PATCH_CALL = [{
+    "name": "patch_project_file", "id": "c1",
+    "args": {"filename": "terraform/main.tf",
+             "replacements": [{"old": 'key = "postgres_password"', "new": 'key = "db_password"'}]},
+}]
+
+
+def test_databricks_heal_forces_apply_and_push_after_patch(monkeypatch):
+    # The failure mode: the LLM emits ONLY the patch (no apply/push). The node must force both.
+    recorded, out = _run_heal_with_llm_response(monkeypatch, "databricks", _PATCH_CALL)
+    assert "patch" in recorded
+    assert "apply" in recorded, "terraform apply must be forced after a clean patch"
+    assert "push" in recorded, "push must be forced after apply (despite prior github_done=True)"
+    assert out["github_done"] is True
+    assert out["last_push_sha"] == "a" * 40
+
+
+def test_object_storage_heal_does_not_force_terraform_apply(monkeypatch):
+    # AWS/Azure/GCP: a clean patch must NOT trigger a forced terraform apply (deploy re-applies k8s).
+    recorded, _ = _run_heal_with_llm_response(monkeypatch, "kubernetes", _PATCH_CALL)
+    assert "patch" in recorded
+    assert "apply" not in recorded, "object-storage heal must not force terraform apply"

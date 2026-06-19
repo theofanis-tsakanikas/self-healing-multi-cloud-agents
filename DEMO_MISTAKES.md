@@ -59,6 +59,14 @@ DBR cannot "save" a secret that does not exist.)
   into the fix prompt as the SOURCE OF TRUTH for the `old` string (the standard is only a template).
   Plus a defense-in-depth guard: a no-op patch (`Applied:\n  (none)`) is now flagged as an error
   instead of a silent "success". `tests/test_infra_heal_routing.py`.
+- **`agents/infra.py` — DETERMINISTIC heal completion + push-block fix.** Two more reliability gaps:
+  (a) the patch→`terraform apply`→push sequence was LLM-driven (gpt-4o-mini could stop after the
+  patch). Now, after a CLEAN applied patch on a Databricks fix, Python FORCES `execute_terraform
+  apply` then `push_to_github` (gated to `is_databricks` fix mode; object-storage clouds unchanged).
+  (b) latent bug never exercised by the validated runs (they pass first-try, no infra heal-push):
+  in a heal `github_success` is True from the initial deploy, so the push was blocked as "already
+  succeeded" → the fix never re-deployed. Now a prior-turn `github_success` no longer blocks a
+  fix-mode push (only a duplicate push WITHIN the turn does). `tests/test_infra_heal_routing.py`.
 
 ## Revert
 - `terraform_databricks.md`: `key = "postgres_password"` → `key = "db_password"`.

@@ -587,6 +587,8 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     push_attempted = False  # True after first push_to_github call — blocks same-turn retry
     last_push_sha = state.get("last_push_sha", "")
     any_tool_error = any_tool_error_from_codegen
+    patch_applied = False              # a patch_project_file call that actually changed the file
+    executed_terraform_this_turn = False  # the LLM already called execute_terraform this turn
 
     if response.tool_calls:
         for tool_call in response.tool_calls:
@@ -635,7 +637,12 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                             new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
                             logger.info(f"⏭️ Skipping existing terraform file: {tracked}")
                             continue
-                elif t_name == "push_to_github" and (github_success or push_attempted):
+                elif t_name == "push_to_github" and (
+                    push_attempted or (github_success and not medic_triggered_fix)
+                ):
+                    # github_success from a PRIOR turn (the initial deploy) must NOT block a fix
+                    # push — the heal needs a NEW commit to re-trigger the deploy. Only block a
+                    # duplicate push WITHIN this turn (push_attempted), or a re-push outside fix mode.
                     reason = "already succeeded" if github_success else "already attempted (failed) — Medic will re-route"
                     result = f"Skipped: push_to_github {reason} in this turn. Do not retry push in the same turn."
                     new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result))
@@ -711,9 +718,14 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                 # error so the heal doesn't falsely "complete" + push nothing + loop on the unchanged
                 # CI error until it escalates. The Skipped (not-found `old`) detail stays in the
                 # message for the next turn / the Medic.
-                if t_name == "patch_project_file" and "Applied:\n  (none)" in result_str:
-                    any_tool_error = True
-                    logger.warning("🚫 No-op patch (nothing applied) — wrong `old` string; flagging as error.")
+                if t_name == "patch_project_file":
+                    if "Applied:\n  (none)" in result_str:
+                        any_tool_error = True
+                        logger.warning("🚫 No-op patch (nothing applied) — wrong `old` string; flagging as error.")
+                    else:
+                        patch_applied = True
+                if t_name == "execute_terraform":
+                    executed_terraform_this_turn = True
 
                 # A. Standard Capture (Smart Mapping)
                 if t_name == "query_vector_store":
@@ -911,6 +923,43 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                 any_tool_error = True
 
             new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=str(result)))
+
+    # 9b. DETERMINISTIC HEAL COMPLETION (Databricks infra fix only)
+    # A SUCCESSFUL infra patch on Databricks is mechanically determined to need two follow-ups:
+    # (1) `terraform apply` to push the change to the LIVE infra (the deploy workflow does NOT run
+    # apply), then (2) a git push to re-trigger the deploy. Relying on the LLM to emit
+    # execute_terraform + push after the patch is not guaranteed (gpt-4o-mini sometimes stops at the
+    # patch, leaving the live secret stale → identical failure). Force them here so the heal always
+    # completes. Gated to Databricks fix mode with a CLEAN applied patch — object-storage clouds
+    # keep the LLM-driven patch+push (their deploy re-applies k8s; the validated runs are unchanged).
+    if (is_databricks and medic_triggered_fix and patch_applied
+            and not any_tool_error and not validation_errors):
+        if not executed_terraform_this_turn:
+            logger.info("🔧 DETERMINISTIC HEAL: applying terraform after a clean patch.")
+            tf_result = str(execute_terraform.invoke({"command": "apply"}))
+            new_messages.append(HumanMessage(content=f"[auto terraform apply] {tf_result[:1500]}"))
+            if "apply complete" in tf_result.lower() or "SUCCESS: Terraform apply" in tf_result:
+                infra_success_detected = True
+            else:
+                any_tool_error = True
+                logger.warning("🚫 DETERMINISTIC HEAL: terraform apply did not complete — routing to Medic.")
+        if not any_tool_error and not push_attempted:
+            logger.info("🔧 DETERMINISTIC HEAL: pushing the fix to re-trigger the deploy.")
+            push_result = str(push_to_github.invoke({
+                "project_id": project_id,
+                "commit_message": "fix(infra): self-heal — apply Medic-diagnosed terraform fix",
+            }))
+            new_messages.append(HumanMessage(content=f"[auto push] {push_result[:500]}"))
+            push_attempted = True
+            if "STATUS: SUCCESS" in push_result.upper():
+                github_success = True
+                sha_match = re.search(r"SHA:\s*([a-f0-9]{40})", push_result)
+                if sha_match:
+                    last_push_sha = sha_match.group(1)
+                    logger.info(f"📌 Commit SHA captured (deterministic heal): {last_push_sha}")
+            else:
+                any_tool_error = True
+                logger.warning("🚫 DETERMINISTIC HEAL: push did not report SUCCESS — routing to Medic.")
 
     # 10. RETURN UPDATED STATE
     # Write validation errors to error_log so Medic reads them as a structured signal
