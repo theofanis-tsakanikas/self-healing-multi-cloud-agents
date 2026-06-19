@@ -228,10 +228,16 @@ class TestWorkflows:
         g_steps = [(s.get("name"), s.get("uses")) for s in g["jobs"]["deploy"]["steps"]]
         r_steps = [(s.get("name"), s.get("uses")) for s in r["jobs"]["deploy"]["steps"]]
         assert r_steps == g_steps
-        # The job-trigger script must be byte-identical (whitespace-normalized).
-        g_run = [s["run"] for s in g["jobs"]["deploy"]["steps"] if s.get("name") == "Trigger job run and wait"][0]
+        # The job-trigger script — post-tag delta (2026-06-19): the v1.0.0 golden blocked on a
+        # bare `run-now` (the unified CLI now WAITS by default → empty RUN_ID on failure) and only
+        # printed the generic task STATE, so the real Spark error never reached the Medic. The
+        # render now (a) uses --no-wait to capture the run_id, and (b) prints `get-run-output` on
+        # failure so the root-cause traceback surfaces in the CI log for the Medic to route.
         r_run = [s["run"] for s in r["jobs"]["deploy"]["steps"] if s.get("name") == "Trigger job run and wait"][0]
-        assert g_run.strip() == r_run.strip()
+        assert "run-now" in r_run and "--no-wait" in r_run          # reliable run_id capture
+        assert "get-run-output" in r_run                            # surfaces the real task error
+        assert ".error" in r_run and ".error_trace" in r_run        # exception + traceback
+        assert "INTERNAL_ERROR" in r_run                            # both terminal-failure states handled
 
     @pytest.mark.parametrize("conf,cloud,registry", [
         (AWS_CONF, "aws", "000000000000.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo"),

@@ -430,18 +430,30 @@ jobs:
         run: |
           terraform init -input=false
           JOB_ID=$(terraform output -raw job_id)
-          RUN_ID=$(databricks jobs run-now "$JOB_ID" -o json | jq -r '.run_id')
+          # --no-wait is MANDATORY: the unified CLI's run-now WAITS by default and, on a failed
+          # run, exits non-zero with EMPTY stdout → RUN_ID="" → the poll loop dies with
+          # "invalid RUN_ID" and the real error is lost. --no-wait returns the run_id at once.
+          RUN_ID=$(databricks jobs run-now "$JOB_ID" --no-wait -o json | jq -r '.run_id')
           echo "Triggered run $RUN_ID for job $JOB_ID"
           for i in $(seq 1 80); do
             RUN=$(databricks jobs get-run "$RUN_ID" -o json)
             STATE=$(echo "$RUN" | jq -r '.state.life_cycle_state')
             RESULT=$(echo "$RUN" | jq -r '.state.result_state // empty')
             echo "run $RUN_ID: $STATE $RESULT ($i/80)"
-            if [ "$STATE" = "TERMINATED" ]; then
+            if [ "$STATE" = "TERMINATED" ] || [ "$STATE" = "INTERNAL_ERROR" ]; then
               [ "$RESULT" = "SUCCESS" ] && { echo "Job succeeded"; exit 0; }
-              echo "Job failed: $RESULT"; echo "$RUN" | jq '.tasks[].state'; exit 1
+              # The job-level state is only "Workload failed, see run output for details" — the
+              # ROOT CAUSE (the Spark task's exception + traceback) lives in the TASK run output.
+              # Print it so the Medic's CI-log fetch sees the real error (e.g. "Secret does not
+              # exist …", "ClassNotFoundException …") and routes the fix to infra instead of
+              # guessing blindly. Without this, EVERY Databricks runtime failure is undiagnosable.
+              echo "Job failed: $STATE $RESULT"
+              TASK_RUN_ID=$(echo "$RUN" | jq -r '.tasks[0].run_id // empty')
+              if [ -n "$TASK_RUN_ID" ]; then
+                databricks jobs get-run-output "$TASK_RUN_ID" -o json | jq -r '.error // empty, .error_trace // empty'
+              fi
+              exit 1
             fi
-            [ "$STATE" = "INTERNAL_ERROR" ] && { echo "Internal error"; exit 1; }
             sleep 15
           done
           echo "Timeout waiting for run"; exit 1
