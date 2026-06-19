@@ -25,8 +25,8 @@ jobs:
 
       - name: Upload Spark script to DBFS
         run: |
-          databricks fs mkdirs "dbfs:/pipelines/pipe_sales_dbx_pipeline_lakehouse" || true
-          databricks fs cp scripts/pipe_sales_dbx_pipeline_lakehouse.py "dbfs:/pipelines/pipe_sales_dbx_pipeline_lakehouse/pipe_sales_dbx_pipeline_lakehouse.py" --overwrite
+          databricks fs mkdirs "dbfs:/pipelines/pipe_sales_dbx_pipeline_etl_lakehouse" || true
+          databricks fs cp scripts/pipe_sales_dbx_pipeline_etl_lakehouse.py "dbfs:/pipelines/pipe_sales_dbx_pipeline_etl_lakehouse/pipe_sales_dbx_pipeline_etl_lakehouse.py" --overwrite
 
       - name: Trigger job run and wait
         working-directory: terraform
