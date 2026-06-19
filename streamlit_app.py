@@ -2109,42 +2109,32 @@ with tab_nl:
                                     st.session_state.nl_wizard_editing_idx = None
                                     st.rerun()
 
-            # ── Add rule ─────────────────────────────────────────────────────
-            if st.session_state.nl_wizard_adding_rule:
+            # ── Add a rule — two side-by-side methods as TABS (no scrolling to find them) ──
+            st.markdown(
+                '<p style="color:#4ade80;font-size:0.82rem;font-weight:600;margin:0.8rem 0 0.3rem;">'
+                '+ Add a rule</p>',
+                unsafe_allow_html=True,
+            )
+            _tab_fields, _tab_nl = st.tabs(["🧱 Fields", "🗣️ Plain English"])
+            with _tab_fields:
+                _new_r = _rule_edit_form("nl_wizard_add")
+                if st.button("💾 Add rule", key="nl_wizard_rule_add_save", type="primary"):
+                    with st.spinner("Finalising rule…"):
+                        st.session_state.nl_rules.append(_finalize_rule(_new_r))
+                    st.rerun()
+            with _tab_nl:
                 st.markdown(
-                    '<div style="background:rgba(74,222,128,0.06);border:1px solid '
-                    'rgba(74,222,128,0.2);border-radius:10px;padding:0.8rem 1rem;margin:0.8rem 0;">'
-                    '<p style="color:#4ade80;font-size:0.82rem;font-weight:600;margin:0 0 0.5rem;">'
-                    '+ New Rule</p>',
+                    '<p style="color:#94a3b8;font-size:0.78rem;margin:0 0 0.3rem;">'
+                    'Write all your rules in plain English — parsed into structured rules, '
+                    'the same way an uploaded file is.</p>',
                     unsafe_allow_html=True,
                 )
-                _new_r = _rule_edit_form("nl_wizard_add")
-                st.markdown("</div>", unsafe_allow_html=True)
-                _an1, _an2, _ = st.columns([1, 1, 3])
-                with _an1:
-                    if st.button("💾 Add", key="nl_wizard_rule_add_save", type="primary"):
-                        with st.spinner("Finalising rule…"):
-                            st.session_state.nl_rules.append(_finalize_rule(_new_r))
-                        st.session_state.nl_wizard_adding_rule = False
-                        st.rerun()
-                with _an2:
-                    if st.button("✗ Cancel", key="nl_wizard_rule_add_cancel",
-                                 type="secondary"):
-                        st.session_state.nl_wizard_adding_rule = False
-                        st.rerun()
-            else:
-                if st.button("+ Add rule", key="nl_wizard_rule_add_btn", type="secondary"):
-                    st.session_state.nl_wizard_adding_rule = True
-                    st.rerun()
-
-            # ── …or write ALL your rules in plain English (parsed like an uploaded file) ──
-            with st.expander("🗣️ Or describe your rules in plain English", expanded=not _rules):
                 _nl_rules_txt = st.text_area(
                     "Plain-English rules",
                     placeholder=("e.g. Drop orders where unit_price is 0 or negative. Exclude "
                                  "future-dated orders. Replace unknown currency with EUR. "
                                  "Flag quantity over 1000 as suspicious."),
-                    key="nl_wizard_build_nl", height=110, label_visibility="collapsed",
+                    key="nl_wizard_build_nl", height=120, label_visibility="collapsed",
                 )
                 if (st.button("✨ Parse to rules", key="nl_wizard_build_nl_btn", type="primary")
                         and _nl_rules_txt.strip()):
@@ -2153,8 +2143,7 @@ with tab_nl:
                         try:
                             _parsed = parse_rules_from_content(_nl_rules_txt)
                             st.session_state.nl_rules.extend(_parsed)
-                            st.success(
-                                f"Added {len(_parsed)} rule(s) from your text — review them above.")
+                            st.success(f"Added {len(_parsed)} rule(s) — review them above.")
                             st.rerun()
                         except Exception as _e:
                             st.error(f"Could not interpret your rules: {_e}")
@@ -2220,11 +2209,9 @@ with tab_nl:
                 st.rerun()
 
             elif _rule_mode == "✍️ Build my own rules":
-                # Author rules from scratch: open the editor (empty) with the add-rule form,
-                # which already supports BOTH the fields form (Rule ID / Target column /
-                # Condition / Action) AND a plain-English condition synthesised by the LLM.
+                # Author rules from scratch: open the (empty) editor, whose "+ Add a rule" area
+                # offers BOTH methods as tabs — 🧱 Fields and 🗣️ Plain English.
                 st.session_state.nl_rules_view = "editor"
-                st.session_state.nl_wizard_adding_rule = True
                 st.rerun()
 
             elif _rule_mode == "💡 Suggest rules for my domain":
