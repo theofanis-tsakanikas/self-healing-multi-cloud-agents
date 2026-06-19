@@ -32,11 +32,24 @@ DBR cannot "save" a secret that does not exist.)
   missing key (`db_password`) and the script reads `db_password`; the secret must match that. The
   script's `dbutils.secrets.get` key is the contract; the Terraform is aligned to it.
 
-## PERMANENT changes alongside (do NOT revert)
+## PERMANENT changes alongside (do NOT revert) — real gaps the first demo run EXPOSED
 - `agents/medic.py`: `_CI_INFRA_SIGNATURES` now also matches `secret does not exist` /
   `resource_does_not_exist` → infra (mirrors the ClassNotFoundException routing). The infra
   healing_context covers both library and secret fixes.
 - `tests/test_medic_ci_infra_routing.py` — secret-not-found → infra; pandas/Spark script errors → architect.
+- **`agents/codegen.py` + `cicd_standards.md` (the Databricks deploy workflow) — VISIBILITY fix.**
+  The first run failed to heal because the REAL error never reached the Medic: the GHA log only
+  had the generic "Workload failed, see run output for details", not "Secret does not exist". Two
+  bugs: (a) `databricks jobs run-now` now WAITS by default → on failure exits with empty stdout →
+  `RUN_ID=""` → poll loop dies with "invalid RUN_ID" (fixed with `--no-wait`); (b) on failure the
+  workflow printed only the job state, not the task output (fixed — now calls
+  `databricks jobs get-run-output <task_run_id>` and prints `.error`/`.error_trace`). Golden test
+  updated. Without this, NO Databricks runtime failure is diagnosable.
+- **`agents/infra.py` — RE-APPLY fix.** A Databricks infra heal was `patch_project_file` +
+  `push_to_github` only, but the deploy workflow does NOT run `terraform apply` → the LIVE secret
+  scope stayed stale and the job failed identically. Now the Databricks push-phase heal also binds
+  `execute_terraform` (gated to `is_databricks` — object-storage clouds unchanged) and the fix
+  prompt instructs patch → `execute_terraform apply` → push. `tests/test_infra_heal_routing.py`.
 
 ## Revert
 - `terraform_databricks.md`: `key = "postgres_password"` → `key = "db_password"`.

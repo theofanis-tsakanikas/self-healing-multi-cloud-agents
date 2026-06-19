@@ -290,6 +290,14 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                 codegen_errors.extend(_cg_err)
             if not state.get("github_done", False) or medic_triggered_fix:
                 selected_keys = ["push_to_github"]
+                # A medic infra heal on Databricks is ALWAYS a terraform-resource fix (the secret
+                # scope / job / dashboard) — and the deploy workflow does NOT run `terraform apply`.
+                # So patch+push fixes only the REPO, leaving the LIVE resource (e.g. the secret
+                # scope key) stale and the job failing identically on re-run. RE-APPLY with
+                # execute_terraform so the fix reaches Databricks BEFORE the push re-triggers the
+                # job. (patch_project_file is added by the GATE 3 medic override below.)
+                if medic_triggered_fix and state.get("healing_context", "").strip():
+                    selected_keys = ["execute_terraform", "push_to_github"]
             logger.info("🧱 Databricks GATE: Push phase (workflow code-generated).")
 
     # --- GATE 2: INFRASTRUCTURE IMPLEMENTATION ---
@@ -440,15 +448,22 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
         )
         logger.info(f"🛡️ GATE: Discovery Phase. Missing keys: {missing_keys}")
     elif medic_triggered_fix:
+        _tf_reapply = "execute_terraform" in selected_keys
         phase_text = (
             "CURRENT OPERATIONAL PHASE: FIX MODE. "
             "The exact fix instructions are in the MANDATORY FIX section of your system prompt above — read them first. "
             "Step 1: Apply the fix to ONLY the affected file with patch_project_file "
             "(surgical replacements — works for terraform, K8s manifests, the Dockerfile and the workflow alike). "
-            "Step 2: Immediately call push_to_github to deploy the fix. "
-            "CRITICAL RULES: "
+            + ("Step 2: Call execute_terraform with command=\"apply\" to push the terraform change to "
+               "the LIVE infrastructure — the deploy workflow does NOT run terraform apply, so without "
+               "this the live resource stays stale and the job fails identically on re-run. "
+               "Step 3: Immediately call push_to_github to deploy the fix. "
+               if _tf_reapply else
+               "Step 2: Immediately call push_to_github to deploy the fix. ")
+            + "CRITICAL RULES: "
             "(1) query_vector_store is only needed if the MANDATORY FIX section above says so. "
-            "(2) You MUST call push_to_github in this same turn after rewriting the file. "
+            "(2) You MUST call push_to_github in this same turn after rewriting the file"
+            + (" and applying the terraform" if _tf_reapply else "") + ". "
             "(3) An empty Knowledge Base result is never a reason to take no action."
         )
     else:
