@@ -1,5 +1,5 @@
 resource "databricks_secret_scope" "pipeline" {
-  name = "pipe_sales_dbx_pipeline_etl_lakehouse"
+  name = "pipe_sales_dbx_pipeline_data_lakehouse"
 }
 
 data "aws_ssm_parameter" "db_host"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_host" }
@@ -8,9 +8,9 @@ data "aws_ssm_parameter" "db_user"     { name = "/multi-cloud-self-healing-agent
 data "aws_ssm_parameter" "db_password" { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_password" }
 
 resource "databricks_secret" "db_password" {
-  key          = "db_password"
+  key          = "postgres_password"
   string_value = data.aws_ssm_parameter.db_password.value
-  scope        = "pipe_sales_dbx_pipeline_etl_lakehouse"
+  scope        = databricks_secret_scope.pipeline.name
 }
 
 data "databricks_cluster" "jobs" {
@@ -18,7 +18,7 @@ data "databricks_cluster" "jobs" {
 }
 
 resource "databricks_job" "pipeline" {
-  name = "pipe_sales_dbx_pipeline_etl_lakehouse"
+  name = "pipe_sales_dbx_pipeline_data_lakehouse"
 
   run_as {
     service_principal_name = var.databricks_client_id
@@ -33,7 +33,7 @@ resource "databricks_job" "pipeline" {
     }
 
     spark_python_task {
-      python_file = "dbfs:/pipelines/pipe_sales_dbx_pipeline_etl_lakehouse/pipe_sales_dbx_pipeline_etl_lakehouse.py"
+      python_file = "dbfs:/pipelines/pipe_sales_dbx_pipeline_data_lakehouse/pipe_sales_dbx_pipeline_data_lakehouse.py"
       parameters = [
         "--catalog", var.catalog,
         "--schema", var.schema,
@@ -56,9 +56,9 @@ data "databricks_sql_warehouse" "obs" {
 }
 
 resource "databricks_dashboard" "observability" {
-  display_name      = "pipe_sales_dbx_pipeline_etl_lakehouse — Observability"
+  display_name      = "pipe_sales_dbx_pipeline_data_lakehouse — Observability"
   parent_path       = "/Shared"
   warehouse_id      = data.databricks_sql_warehouse.obs.id
-  file_path         = "${path.module}/../dashboards/pipe_sales_dbx_pipeline_etl_lakehouse_lakeview.json"
+  file_path         = "${path.module}/../dashboards/pipe_sales_dbx_pipeline_data_lakehouse_lakeview.json"
   embed_credentials = false
 }
