@@ -16,6 +16,7 @@ from agents.tools import (
     query_vector_store,
     store_architectural_insight,
     _EVIDENCE_MARKERS,
+    REPO_ROOT,
 )
 from agents.constants import TEMPERATURE, PROMPTS_DIR, MEDIC_PROMPT_FILE
 from utils.file_utils import read_file
@@ -225,6 +226,44 @@ def _ci_error_owner(messages: list) -> str:
         if any(sig in low for sig in _CI_INFRA_SIGNATURES):
             return "infra"
     return ""
+
+
+def _databricks_secret_key_exact_fix(messages: list) -> tuple[str, str] | None:
+    """For a Databricks 'Secret does not exist … key: <wanted>' failure, compute the EXACT one-line
+    patch for terraform/main.tf so the infra agent does not have to GUESS which line to change.
+
+    The agent reliably mis-targets this: the error names the SCOPE prominently ('scope: X and key:
+    db_password'), so the LLM patches the `scope`/`name` instead of the `databricks_secret` `key`
+    value — leaving the real bug (`key = "postgres_password"`) untouched and the heal looping.
+
+    Reads the CURRENT `databricks_secret` `key = "<current>"` line VERBATIM (whitespace and all) and
+    returns (old_line, new_line) with only the value swapped to <wanted>. Returns None when not
+    applicable (no secret error, file unreadable, key already correct, or no key line found)."""
+    blob = "\n".join(str(getattr(m, "content", "")) for m in messages[-12:])
+    m = re.search(r"[Ss]ecret does not exist.*?key:\s*([A-Za-z0-9_./-]+)", blob)
+    if not m:
+        return None
+    wanted = m.group(1).strip()
+    try:
+        tf = read_file(str(REPO_ROOT / "terraform" / "main.tf"))
+    except Exception:
+        return None
+    in_secret = False
+    for line in tf.splitlines():
+        # `resource "databricks_secret" "..."` — NOT `databricks_secret_scope` (the closing quote
+        # after `databricks_secret` excludes the `_scope` variant).
+        if re.search(r'resource\s+"databricks_secret"', line):
+            in_secret = True
+            continue
+        if in_secret:
+            km = re.match(r'(\s*key\s*=\s*")([^"]+)(".*)$', line)
+            if km:
+                if km.group(2) == wanted:
+                    return None  # already correct
+                return (line, km.group(1) + wanted + km.group(3))
+            if re.match(r'\s*(resource|data)\s+"', line):  # left the secret block without a key
+                in_secret = False
+    return None
 
 
 def _accumulate_healing_context(existing: str, new_chunk: str) -> str:
@@ -603,6 +642,21 @@ def medic_node(state: AgentState):
             # routing, but keyed on the ERROR TYPE rather than the file location.
             deterministic_fix_target = "infra"
             _ci_file = _extract_ci_failed_file(state["messages"])
+            # For a secret-key mismatch, compute the EXACT one-line patch (read the current key line
+            # from the file) so the infra agent copies it verbatim instead of guessing — it kept
+            # patching the `scope`/`name` (named in the error) and missing the actual `key` line.
+            _exact = _databricks_secret_key_exact_fix(state["messages"])
+            _exact_block = ""
+            if _exact:
+                _old, _new = _exact
+                _exact_block = (
+                    "\n\n🎯 EXACT FIX — apply this SINGLE replacement to terraform/main.tf VERBATIM, and "
+                    "change NOTHING else (do NOT touch the scope, the name, or any reference — ONLY this "
+                    "one line):\n"
+                    f"  old: {_old}\n"
+                    f"  new: {_new}\n"
+                    "Call patch_project_file with exactly this one old/new pair and then deploy.\n"
+                )
             healing_context = (
                 "Target: the pipeline Terraform (terraform/main.tf) — this is a missing PROVISIONED-"
                 "RESOURCE runtime failure (see the error below), NOT a script bug. Fix it in the "
@@ -611,8 +665,9 @@ def medic_node(state: AgentState):
                 "`library { maven { coordinates = ... } }` (the source JDBC driver);\n"
                 "  • 'Secret does not exist … key: <k>' → the `databricks_secret` `key` must EXACTLY "
                 "match the key the script reads in `dbutils.secrets.get(scope, \"<k>\")` — set it to "
-                "the key named in the error.\n"
-                "Do NOT edit the Spark script" + (f" `{_ci_file}`" if _ci_file else "") + " — it is correct.\n\n"
+                "the key named in the error (NOT the scope or the name).\n"
+                "Do NOT edit the Spark script" + (f" `{_ci_file}`" if _ci_file else "") + " — it is correct."
+                + _exact_block + "\n\n"
                 + healing_context
             )
             logger.info("🧭 CI-runtime infra signature (missing library/secret) → routing fix to infra (Terraform).")

@@ -37,6 +37,14 @@ DBR cannot "save" a secret that does not exist.)
   `resource_does_not_exist` → infra (mirrors the ClassNotFoundException routing). The infra
   healing_context covers both library and secret fixes.
 - `tests/test_medic_ci_infra_routing.py` — secret-not-found → infra; pandas/Spark script errors → architect.
+- **`agents/medic.py` — EXACT secret-key fix (the 3rd run exposed this).** Even with the file content
+  injected, the infra agent kept mis-targeting: the error names the SCOPE prominently ("scope: X and
+  key: db_password"), so the LLM patched the `scope`/`name` (or a `<pipeline_id>` placeholder) and
+  never the actual `key = "postgres_password"` line → no-op on the key → the heal looped to escalation
+  (the earlier success was luck — 1 of 3 attempts happened to hit the key). `_databricks_secret_key_
+  exact_fix` now READS the current `databricks_secret` `key = "<current>"` line from terraform/main.tf
+  and puts the EXACT one-line `old`/`new` into the healing_context, so the agent copies it verbatim
+  instead of guessing. `tests/test_medic_ci_infra_routing.py`.
 - **`agents/codegen.py` + `cicd_standards.md` (the Databricks deploy workflow) — VISIBILITY fix.**
   The first run failed to heal because the REAL error never reached the Medic: the GHA log only
   had the generic "Workload failed, see run output for details", not "Secret does not exist". Two
