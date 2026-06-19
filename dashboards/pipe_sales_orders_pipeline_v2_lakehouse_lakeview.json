@@ -1,0 +1,352 @@
+{
+  "datasets": [
+    {
+      "name": "ds_summary",
+      "displayName": "Latest run",
+      "queryLines": [
+        "SELECT rows_processed, rows_rejected, duration_seconds, run_date, CASE WHEN (rows_processed + rows_rejected) > 0 THEN round(100.0 * rows_rejected / (rows_processed + rows_rejected), 1) ELSE 0 END AS rejection_rate_pct FROM multi_cloud_agent_workspace.raw.pipe_sales_orders_pipeline_v2_lakehouse_audit ORDER BY run_timestamp DESC LIMIT 1"
+      ]
+    },
+    {
+      "name": "ds_trend",
+      "displayName": "Per-run volume",
+      "queryLines": [
+        "SELECT run_date, 'processed' AS metric, rows_processed AS value FROM multi_cloud_agent_workspace.raw.pipe_sales_orders_pipeline_v2_lakehouse_audit UNION ALL SELECT run_date, 'rejected' AS metric, rows_rejected AS value FROM multi_cloud_agent_workspace.raw.pipe_sales_orders_pipeline_v2_lakehouse_audit"
+      ]
+    },
+    {
+      "name": "ds_reasons",
+      "displayName": "Rejections by reason (latest run)",
+      "queryLines": [
+        "SELECT reason, cnt FROM multi_cloud_agent_workspace.raw.pipe_sales_orders_pipeline_v2_lakehouse_audit LATERAL VIEW explode(rejected_by_reason) t AS reason, cnt WHERE run_timestamp = (SELECT MAX(run_timestamp) FROM multi_cloud_agent_workspace.raw.pipe_sales_orders_pipeline_v2_lakehouse_audit)"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "page_observability",
+      "displayName": "Observability",
+      "layout": [
+        {
+          "widget": {
+            "name": "w_processed",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "sum_rows_processed",
+                      "expression": "SUM(`rows_processed`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum_rows_processed",
+                  "displayName": "Records processed"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Records Processed (latest run)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "w_rejected",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "sum_rows_rejected",
+                      "expression": "SUM(`rows_rejected`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum_rows_rejected",
+                  "displayName": "Records rejected"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Records Rejected (latest run)"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "w_rate",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "max_rejection_rate_pct",
+                      "expression": "MAX(`rejection_rate_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max_rejection_rate_pct",
+                  "displayName": "Rejection rate %"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rejection Rate % (latest run)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "w_duration",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "max_duration_seconds",
+                      "expression": "MAX(`duration_seconds`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max_duration_seconds",
+                  "displayName": "Duration (s)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Run Duration s (latest run)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "w_lastrun",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "max_run_date",
+                      "expression": "MAX(`run_date`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max_run_date",
+                  "displayName": "Last run date"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Last Run Date"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 3,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "w_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_trend",
+                  "fields": [
+                    {
+                      "name": "run_date",
+                      "expression": "`run_date`"
+                    },
+                    {
+                      "name": "metric",
+                      "expression": "`metric`"
+                    },
+                    {
+                      "name": "sum_value",
+                      "expression": "SUM(`value`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "run_date",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Run date"
+                },
+                "y": {
+                  "fieldName": "sum_value",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Records"
+                },
+                "color": {
+                  "fieldName": "metric",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Metric"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Records Processed vs Rejected over time"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "w_reasons",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_reasons",
+                  "fields": [
+                    {
+                      "name": "reason",
+                      "expression": "`reason`"
+                    },
+                    {
+                      "name": "sum_cnt",
+                      "expression": "SUM(`cnt`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "reason",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Reason"
+                },
+                "y": {
+                  "fieldName": "sum_cnt",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Rejected rows"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rejections by Reason (latest run)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    }
+  ]
+}

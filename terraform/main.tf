@@ -1,47 +1,63 @@
-data "google_service_account" "pipeline" {
-  account_id = var.service_account_id
-  project    = var.project_id
+resource "databricks_secret_scope" "pipeline" {
+  name = "pipe_sales_orders_pipeline_v2_lakehouse"
 }
 
-resource "google_storage_bucket" "data" {
-  name                        = var.bucket_name
-  location                    = var.region
-  storage_class               = "STANDARD"
-  uniform_bucket_level_access = true
-  public_access_prevention    = "enforced"
+data "aws_ssm_parameter" "db_host"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_host" }
 
-  versioning {
-    enabled = true
+data "aws_ssm_parameter" "db_name"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_name" }
+
+data "aws_ssm_parameter" "db_user"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_user" }
+
+data "aws_ssm_parameter" "db_password" { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_password" }
+
+resource "databricks_secret" "db_password" {
+  key          = "db_password"
+  string_value = data.aws_ssm_parameter.db_password.value
+  scope        = databricks_secret_scope.pipeline.name
+}
+
+data "databricks_cluster" "jobs" {
+  cluster_name = "multi-cloud-agent-workspace-jobs-cluster"
+}
+
+resource "databricks_job" "pipeline" {
+  name = "pipe_sales_orders_pipeline_v2_lakehouse"
+
+  run_as {
+    service_principal_name = var.databricks_client_id
   }
 
-  lifecycle_rule {
-    action {
-      type          = "SetStorageClass"
-      storage_class = "NEARLINE"
+  task {
+    task_key            = "etl"
+    existing_cluster_id = data.databricks_cluster.jobs.id
+
+    spark_python_task {
+      python_file = "dbfs:/pipelines/pipe_sales_orders_pipeline_v2_lakehouse/pipe_sales_orders_pipeline_v2_lakehouse.py"
+      parameters = [
+        "--catalog", var.catalog,
+        "--schema", var.schema,
+        "--secret-scope", databricks_secret_scope.pipeline.name,
+        "--db-host", data.aws_ssm_parameter.db_host.value,
+        "--db-name", data.aws_ssm_parameter.db_name.value,
+        "--db-user", data.aws_ssm_parameter.db_user.value,
+      ]
     }
-    condition {
-      age = 90
-    }
   }
 
-  labels = {
-    project_id = var.project_id
-    managed_by = "terraform"
-  }
-
-  lifecycle {
-    prevent_destroy = true
+  schedule {
+    quartz_cron_expression = "0 0 6 * * ?"
+    timezone_id            = "UTC"
   }
 }
 
-resource "google_storage_bucket_object" "processed_dir" {
-  name    = "processed/"
-  bucket  = google_storage_bucket.data.name
-  content = " "
+data "databricks_sql_warehouse" "obs" {
+  name = "multi-cloud-agent-workspace-warehouse"
 }
 
-resource "google_storage_bucket_iam_member" "pipeline" {
-  bucket = google_storage_bucket.data.name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${data.google_service_account.pipeline.email}"
+resource "databricks_dashboard" "observability" {
+  display_name      = "pipe_sales_orders_pipeline_v2_lakehouse — Observability"
+  parent_path       = "/Shared"
+  warehouse_id      = data.databricks_sql_warehouse.obs.id
+  file_path         = "${path.module}/../dashboards/pipe_sales_orders_pipeline_v2_lakehouse_lakeview.json"
+  embed_credentials = false
 }

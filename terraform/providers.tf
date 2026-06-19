@@ -1,20 +1,19 @@
 terraform {
-  required_version = ">= 1.6"
-
   required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
+    databricks = { source = "databricks/databricks", version = "~> 1.0" }
+    aws        = { source = "hashicorp/aws", version = "~> 5.0" }
   }
-
-  backend "gcs" {
-    bucket = "multi-cloud-agent-tfstate"
-    prefix = "gcp/global-marketing-insights/terraform.tfstate"
+  backend "s3" {
+    bucket = "multi-cloud-agent-bootstrap-state"
+    key    = "terraform/sales-orders-pipeline-v2-lakehouse/terraform.tfstate"
+    region = "eu-central-1"
   }
 }
 
-provider "google" {
-  project = var.project_id
-  region  = var.region
+provider "databricks" {
+  auth_type = "oauth-m2m"
+}
+
+provider "aws" {
+  region = "eu-central-1"
 }
