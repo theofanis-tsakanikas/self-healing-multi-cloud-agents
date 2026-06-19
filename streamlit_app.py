@@ -2137,6 +2137,28 @@ with tab_nl:
                     st.session_state.nl_wizard_adding_rule = True
                     st.rerun()
 
+            # ── …or write ALL your rules in plain English (parsed like an uploaded file) ──
+            with st.expander("🗣️ Or describe your rules in plain English", expanded=not _rules):
+                _nl_rules_txt = st.text_area(
+                    "Plain-English rules",
+                    placeholder=("e.g. Drop orders where unit_price is 0 or negative. Exclude "
+                                 "future-dated orders. Replace unknown currency with EUR. "
+                                 "Flag quantity over 1000 as suspicious."),
+                    key="nl_wizard_build_nl", height=110, label_visibility="collapsed",
+                )
+                if (st.button("✨ Parse to rules", key="nl_wizard_build_nl_btn", type="primary")
+                        and _nl_rules_txt.strip()):
+                    with st.spinner("Interpreting your rules…"):
+                        from utils.nlp_parser import parse_rules_from_content
+                        try:
+                            _parsed = parse_rules_from_content(_nl_rules_txt)
+                            st.session_state.nl_rules.extend(_parsed)
+                            st.success(
+                                f"Added {len(_parsed)} rule(s) from your text — review them above.")
+                            st.rerun()
+                        except Exception as _e:
+                            st.error(f"Could not interpret your rules: {_e}")
+
             st.markdown("<hr style='margin:1.2rem 0;'>", unsafe_allow_html=True)
             _s2a1, _s2a2, _ = st.columns([1, 1, 3])
             with _s2a1:
