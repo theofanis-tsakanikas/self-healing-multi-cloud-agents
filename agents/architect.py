@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 import json
 from pathlib import Path
@@ -19,7 +20,7 @@ from utils.prompt_utils import format_prompt
 from utils.file_utils import read_file
 from utils.message_utils import safe_recent_messages
 from utils.config_utils import build_architect_context, build_databricks_architect_context
-from agents.tools import read_data_schema, write_project_file, patch_project_file, query_vector_store, validate_generated_code
+from agents.tools import read_data_schema, write_project_file, patch_project_file, query_vector_store, validate_generated_code, REPO_ROOT
 
 # Logger configuration
 logging.basicConfig(
@@ -65,6 +66,44 @@ def _is_architect_allowed_file(filename: str) -> bool:
         return False
 
     return True
+
+
+# Architect-owned file paths the Medic may name in a healing_context (script / SQL / dashboard /
+# requirements). Used to pull the CURRENT on-disk content into the FIX prompt so the LLM patches the
+# REAL text, not stale/remembered content — symmetric to the infra agent's injection. In a CI-runtime
+# heal the script was written many turns ago and trimmed from context, so the LLM would patch blind.
+_ARCH_FILE_PATH_RE = re.compile(
+    r"(?:scripts/[\w./-]+\.py|sql/[\w./-]+\.sql|dashboards/[\w./-]+\.json|requirements\.txt)",
+    re.IGNORECASE,
+)
+
+
+def _inject_current_file_contents(healing_context: str) -> str:
+    """Return a prompt block with the CURRENT on-disk content of every architect-owned file named in
+    the healing_context, so patch_project_file's `old` string matches reality. Empty string when no
+    architect-owned file is named / found on disk."""
+    found: dict[str, str] = {}
+    for raw in _ARCH_FILE_PATH_RE.findall(healing_context or ""):
+        norm = raw.replace("\\", "/").lstrip("/")
+        if norm in found or not _is_architect_allowed_file(norm):
+            continue
+        path = REPO_ROOT / norm
+        if not path.is_file():
+            continue
+        try:
+            found[norm] = path.read_text()
+        except Exception:
+            continue
+    if not found:
+        return ""
+    block = (
+        "\n\n📄 CURRENT ON-DISK CONTENT of the file(s) to fix — this is the SOURCE OF TRUTH for the "
+        "`old` string in patch_project_file. Copy the EXACT current text from below as `old` "
+        "(do not patch remembered or placeholder text):\n"
+    )
+    for norm, content in found.items():
+        block += f"\n--- {norm} (current) ---\n```\n{content}\n```\n"
+    return block
 
 
 def _resolve_artifacts(pipe_conf: dict, written_files: list[str]) -> list[str]:
@@ -297,6 +336,11 @@ def architect_node(state: AgentState, config: RunnableConfig = None):
             f"Apply this fix exactly as described. "
             f"Only call query_vector_store if the instructions above explicitly require it."
         )
+        # Inject the CURRENT on-disk content of the target file(s) so patch_project_file's `old`
+        # matches reality — without it the LLM patches blind against remembered/placeholder text
+        # (the script may have been written many turns ago and trimmed from context). Symmetric to
+        # the infra agent's injection.
+        system_prompt += _inject_current_file_contents(healing_context)
 
     # Add dynamic instructions regarding phase and knowledge capture
     system_prompt += f"\n\nCRITICAL: {phase_instruction}"
