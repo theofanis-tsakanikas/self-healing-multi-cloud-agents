@@ -104,25 +104,47 @@ def test_resource_does_not_exist_routes_infra():
     assert _owner("RESOURCE_DOES_NOT_EXIST: No secret scope found") == "infra"
 
 
-# --- must NOT match (keep existing architect/script routing) — the 4-cloud safety net ---
-def test_pandas_keyerror_not_infra():
+# --- script-logic bugs now route to ARCHITECT deterministically (3-way, not just "") ---
+def test_pandas_keyerror_routes_architect():
     log = (
         'Traceback (most recent call last):\n'
         '  File "/app/scripts/pipe_etl.py", line 92, in run\n'
         "    chunk['campaign'] = chunk['campaign'].where(...)\n"
         "KeyError: 'campaign'"
     )
-    assert _owner(log) == ""
+    assert _owner(log) == "architect"          # script bug → architect, NOT infra
 
 
-def test_pandas_valueerror_not_infra():
-    assert _owner("ValueError: could not convert string to float: 'not_a_number'") == ""
+def test_pandas_valueerror_routes_architect():
+    assert _owner("ValueError: could not convert string to float: 'not_a_number'") == "architect"
 
 
-def test_spark_analysis_cannot_resolve_not_infra():
-    # A genuine SCRIPT bug in Spark (wrong column) — must stay architect, not infra.
-    assert _owner("AnalysisException: [UNRESOLVED_COLUMN] cannot resolve 'campaign'") == ""
+def test_spark_analysis_cannot_resolve_routes_architect():
+    # A genuine SCRIPT bug in Spark (wrong column) — architect, not infra.
+    assert _owner("AnalysisException: [UNRESOLVED_COLUMN] cannot resolve 'campaign'") == "architect"
 
 
-def test_empty_messages_not_infra():
+def test_empty_messages_undetermined():
     assert _ci_error_owner([]) == ""
+
+
+# --- #1 generalisation: an UNRECOGNISED Databricks runtime error defaults to infra ---
+def test_unknown_databricks_runtime_error_routes_infra():
+    # No known infra signature, no script-logic marker, but clearly a Databricks (py4j) failure →
+    # infra (provisioning/permission is far more likely than a Spark logic bug).
+    log = ("py4j.protocol.Py4JJavaError: An error occurred.\n"
+           "INTERNAL_ERROR: cluster terminated unexpectedly during the run")
+    assert _owner(log) == "infra"
+
+
+def test_unknown_objectstorage_error_stays_undetermined():
+    # A non-logic object-storage error with no databricks markers → '' (LLM/script-frame decides).
+    assert _owner("ConnectionResetError: connection reset by peer while uploading to s3") == ""
+
+
+# --- #3 convergence: volatile tokens are normalised so oscillation is detected ---
+def test_normalize_error_sig_collapses_volatile_tokens():
+    from agents.medic import _normalize_error_sig
+    a = 'File "/tmp/tmpcs1b4xuf.py", line 35, in run — run 190509675097294 failed at 2026-06-19T07:09'
+    b = 'File "/tmp/tmpZZ99aa11.py", line 42, in run — run 887766554433221 failed at 2026-06-20T11:02'
+    assert _normalize_error_sig(a) == _normalize_error_sig(b)   # same failure → same signature

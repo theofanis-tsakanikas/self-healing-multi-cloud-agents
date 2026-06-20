@@ -213,19 +213,61 @@ _CI_INFRA_SIGNATURES = (
     "resource_does_not_exist",     # Databricks API code accompanying a missing secret/scope
 )
 
+# A CI-runtime error carrying one of these is a SCRIPT-LOGIC bug → architect (on ANY cloud). These
+# are Python/Spark logic errors the architect owns; they are NOT provisioning/infra. Listing them
+# lets the medic route a script bug to the architect DETERMINISTICALLY instead of relying on the
+# LLM's target_agent (which has mis-routed before).
+_CI_SCRIPT_SIGNATURES = (
+    "keyerror", "valueerror", "typeerror", "nameerror", "attributeerror", "indexerror",
+    "unresolved_column", "analysisexception", "cannot resolve",
+)
+
+# Markers that the failing run is a DATABRICKS run (they NEVER appear in an object-storage
+# pandas/Trino traceback). Used as a generalised fallback: an UNRECOGNISED Databricks runtime error
+# (not a known infra signature, not a script-logic bug) is far more likely an infra/provisioning
+# issue than a Spark logic bug — the Spark script is validated; the failures are
+# permission/config/resource. So default it to infra rather than the script-frame architect. Object-
+# storage errors lack these markers → they fall through to '' (the LLM/script-frame default).
+_CI_DATABRICKS_CONTEXT = ("py4j", "dbutils", "databricks", "unity catalog")
+
 
 def _ci_error_owner(messages: list) -> str:
-    """Return 'infra' when the CI logs carry an UNAMBIGUOUS infra/dependency signature (the fix is
-    the Terraform — job library OR secret key — not the script); '' otherwise (→ keep script-file
-    routing). Scans the most recent messages (the fetch_github_action_logs output)."""
-    for msg in reversed(messages[-12:]):
-        content = getattr(msg, "content", "") or ""
-        if not isinstance(content, str):
-            content = str(content)
-        low = content.lower()
-        if any(sig in low for sig in _CI_INFRA_SIGNATURES):
-            return "infra"
+    """3-way owner for a CI-LOG runtime failure (no validate_generated_code result to map):
+      - 'architect' → a SCRIPT-LOGIC bug (KeyError/ValueError/AnalysisException/…) on any cloud;
+      - 'infra'     → a known infra signature (missing library/secret/resource) OR any OTHER
+                      Databricks runtime error (those are predominantly provisioning/permission,
+                      not Spark logic — generalises beyond the fixed signature list);
+      - ''          → undetermined (object-storage non-logic error) → let the LLM target_agent /
+                      script-frame default decide.
+    Scans the most recent messages (the fetch_github_action_logs output)."""
+    blob = " ".join(
+        (getattr(m, "content", "") if isinstance(getattr(m, "content", ""), str)
+         else str(getattr(m, "content", "")))
+        for m in messages[-12:]
+    ).lower()
+    if any(sig in blob for sig in _CI_SCRIPT_SIGNATURES):
+        return "architect"
+    if any(sig in blob for sig in _CI_INFRA_SIGNATURES):
+        return "infra"
+    if any(sig in blob for sig in _CI_DATABRICKS_CONTEXT):
+        return "infra"
     return ""
+
+
+def _normalize_error_sig(text: str) -> str:
+    """Strip VOLATILE tokens from an error string so the fix-loop convergence guard treats the SAME
+    underlying failure as identical across rounds even when line numbers / run-ids / timestamps /
+    hex addresses / ephemeral tmp paths differ. Without this, an error whose text shifts every
+    attempt (e.g. a new `/tmp/tmpXXXX.py` path or a different traceback line number) produces a
+    fresh signature each round → fix_attempt never reaches the escalation threshold → the heal
+    loops to the graph recursion limit instead of surfacing to the user."""
+    t = (text or "").lower()
+    t = re.sub(r"/tmp/\S+", "/tmp/X", t)                    # ephemeral spark tmp script paths
+    t = re.sub(r"\b[0-9a-f]{8,}\b", "X", t)                 # hex ids / shas / dashboard+run ids
+    t = re.sub(r"\d{4}-\d{2}-\d{2}[t ][\d:.,+-]+", "T", t)  # iso timestamps
+    t = re.sub(r"\d+", "N", t)                              # line numbers, counts, numeric run-ids
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
 
 
 def _databricks_secret_key_exact_fix(messages: list) -> tuple[str, str] | None:
@@ -633,7 +675,7 @@ def medic_node(state: AgentState):
                     "Target file(s) to fix: " + ", ".join(_failed_files) + "\n\n" + healing_context
                 )
                 logger.info("🩹 Injected FAILED filename(s) into healing_context for patch targeting.")
-        elif _ci_error_owner(state["messages"]) == "infra":
+        elif (_ci_owner := _ci_error_owner(state["messages"])) == "infra":
             # CI-LOG failure with an UNAMBIGUOUS infra/dependency signature (e.g. a missing JDBC
             # driver → ClassNotFoundException). The error surfaces AT the script's read line, but
             # the fix is the Terraform job `library` block, NOT the script — so route to infra
@@ -673,9 +715,13 @@ def medic_node(state: AgentState):
             logger.info("🧭 CI-runtime infra signature (missing library/secret) → routing fix to infra (Terraform).")
         else:
             # CI-LOG failure (a runtime error surfaced by fetch_github_action_logs) — there is no
-            # validate_generated_code result to map to a file. Pull the failing artifact straight
+            # validate_generated_code result to map to a file. A SCRIPT-LOGIC bug routes to the
+            # architect DETERMINISTICALLY (no longer just via the LLM's target_agent); an
+            # undetermined error ('') keeps the LLM target. Either way, pull the failing artifact
             # from the CI traceback so the architect can target it; otherwise healing_context names
             # no file, the architect rejects its own patch ("not the fix target"), and the fix loops.
+            if _ci_owner == "architect":
+                deterministic_fix_target = "architect"
             _ci_file = _extract_ci_failed_file(state["messages"])
             if (_ci_file and healing_context
                     and Path(_ci_file).stem.lower() not in healing_context.lower()):
@@ -710,7 +756,7 @@ def medic_node(state: AgentState):
     escalated_fix_loop = False
     if fix_requested:
         current_sig = hashlib.sha256(
-            "||".join(sorted(filter(None, fix_signature_parts))).encode()
+            "||".join(sorted(filter(None, (_normalize_error_sig(p) for p in fix_signature_parts)))).encode()
         ).hexdigest()
         if current_sig and current_sig == state.get("last_fix_signature", ""):
             fix_attempt = state.get("fix_attempt", 0) + 1  # same error again → not converging
