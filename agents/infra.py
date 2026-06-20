@@ -588,6 +588,7 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
     last_push_sha = state.get("last_push_sha", "")
     any_tool_error = any_tool_error_from_codegen
     patch_applied = False              # a patch_project_file call that actually changed the file
+    patched_tf = False                 # ...and that file was a .tf (→ the live infra needs apply)
     executed_terraform_this_turn = False  # the LLM already called execute_terraform this turn
 
     if response.tool_calls:
@@ -724,6 +725,8 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                         logger.warning("🚫 No-op patch (nothing applied) — wrong `old` string; flagging as error.")
                     else:
                         patch_applied = True
+                        if str(t_args.get("filename", "")).lower().endswith(".tf"):
+                            patched_tf = True   # a live terraform resource changed → needs apply
                 if t_name == "execute_terraform":
                     executed_terraform_this_turn = True
 
@@ -924,15 +927,17 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
 
             new_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=str(result)))
 
-    # 9b. DETERMINISTIC HEAL COMPLETION (Databricks infra fix only)
-    # A SUCCESSFUL infra patch on Databricks is mechanically determined to need two follow-ups:
-    # (1) `terraform apply` to push the change to the LIVE infra (the deploy workflow does NOT run
-    # apply), then (2) a git push to re-trigger the deploy. Relying on the LLM to emit
+    # 9b. DETERMINISTIC HEAL COMPLETION (any infra fix that changed live Terraform)
+    # A SUCCESSFUL infra patch to a Terraform resource is mechanically determined to need two
+    # follow-ups: (1) `terraform apply` to push the change to the LIVE infra (the deploy workflow
+    # does NOT run apply), then (2) a git push to re-trigger the deploy. Relying on the LLM to emit
     # execute_terraform + push after the patch is not guaranteed (gpt-4o-mini sometimes stops at the
-    # patch, leaving the live secret stale → identical failure). Force them here so the heal always
-    # completes. Gated to Databricks fix mode with a CLEAN applied patch — object-storage clouds
-    # keep the LLM-driven patch+push (their deploy re-applies k8s; the validated runs are unchanged).
-    if (is_databricks and medic_triggered_fix and patch_applied
+    # patch, leaving the live resource stale → identical failure). Force them here.
+    # Fires when: Databricks fix mode (ALL its artifacts are Terraform), OR ANY cloud where the
+    # patched file was a `.tf` (a live IAM/S3/etc. change that the k8s-only deploy won't apply).
+    # A k8s/Dockerfile/workflow fix has patched_tf=False → unchanged LLM-driven patch+push (the
+    # deploy re-applies k8s) — so the validated object-storage heals are untouched.
+    if (medic_triggered_fix and patch_applied and (is_databricks or patched_tf)
             and not any_tool_error and not validation_errors):
         if not executed_terraform_this_turn:
             logger.info("🔧 DETERMINISTIC HEAL: applying terraform after a clean patch.")

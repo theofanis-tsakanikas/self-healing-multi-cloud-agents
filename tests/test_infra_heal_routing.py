@@ -173,8 +173,23 @@ def test_databricks_heal_forces_apply_and_push_after_patch(monkeypatch):
     assert out["last_push_sha"] == "a" * 40
 
 
-def test_object_storage_heal_does_not_force_terraform_apply(monkeypatch):
-    # AWS/Azure/GCP: a clean patch must NOT trigger a forced terraform apply (deploy re-applies k8s).
-    recorded, _ = _run_heal_with_llm_response(monkeypatch, "kubernetes", _PATCH_CALL)
+_K8S_PATCH_CALL = [{
+    "name": "patch_project_file", "id": "c1",
+    "args": {"filename": "k8s/job.yaml",
+             "replacements": [{"old": "imagePullPolicy: Never", "new": "imagePullPolicy: Always"}]},
+}]
+
+
+def test_object_storage_k8s_fix_does_not_force_terraform_apply(monkeypatch):
+    # AWS/Azure/GCP: a K8S fix must NOT trigger a forced terraform apply — the deploy re-applies k8s.
+    recorded, _ = _run_heal_with_llm_response(monkeypatch, "kubernetes", _K8S_PATCH_CALL)
     assert "patch" in recorded
-    assert "apply" not in recorded, "object-storage heal must not force terraform apply"
+    assert "apply" not in recorded, "a k8s fix must not force terraform apply"
+
+
+def test_object_storage_tf_fix_forces_apply_and_push(monkeypatch):
+    # #5: a .tf fix on object-storage IS a live IAM/S3 change the k8s-only deploy won't apply →
+    # force terraform apply + push (unlike a k8s fix above). _PATCH_CALL patches terraform/main.tf.
+    recorded, _ = _run_heal_with_llm_response(monkeypatch, "kubernetes", _PATCH_CALL)
+    assert "apply" in recorded, "object-storage .tf fix must force terraform apply (live infra change)"
+    assert "push" in recorded
