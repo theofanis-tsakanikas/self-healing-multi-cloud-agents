@@ -2574,6 +2574,18 @@ _EVIDENCE_MARKERS = (
     "is invalid",         # kubectl resource validation: `The Job "..." is invalid`
     "Invalid value",      # kubectl field validation error
     "immutable",          # k8s immutable-field error (e.g. Job spec.template)
+    # High-signal error phrases that carry no generic marker above (e.g. a permission/resource
+    # failure phrased without "Error:"). None of these appear in a CLEAN validation message
+    # ("AUTO-VALIDATION: CLEAN ✓"), so they cannot let the LLM fabricate a fix for a clean file.
+    "does not exist",     # missing resource (Secret/Table/Scope does not exist)
+    "not found",          # Table/run/resource not found
+    "no such",            # no such file/table/host
+    "denied",             # Access denied / Permission denied
+    "permission",         # INSUFFICIENT_PERMISSIONS / permission errors
+    "refused",            # connection refused
+    "timed out",          # connection/operation timeout
+    "timeout",
+    "unable to",          # unable to connect / create / acquire
 )
 
 @tool
