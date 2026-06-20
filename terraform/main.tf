@@ -1,4 +1,5 @@
 resource "databricks_secret_scope" "pipeline" {
+  
   name = "pipe_sales_lakehouse"
 }
 
