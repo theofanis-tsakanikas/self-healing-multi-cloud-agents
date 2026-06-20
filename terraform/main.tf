@@ -11,7 +11,7 @@ data "aws_ssm_parameter" "db_password" { name = "/multi-cloud-self-healing-agent
 
 # ONLY the password goes into the secret scope; host/name/user are non-sensitive job params.
 resource "databricks_secret" "db_password" {
-  key          = "postgres_password"
+  key          = "db_password"
   string_value = data.aws_ssm_parameter.db_password.value
   scope        = databricks_secret_scope.pipeline.name
 }
