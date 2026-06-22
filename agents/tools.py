@@ -2409,28 +2409,13 @@ def push_to_github(project_id: str, commit_message: str):
         subprocess.run(["git", "config", "user.name", "github-actions[bot]"], cwd=REPO_ROOT, check=True)
         subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], cwd=REPO_ROOT, check=True)
 
-        # 2. Authentication: rewrite the remote URL to embed the token so git push
-        # is authenticated. Works in both CI (GITHUB_REPOSITORY set by Actions) and
-        # local dev (GITHUB_REPOSITORY absent — inferred from the existing remote URL).
-        github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
-        github_repository = os.getenv("GITHUB_REPOSITORY")
-        if github_token and not github_repository:
-            # Infer repo slug from the current remote URL (handles both HTTPS and SSH).
-            _remote_out = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
-                cwd=REPO_ROOT, capture_output=True, text=True
-            )
-            if _remote_out.returncode == 0:
-                _m = re.search(r"github\.com[:/](.+?)(?:\.git)?$", _remote_out.stdout.strip())
-                if _m:
-                    github_repository = _m.group(1)
-        if github_token and github_repository:
-            authed_url = f"https://x-access-token:{github_token}@github.com/{github_repository}.git"
-            subprocess.run(
-                ["git", "remote", "set-url", "origin", authed_url],
-                cwd=REPO_ROOT, check=True
-            )
-            logger.info("🔑 Remote URL configured with token (repo: %s).", github_repository)
+        # 2. Authentication is provided by AMBIENT git credentials — the token is never
+        # embedded in the remote URL. Embedding it would persist the secret in plaintext
+        # in .git/config and risk leaking it in logs / `git remote -v`.
+        #   • CI: actions/checkout@v4 (run_agent.yml) persists GH_PAT as an http.extraheader
+        #     on the runner, so `git push` to origin is already authenticated.
+        #   • Local: a git credential helper supplies it (`gh auth setup-git`, or osxkeychain).
+        # The remote stays a clean tokenless https URL; identity below is unchanged.
 
         # 3. Selective Staging — stage every directory/file that agents generate.
         # REPO_ROOT == PROJECT_ROOT (standalone repo — not a monorepo anymore).
