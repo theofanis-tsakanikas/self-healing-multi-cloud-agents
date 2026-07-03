@@ -141,16 +141,21 @@ Each object-storage pipeline ships with a provisioned Grafana dashboard (record 
 ## Testing
 
 ```bash
-make test     # 190+ hermetic unit tests — no cloud, no credentials, every external dependency mocked
+make test         # hermetic unit tests — no cloud, no credentials, every external dependency mocked
+make eval-replay  # offline Medic self-heal eval — score the failure corpus, no LLM/cloud/keys
+make heal LOG=run.log   # route + validate ANY failing CI log through the real Medic logic (offline)
 ```
 
-CI (`tests.yml`) runs lint + the suite with a coverage floor on every push/PR. The deterministic core (routing, validators, state lifecycle, credential resolution) is unit-tested; the LLM-driven node bodies are validated by the end-to-end pipeline runs above.
+CI (`tests.yml`) runs lint + the suite with a coverage floor on every push/PR. The deterministic core (routing, validators, state lifecycle, credential resolution) is unit-tested.
+
+**Self-heal eval harness ([`evals/`](evals/), [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md)).** The Medic's judgment — diagnosing a failed CI run and routing an evidence-grounded fix — is measured offline against a corpus of the documented failure classes (`evals/corpus/corpus.json`). **Replay mode** (`make eval-replay`, gated in CI) scores the *real* routing + anti-hallucination evidence gate with no LLM, no cloud, no keys — the regression net the previously eval-less whack-a-mole guards never had. **Eval mode** (`make eval-live`, needs an LLM key, model-agnostic via `get_llm`) scores the current model's diagnosis quality, catching model regressions. The `heal` CLI runs the same judgment on any failing log, decoupled from the pipelines this agent generated.
 
 ---
 
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — as-built architecture: agents, state machine, per-cloud execution models, credential resolution
+- [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md) — the offline replay + eval harness for the self-healing Medic (corpus, replay/eval modes, the `heal` CLI)
 - [docs/VISION.md](docs/VISION.md) — product vision and roadmap
 - [SECURITY.md](SECURITY.md) — what is hardened, the deliberate demo trade-offs, and the production posture for each
 - [CHANGELOG.md](CHANGELOG.md) — release history

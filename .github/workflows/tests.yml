@@ -44,6 +44,11 @@ jobs:
         # fail_under is enforced via [tool.coverage.report] in pyproject.toml.
         run: uv run pytest --cov --cov-report=term-missing
 
+      - name: Medic self-heal eval (offline replay — routing + evidence-gate regression net)
+        # Scores the REAL Medic routing + evidence gate against evals/corpus/corpus.json and
+        # fails if the committed report is stale or any deterministic check regressed. No LLM.
+        run: make eval-check
+
   terraform-fmt:
     # Formatting gate for the HAND-WRITTEN Terraform only (bootstrap/). The
     # pipeline stack under terraform/ is an agent-generated output with its own

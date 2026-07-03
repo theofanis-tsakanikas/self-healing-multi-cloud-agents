@@ -166,6 +166,24 @@ demo-databricks: ## Full Databricks demo: ingest + chaos + run sales_lakehouse
 test: ## Run the full test suite
 	uv run pytest tests/ -v --tb=short
 
+.PHONY: eval-replay
+eval-replay: ## Medic self-heal eval (OFFLINE replay — no cloud/LLM/creds): score the failure corpus, regenerate evals/report/
+	$(PYTHON) -m evals.harness.runner
+
+.PHONY: eval-check
+eval-check: ## CI parity: fail if evals/report is stale OR the deterministic routing/gate regressed vs the corpus
+	$(PYTHON) -m evals.harness.runner --check
+	$(PYTHON) -m evals.harness.runner --gate
+
+.PHONY: eval-live
+eval-live: ## Medic diagnosis eval (LIVE — needs an LLM key): score the current model's routing + evidence grounding. Override with model=<id>
+	$(PYTHON) -m evals.harness.eval_live $(if $(model),--model $(model),)
+
+.PHONY: heal
+heal: ## Route + validate ANY failing CI log through the real Medic logic (offline). Usage: make heal LOG=run.log
+	@$(if $(LOG),,$(error Error: LOG is undefined. Usage: make heal LOG=run.log))
+	$(PYTHON) -m evals.heal --log $(LOG)
+
 .PHONY: format
 format: ## Autofix lint findings with ruff (generated pipe_*.py excluded via pyproject)
 	@echo "Fixing lint findings..."

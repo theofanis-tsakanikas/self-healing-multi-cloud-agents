@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); commit history uses
 conventional commits (`type(scope): description`).
 
+## [Unreleased]
+
+### Added
+- **Offline replay + eval harness for the self-healing Medic** ([`evals/`](evals/), [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md)) — makes the agent's core loop verifiable and its LLM judgment measurable, with no cloud, spend, or credentials:
+  - `evals/corpus/corpus.json` — a golden corpus of the documented failure classes (script-logic → architect; missing library/secret/resource → infra; plus clean/green/speculation negatives), with realistic trigger logs matching the Medic's routing signatures and links to the real self-heal commits.
+  - **Replay mode** (`make eval-replay`) — `evals/harness/` scores the *real* deterministic routing (`_ci_error_owner` + the failing-file fallback) and the anti-hallucination evidence gate (`request_fix`) against the corpus, writing `evals/report/{metrics.json,REPORT.md}`. The regression net the whack-a-mole guards never had — gated in CI (`make eval-check`) and asserted by `tests/test_evals.py`.
+  - **Eval mode** (`make eval-live`) — `evals/harness/eval_live.py` scores the current model's diagnosis quality (correct target + gate-valid verbatim evidence) via the real `request_fix` tool; model-agnostic through the `get_llm` seam (OpenAI / Anthropic / Vertex).
+  - **`heal` CLI** (`make heal LOG=…`, `evals/heal.py`) — routes + validates ANY failing CI log through the shipping Medic logic, decoupling the healing judgment from the pipelines this agent generated.
+  - `evals/harness/local_kb.py` — a credential-free local knowledge-base retriever (stand-in for the Pinecone `query_vector_store` seam).
+
 ## [1.0.0] — 2026-06-10
 
 First tagged release: **all four platforms validated end-to-end on live
