@@ -1,0 +1,118 @@
+{
+  "corpus_cases": 13,
+  "routing": {
+    "total": 10,
+    "correct": 10,
+    "accuracy_pct": 100.0,
+    "failures": []
+  },
+  "evidence_gate": {
+    "total": 13,
+    "correct": 13,
+    "accuracy_pct": 100.0,
+    "failures": []
+  },
+  "by_failure_class": {
+    "infra:databricks-context-fallback": {
+      "routing_total": 1,
+      "routing_correct": 1,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "infra:missing-library": {
+      "routing_total": 1,
+      "routing_correct": 1,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "infra:resource-not-found": {
+      "routing_total": 1,
+      "routing_correct": 1,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "infra:secret-not-found": {
+      "routing_total": 1,
+      "routing_correct": 1,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "negative:clean": {
+      "routing_total": 0,
+      "routing_correct": 0,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "negative:green": {
+      "routing_total": 0,
+      "routing_correct": 0,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "negative:speculation": {
+      "routing_total": 0,
+      "routing_correct": 0,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "script-logic:AnalysisException": {
+      "routing_total": 1,
+      "routing_correct": 1,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "script-logic:KeyError": {
+      "routing_total": 1,
+      "routing_correct": 1,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "script-logic:TypeError": {
+      "routing_total": 1,
+      "routing_correct": 1,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "script-logic:ValueError": {
+      "routing_total": 1,
+      "routing_correct": 1,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "script-logic:trino-arg-shape": {
+      "routing_total": 1,
+      "routing_correct": 1,
+      "gate_total": 1,
+      "gate_correct": 1
+    },
+    "script-logic:trino-ddl-type": {
+      "routing_total": 1,
+      "routing_correct": 1,
+      "gate_total": 1,
+      "gate_correct": 1
+    }
+  },
+  "evidence_markers": [
+    "VALIDATION FAILED",
+    "Error:",
+    "error:",
+    "FAILED",
+    "Exception",
+    "Traceback",
+    "exit code",
+    "rejected",
+    "is invalid",
+    "Invalid value",
+    "immutable",
+    "does not exist",
+    "not found",
+    "no such",
+    "denied",
+    "permission",
+    "refused",
+    "timed out",
+    "timeout",
+    "unable to"
+  ],
+  "all_passed": true
+}

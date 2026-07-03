@@ -1,0 +1,153 @@
+{
+  "_about": [
+    "Golden corpus of CI-runtime failures for the offline Medic eval harness (evals/).",
+    "Each case is a realistic failing-CI log reconstructed from the documented failure classes",
+    "(DEMO_MISTAKES.md, CLAUDE.md) and the Medic's own routing signatures (agents/medic.py:",
+    "_CI_SCRIPT_SIGNATURES / _CI_INFRA_SIGNATURES / _CI_DATABRICKS_CONTEXT) and evidence markers",
+    "(agents/tools.py: _EVIDENCE_MARKERS). The real self-heal commits in git history are fix-only",
+    "(no triggering CI logs are stored), so the trigger logs here are synthesised to match the",
+    "exact strings the deterministic router keys on — that is what the router actually sees.",
+    "",
+    "Fields: id, failure_class, provider, trigger_log (the CI log the Medic fetches),",
+    "expected_owner ('architect'|'infra'|'' = undetermined, LLM decides), evidence_gate",
+    "('pass' = request_fix accepts it as a real failure | 'reject' = no error marker, refused),",
+    "source, real_self_heal_commit (optional), notes.",
+    "",
+    "The harness (evals/harness/) scores expected_owner against the REAL medic routing functions",
+    "and evidence_gate against the REAL request_fix tool — a regression net for the whack-a-mole",
+    "routing/guard logic that previously had no eval."
+  ],
+  "cases": [
+    {
+      "id": "script_keyerror_wrong_column",
+      "failure_class": "script-logic:KeyError",
+      "provider": "aws",
+      "trigger_log": "Traceback (most recent call last):\n  File \"/app/scripts/pipe_eu_sales_to_s3.py\", line 88, in <module>\n    chunk['campaign'] = chunk['campaign'].fillna('')\n  File \"/usr/local/lib/python3.12/site-packages/pandas/core/frame.py\", line 3805, in __getitem__\n    indexer = self.columns.get_loc(key)\nKeyError: 'campaign'\nError: Process completed with exit code 1.",
+      "expected_owner": "architect",
+      "evidence_gate": "pass",
+      "source": "CLAUDE.md (Schema column cross-check / KeyError guard)",
+      "notes": "The LLM used a business rule's target_criteria value ('campaign') literally instead of resolving it to 'campaign_id'. KeyError is a _CI_SCRIPT_SIGNATURE -> architect."
+    },
+    {
+      "id": "script_valueerror_astype_float_dirty",
+      "failure_class": "script-logic:ValueError",
+      "provider": "gcp",
+      "trigger_log": "Traceback (most recent call last):\n  File \"/app/scripts/pipe_global_marketing_to_gcs.py\", line 121, in <module>\n    chunk['spend'] = chunk['spend'].astype(float)\nValueError: could not convert string to float: 'not_a_number'\nError: Process completed with exit code 1.",
+      "expected_owner": "architect",
+      "evidence_gate": "pass",
+      "source": "CLAUDE.md (Numeric comparison columns coerce, never .astype(float))",
+      "notes": ".astype(float) crashes on the first dirty cell; the fix is pd.to_numeric(errors='coerce'). ValueError -> architect."
+    },
+    {
+      "id": "script_typeerror_chained_coerce_compare",
+      "failure_class": "script-logic:TypeError",
+      "provider": "gcp",
+      "trigger_log": "Traceback (most recent call last):\n  File \"/app/scripts/pipe_global_marketing_to_gcs.py\", line 130, in <module>\n    chunk['qty'] = pd.to_numeric(chunk['qty'], errors='coerce').where(chunk['qty'] >= 0, 0)\nTypeError: Invalid comparison between dtype=str and int\nError: Process completed with exit code 1.",
+      "expected_owner": "architect",
+      "evidence_gate": "pass",
+      "source": "CLAUDE.md (Coerce-then-compare is TWO statements)",
+      "notes": "Chaining .where onto the coerce compares against the ORIGINAL str column. TypeError -> architect."
+    },
+    {
+      "id": "script_spark_analysisexception_unresolved_column",
+      "failure_class": "script-logic:AnalysisException",
+      "provider": "databricks",
+      "trigger_log": "py4j.protocol.Py4JJavaError: An error occurred while calling o123.saveAsTable.\npyspark.sql.utils.AnalysisException: cannot resolve 'customer_id' given input columns: [id, name, amount]\nError: Task failed.",
+      "expected_owner": "architect",
+      "evidence_gate": "pass",
+      "source": "CLAUDE.md / _CI_SCRIPT_SIGNATURES",
+      "notes": "AnalysisException + 'cannot resolve' are _CI_SCRIPT_SIGNATURES -> architect, even though 'py4j' (a Databricks-context marker) is present: the script-logic check runs first."
+    },
+    {
+      "id": "script_trino_sync_partition_boolean_cast",
+      "failure_class": "script-logic:trino-arg-shape",
+      "provider": "aws",
+      "trigger_log": "  File \"/app/scripts/pipe_eu_sales_to_s3.py\", line 156, in register_partition\n    cursor.execute(\"CALL hive.system.sync_partition_metadata('hive','sales_eu','orders','ADD')\")\ntrino.exceptions.TrinoUserError: line 1:1: Cannot cast varchar to boolean\nFAILED: Process completed with exit code 1.",
+      "expected_owner": "architect",
+      "evidence_gate": "pass",
+      "source": "CLAUDE.md (sync_partition_metadata EXACTLY 3 args)",
+      "notes": "No _CI_SCRIPT_SIGNATURE and no Databricks context -> _ci_error_owner returns ''; the failing scripts/*.py frame in the traceback then routes it to architect via _owner_of_file (the file-frame fallback)."
+    },
+    {
+      "id": "script_trino_ddl_unknown_type",
+      "failure_class": "script-logic:trino-ddl-type",
+      "provider": "aws",
+      "trigger_log": "  File \"/app/scripts/pipe_eu_sales_to_s3.py\", line 64, in create_table\n    cursor.execute(ddl)\ntrino.exceptions.TrinoUserError: line 3:5: Unknown type 'TEXT' for column 'notes'\nError: Process completed with exit code 1.",
+      "expected_owner": "architect",
+      "evidence_gate": "pass",
+      "source": "CLAUDE.md (_fix_trino_ddl_types: TEXT/STRING -> VARCHAR)",
+      "notes": "Object-storage Trino DDL type error; no infra signature -> file-frame fallback routes to architect."
+    },
+    {
+      "id": "infra_databricks_secret_not_found",
+      "failure_class": "infra:secret-not-found",
+      "provider": "databricks",
+      "trigger_log": "Exception: Secret does not exist with scope: sales_lakehouse and key: db_password\n  at com.databricks.backend.daemon.dbutils.SecretUtils.get(...)\nError: Task failed with state INTERNAL_ERROR.",
+      "expected_owner": "infra",
+      "evidence_gate": "pass",
+      "source": "DEMO_MISTAKES.md (active injected chaos)",
+      "real_self_heal_commit": "0b1e0c1",
+      "notes": "The active demo mistake: terraform databricks_secret key='postgres_password' but the script reads 'db_password'. 'secret does not exist' is a _CI_INFRA_SIGNATURE -> infra; _databricks_secret_key_exact_fix computes the exact terraform one-line patch."
+    },
+    {
+      "id": "infra_databricks_missing_jdbc_driver",
+      "failure_class": "infra:missing-library",
+      "provider": "databricks",
+      "trigger_log": "py4j.protocol.Py4JJavaError: An error occurred while calling o89.load.\njava.lang.ClassNotFoundException: org.postgresql.Driver\nError: Task failed.",
+      "expected_owner": "infra",
+      "evidence_gate": "pass",
+      "source": "CLAUDE.md / _CI_INFRA_SIGNATURES",
+      "notes": "The JDBC driver library is not attached to the databricks_job. ClassNotFoundException -> infra (fix the Terraform 'library' block), not the script."
+    },
+    {
+      "id": "infra_databricks_resource_does_not_exist_scope",
+      "failure_class": "infra:resource-not-found",
+      "provider": "databricks",
+      "trigger_log": "Traceback (most recent call last):\n  File \"main.py\", line 40, in <module>\n    w.secrets.get_secret(scope='sales_lakehouse', key='db_password')\ndatabricks.sdk.errors.platform.ResourceDoesNotExist: RESOURCE_DOES_NOT_EXIST: No secret scope 'sales_lakehouse' exists.\nError: exit code 1.",
+      "expected_owner": "infra",
+      "evidence_gate": "pass",
+      "source": "_CI_INFRA_SIGNATURES (resource_does_not_exist)",
+      "notes": "The secret scope itself is missing (provisioning gap) -> infra."
+    },
+    {
+      "id": "infra_databricks_unrecognised_runtime_error",
+      "failure_class": "infra:databricks-context-fallback",
+      "provider": "databricks",
+      "trigger_log": "py4j.protocol.Py4JJavaError: An error occurred while calling o201.saveAsTable.\ncom.databricks.sql.transaction.tahoe.ConcurrentAppendException: Files were added to the root of the table by a concurrent update.\nError: Task failed.",
+      "expected_owner": "infra",
+      "evidence_gate": "pass",
+      "source": "_CI_DATABRICKS_CONTEXT fallback",
+      "notes": "Not a known signature and not a script-logic error, but a Databricks-context ('py4j'/'databricks') runtime failure -> defaulted to infra (provisioning/config far more likely than Spark logic on a validated script)."
+    },
+    {
+      "id": "gate_reject_clean_validation",
+      "failure_class": "negative:clean",
+      "provider": "aws",
+      "trigger_log": "AUTO-VALIDATION: CLEAN ✓ — scripts/pipe_eu_sales_to_s3.py passed all checks.",
+      "expected_owner": null,
+      "evidence_gate": "reject",
+      "source": "agents/tools.py _EVIDENCE_MARKERS (none present)",
+      "notes": "A CLEAN validation message carries no error marker; request_fix MUST refuse it so the LLM cannot fabricate a fix for a healthy file."
+    },
+    {
+      "id": "gate_reject_llm_speculation",
+      "failure_class": "negative:speculation",
+      "provider": "gcp",
+      "trigger_log": "Based on my analysis the schema might be wrong and the column could be misnamed, so we should probably change it.",
+      "expected_owner": null,
+      "evidence_gate": "reject",
+      "source": "agents/tools.py request_fix gate",
+      "notes": "Free-form LLM speculation with no verbatim error text -> rejected (anti-hallucination gate)."
+    },
+    {
+      "id": "gate_pass_green_but_no_fix",
+      "failure_class": "negative:green",
+      "provider": "aws",
+      "trigger_log": "Everything looks green! No failed jobs found for the latest run.",
+      "expected_owner": null,
+      "evidence_gate": "reject",
+      "source": "medic green-detection strings",
+      "notes": "A green CI result must never trigger request_fix — no error marker present, so the gate refuses."
+    }
+  ]
+}
