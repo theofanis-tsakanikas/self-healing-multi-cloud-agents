@@ -40,6 +40,7 @@ pipeline_execution.log
 # Local TODO / planning / promo notes — not versioned
 todo/
 promo/
+notes/
 
 # macOS
 .DS_Store
