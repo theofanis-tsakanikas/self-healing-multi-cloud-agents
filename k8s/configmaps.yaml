@@ -7,20 +7,19 @@ metadata:
     project_id: multi-cloud-self-healing-agent
 data:
   setup_trino.sql: |
-    CREATE SCHEMA IF NOT EXISTS hive.marketing_global;
-    DROP TABLE IF EXISTS hive.marketing_global.pipe_mkt_global_to_gcp;
-    CREATE TABLE hive.marketing_global.pipe_mkt_global_to_gcp (
-        campaign_id VARCHAR,
-        platform_name VARCHAR,
-        ad_spend DECIMAL(18,2),
-        clicks BIGINT,
-        impressions DOUBLE,
-        event_timestamp TIMESTAMP,
+    CREATE SCHEMA IF NOT EXISTS hive.sales_eu;
+    DROP TABLE IF EXISTS hive.sales_eu.pipe_eu_sales_to_s3;
+    CREATE TABLE hive.sales_eu.pipe_eu_sales_to_s3 (
+        order_id VARCHAR,
+        unit_price DECIMAL(18,2),
+        quantity INTEGER,
+        order_date TIMESTAMP,
+        currency VARCHAR,
         is_suspicious BOOLEAN,
         run_date DATE
     ) WITH (
         format = 'PARQUET',
-        external_location = 'gs://global-marketing-insights-data/processed/',
+        external_location = 's3://eu-sales-insights-data/processed/',
         partitioned_by = ARRAY['run_date']
     );
 ---
@@ -34,9 +33,10 @@ metadata:
 data:
   hive.properties: |
     connector.name=hive
-    hive.metastore=file
-    hive.metastore.catalog.dir=gs://global-marketing-insights-data/metastore/
-    hive.gcs.use-access-token=false
+    hive.metastore=glue
+    hive.metastore.glue.region=eu-central-1
+    hive.s3.region=eu-central-1
+    hive.s3.path-style-access=true
     hive.allow-drop-table=true
     hive.allow-rename-table=true
 ---
@@ -61,8 +61,8 @@ data:
         path: /etc/grafana/provisioning/dashboards
   monitoring_specs.json: |
     {
-      "uid": "global-marketing-data-observability",
-      "title": "Global Marketing Data Observability",
+      "uid": "eu-sales-data-observability",
+      "title": "EU Sales Data Observability",
       "schemaVersion": 37,
       "version": 1,
       "refresh": "5m",
@@ -72,8 +72,8 @@ data:
       },
       "tags": [
         "data-pipeline",
-        "global-marketing",
-        "gcp"
+        "eu-sales",
+        "aws"
       ],
       "templating": {
         "list": [

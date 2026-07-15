@@ -16,4 +16,4 @@ COPY dashboards/ dashboards/
 RUN useradd --no-create-home --shell /bin/false appuser
 USER appuser
 
-CMD ["python", "scripts/pipe_mkt_global_to_gcp.py"]
+CMD ["python", "scripts/pipe_eu_sales_to_s3.py"]

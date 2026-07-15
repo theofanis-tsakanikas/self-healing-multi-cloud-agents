@@ -1,19 +1,21 @@
 terraform {
-  required_providers {
-    databricks = { source = "databricks/databricks", version = "~> 1.0" }
-    aws        = { source = "hashicorp/aws", version = "~> 5.0" }
-  }
-  backend "s3" {
-    bucket = "multi-cloud-agent-bootstrap-state"
-    key    = "terraform/sales-lakehouse/terraform.tfstate"
-    region = "eu-central-1"
-  }
-}
+  required_version = ">= 1.6"
 
-provider "databricks" {
-  auth_type = "oauth-m2m"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+
+  backend "s3" {
+    bucket         = "multi-cloud-agent-tf-state-bucket"
+    key            = "terraform/eu-sales-insights/terraform.tfstate"
+    region         = "eu-central-1"
+    dynamodb_table = "terraform-state-lock"
+  }
 }
 
 provider "aws" {
-  region = "eu-central-1"
+  region = var.region
 }

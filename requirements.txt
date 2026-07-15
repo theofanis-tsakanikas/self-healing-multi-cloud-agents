@@ -3,6 +3,6 @@ sqlalchemy
 pyarrow
 trino
 prometheus-client
-google-cloud-storage
-gcsfs
-pymysql
+boto3
+s3fs
+psycopg2-binary

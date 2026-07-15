@@ -1,20 +1,20 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pipe-mkt-global-to-gcp-job
+  name: pipe-eu-sales-to-s3-job
   namespace: analytics
   labels:
-    project_id: pipe_mkt_global_to_gcp
+    project_id: pipe_eu_sales_to_s3
     component: pipeline-job
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        project_id: pipe_mkt_global_to_gcp
+        project_id: pipe_eu_sales_to_s3
         component: pipeline-job
     spec:
-      serviceAccountName: global-mkt-insights-sa
+      serviceAccountName: eu-sales-insights-sa
       restartPolicy: Never
       initContainers:
       - name: init-trino
@@ -32,21 +32,21 @@ spec:
           mountPath: /scripts
       containers:
       - name: pipeline
-        image: europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260618-0707:latest
+        image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
         env:
         - name: PROJECT_ID
-          value: "pipe_mkt_global_to_gcp"
+          value: "pipe_eu_sales_to_s3"
         - name: CLOUD_PROVIDER
-          value: "gcp"
+          value: "aws"
         - name: DESTINATION_URI
-          value: "gs://global-marketing-insights-data/processed/"
+          value: "s3://eu-sales-insights-data/processed/"
         - name: TRINO_HOST
           value: "trino.analytics.svc.cluster.local"
         - name: PUSHGATEWAY_URL
           value: "http://pushgateway.monitoring.svc.cluster.local:9091"
         envFrom:
         - secretRef:
-            name: pipe-mkt-global-to-gcp-db-credentials
+            name: pipe-eu-sales-to-s3-db-credentials
         resources:
           requests:
             memory: "1Gi"

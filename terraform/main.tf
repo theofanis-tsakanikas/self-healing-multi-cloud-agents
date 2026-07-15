@@ -1,73 +1,106 @@
-resource "databricks_secret_scope" "pipeline" {
-  
-  name = "pipe_sales_lakehouse"
+resource "aws_s3_bucket" "data_bucket" {
+  bucket = var.bucket_name
+  tags   = { Project = var.project_id }
 }
 
-# DB connection from SSM (published by bootstrap/databricks/ssm.tf). One source of truth.
-data "aws_ssm_parameter" "db_host"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_host" }
-data "aws_ssm_parameter" "db_name"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_name" }
-data "aws_ssm_parameter" "db_user"     { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_user" }
-data "aws_ssm_parameter" "db_password" { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_password" }
-
-# ONLY the password goes into the secret scope; host/name/user are non-sensitive job params.
-resource "databricks_secret" "db_password" {
-  key          = "db_password"
-  string_value = data.aws_ssm_parameter.db_password.value
-  scope        = databricks_secret_scope.pipeline.name
-}
-
-# Resolve the bootstrap jobs cluster BY NAME — no cluster id has to be wired through context.
-data "databricks_cluster" "jobs" {
-  cluster_name = "multi-cloud-agent-workspace-jobs-cluster"
-}
-
-resource "databricks_job" "pipeline" {
-  name = "pipe_sales_lakehouse"
-
-  # Run as the service principal — the SINGLE_USER the bootstrap assigned the jobs cluster to, so
-  # the job has the SP's Unity Catalog access. The pipeline provider authenticates AS this SP
-  # (oauth-m2m), so it can bind the SP into run_as (a user PAT cannot — "must have
-  # servicePrincipal.user role on the SP"). var.databricks_client_id = the SP application id.
-  run_as {
-    service_principal_name = var.databricks_client_id
+resource "aws_s3_bucket_ownership_controls" "ownership_controls" {
+  bucket = aws_s3_bucket.data_bucket.id
+  rule {
+    object_ownership = "BucketOwnerEnforced"
   }
+}
 
-  task {
-    task_key            = "etl"
-    existing_cluster_id = data.databricks_cluster.jobs.id
+resource "aws_s3_bucket_public_access_block" "public_access_block" {
+  bucket                  = aws_s3_bucket.data_bucket.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
 
-    library {
-      maven { coordinates = "org.postgresql:postgresql:42.7.3" }
-    }
+resource "aws_s3_bucket_versioning" "versioning" {
+  bucket = aws_s3_bucket.data_bucket.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
 
-    spark_python_task {
-      python_file = "dbfs:/pipelines/pipe_sales_lakehouse/pipe_sales_lakehouse.py"
-      parameters = [
-        "--catalog", var.catalog,
-        "--schema", var.schema,
-        "--secret-scope", databricks_secret_scope.pipeline.name,
-        "--db-host", data.aws_ssm_parameter.db_host.value,
-        "--db-name", data.aws_ssm_parameter.db_name.value,
-        "--db-user", data.aws_ssm_parameter.db_user.value,
-      ]
+resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
+  bucket = aws_s3_bucket.data_bucket.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "aws:kms"
     }
   }
+}
 
-  schedule {
-    quartz_cron_expression = "0 0 6 * * ?"
-    timezone_id            = "UTC"
+resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
+  bucket = aws_s3_bucket.data_bucket.id
+  rule {
+    id     = "lifecycle_rule"
+    status = "Enabled"
+    filter {}
+    transition {
+      days          = 90
+      storage_class = "STANDARD_IA"
+    }
+    transition {
+      days          = 365
+      storage_class = "GLACIER"
+    }
   }
 }
 
-# Observability — Lakeview (AI/BI) dashboard.
-data "databricks_sql_warehouse" "obs" {
-  name = "multi-cloud-agent-workspace-warehouse"
+resource "aws_s3_object" "processed_dir" {
+  bucket  = aws_s3_bucket.data_bucket.id
+  key     = "processed/"
+  content = " "
 }
 
-resource "databricks_dashboard" "observability" {
-  display_name      = "pipe_sales_lakehouse — Observability"
-  parent_path       = "/Shared"
-  warehouse_id      = data.databricks_sql_warehouse.obs.id
-  file_path         = "${path.module}/../dashboards/pipe_sales_lakehouse_lakeview.json"
-  embed_credentials = false
+resource "aws_iam_policy" "s3_access_policy" {
+  name        = "${var.project_id}-s3-access-policy"
+  description = "Scoped S3 and Glue access policy for ${var.project_id}"
+  policy      = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = [aws_s3_bucket.data_bucket.arn]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = ["${aws_s3_bucket.data_bucket.arn}/processed/*"]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "glue:GetDatabase", "glue:GetDatabases", "glue:CreateDatabase",
+          "glue:GetTable",    "glue:GetTables",    "glue:CreateTable",
+          "glue:DeleteTable", "glue:UpdateTable",
+          "glue:GetPartition",     "glue:GetPartitions",
+          "glue:CreatePartition",  "glue:DeletePartition",  "glue:UpdatePartition",
+          "glue:BatchCreatePartition", "glue:BatchDeletePartition"
+        ]
+        Resource = [
+          "arn:aws:glue:*:*:catalog",
+          "arn:aws:glue:*:*:database/*",
+          "arn:aws:glue:*:*:table/*/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = "arn:aws:ssm:*:*:parameter/multi-cloud-self-healing-agent/*"
+      }
+    ]
+  })
+  lifecycle {
+    ignore_changes = [description, tags]
+  }
 }
