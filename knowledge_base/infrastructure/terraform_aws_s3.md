@@ -120,11 +120,13 @@ resource "aws_s3_bucket_public_access_block" "public_access_block" {
 ### 2.3 Separate Service Resources
 Link these resources to the main bucket using `bucket = aws_s3_bucket.<name>.id`:
 
-- **Versioning:** Use `aws_s3_bucket_versioning`. Set `enabled = true` directly on the resource as a top-level boolean — this is the simplest form. Do NOT wrap it in a nested `versioning_configuration` block:
+- **Versioning:** Use `aws_s3_bucket_versioning`. The `status` field is **nested** inside a `versioning_configuration` block. Set the status to `"On"` to turn versioning on:
 ```hcl
 resource "aws_s3_bucket_versioning" "versioning" {
-  bucket  = aws_s3_bucket.<name>.id
-  enabled = true
+  bucket = aws_s3_bucket.<name>.id
+  versioning_configuration {
+    status = "On"
+  }
 }
 ```
 
