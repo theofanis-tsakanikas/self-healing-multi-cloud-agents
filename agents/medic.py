@@ -194,6 +194,33 @@ def _extract_ci_failed_file(messages: list) -> str:
     return ""
 
 
+def _terraform_command_failure(messages: list) -> str:
+    """Return the failure text of the most recent `terraform` command that FAILED, else "".
+
+    execute_terraform (agents/tools.py) returns "SUCCESS: Terraform <cmd>\\n…" on success and
+    "FAILED: Terraform <cmd>\\nERROR: …" on failure. A terraform apply/plan that fails is an
+    UNAMBIGUOUS infra bug — the fix is terraform/main.tf, never a script — so the Medic must route it
+    to infra DETERMINISTICALLY, independent of whether the LLM quoted the error well enough to pass
+    the request_fix provenance gate (a paraphrased terraform error is not a verbatim substring of the
+    tool output → the gate drops it → the infra failure otherwise falls through to the architect
+    default and architect↔medic loops to the recursion limit). Only the NEWEST terraform result
+    counts: a later SUCCESS (the re-apply after a heal) supersedes an earlier FAILED, so a healed run
+    does not re-trigger. Operational lock errors surface as PENDING/STATE_LOCK (not FAILED) and are
+    excluded — no code change fixes them."""
+    for msg in reversed(messages[-20:]):
+        content = getattr(msg, "content", "") or ""
+        if not isinstance(content, str):
+            content = str(content)
+        stripped = content.lstrip()
+        if "SUCCESS: Terraform" in content:
+            return ""  # newest terraform result is a success → nothing to fix
+        if stripped.startswith("FAILED: Terraform"):
+            if "STATE_LOCK_ERROR" in content or stripped.startswith("PENDING:"):
+                return ""  # operational, not a code bug
+            return content[:1500]
+    return ""
+
+
 # CI-runtime error signatures whose owner is UNAMBIGUOUS = infra. A CI-LOG failure (no validation
 # result) is normally routed to the architect via the failing scripts/*.py frame in the traceback —
 # but a missing PROVISIONED-RESOURCE failure surfaces AT the script's line yet the fix is the
@@ -692,6 +719,22 @@ def medic_node(state: AgentState):
         if fix_requested:
             break
 
+    # DETERMINISTIC TERRAFORM-FAILURE OVERRIDE — a `terraform apply/plan` that FAILED
+    # (execute_terraform → "FAILED: Terraform <cmd>") is an UNAMBIGUOUS infra bug: the fix is
+    # terraform/main.tf, never a script. Detect it in Python and force an infra fix REGARDLESS of the
+    # LLM's request_fix, which mis-routes it to the architect — either directly (target_agent), or
+    # because the provenance gate first DROPS the paraphrased quote yet the rejected ToolMessage
+    # echoes that quote back into the evidence pool, so the LLM's next retry "passes" provenance and
+    # is honoured with target=architect. The architect cannot edit terraform (ownership guard), so the
+    # fix loops architect↔medic to the recursion limit and the run CRASHES instead of healing. The
+    # actual override (reset + target) is applied in the ownership routing below. Mirrors the
+    # deterministic CI-poll: an unambiguous, Python-detectable failure must not depend on the LLM.
+    _tf_fail_text = _terraform_command_failure(list(state["messages"]) + new_messages_for_state)
+    _forced_tf_infra = bool(_tf_fail_text)
+    if _forced_tf_infra:
+        fix_requested = True  # ensure the fix cycle runs even if the LLM quote was dropped
+        fix_signature_parts.append(_tf_fail_text[:200].lower())
+
     # 3b. DETERMINISTIC OWNERSHIP ROUTING — override the LLM's target_agent.
     # A file-validation failure belongs to exactly ONE agent. The LLM has mis-routed
     # the SAME .py error to BOTH architect and infra; honouring that drags infra into
@@ -714,7 +757,23 @@ def medic_node(state: AgentState):
             # not every artifact it generated. (Prevents over-patching a correct SQL/dashboard.)
             _latest_failed = _latest_autovalidation_failure(_all_msgs)
             _failed_files = [_latest_failed] if _latest_failed else []
-        if _failed_files:
+        if _forced_tf_infra and not any(_owner_of_file(f) == "architect" for f in _failed_files):
+            # Terraform apply/plan failure (detected in Python above). Route to infra deterministically,
+            # OVERRIDING the LLM target, the provenance gate, and any architect reset the (wrong)
+            # request_fix triggered. Guarded by "no architect-owned file also failed this turn" so a
+            # genuine data-plane bug still heals first. Replace the LLM's architect-aimed diagnosis with
+            # the terraform-targeted instruction so the infra agent patches terraform/main.tf.
+            deterministic_fix_target = "infra"
+            reset_infra = True
+            reset_architect = False
+            healing_context = (
+                "Target: the pipeline Terraform (terraform/main.tf) — `terraform apply` FAILED (error "
+                "below). This is an infra/provisioning bug, NOT a script bug. Fix the offending "
+                "resource in terraform/main.tf, then re-run execute_terraform apply. Do NOT edit "
+                "scripts/*.py, sql/*.sql, or dashboards.\n\n" + _tf_fail_text
+            )
+            logger.info("🧭 Ownership routing: terraform apply/plan failure → infra (overriding LLM target).")
+        elif _failed_files:
             _owners = {_owner_of_file(f) for f in _failed_files}
             reset_architect = "architect" in _owners
             reset_infra = "infra" in _owners
