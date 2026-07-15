@@ -89,6 +89,10 @@ class AgentState(TypedDict):
     # Both reset on a clean verification or a different (progress) error signature.
     fix_attempt: int
     last_fix_signature: str
+    # Hard backstop: counts EVERY fix round regardless of error signature, so a FLAILING heal (whose
+    # error text changes each round, resetting fix_attempt) still escalates cleanly instead of looping
+    # to the recursion_limit / an LLM timeout. Reset on clean verification or escalation.
+    total_fix_attempts: int
 
     # Set True by Medic when the fix loop is abandoned as non-converging. The Supervisor
     # honours it (routes to FINISH) instead of re-deriving the fix target from the
@@ -152,6 +156,7 @@ def build_initial_state(project_id: str, task: str, raw_configs: dict, target_in
         "ci_poll_attempt": 0,
         "fix_attempt": 0,
         "last_fix_signature": "",
+        "total_fix_attempts": 0,
         "fix_loop_escalated": False,
         "medic_fix_target": "",
         "healing_context": "",

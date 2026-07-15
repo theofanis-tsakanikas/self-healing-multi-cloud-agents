@@ -88,3 +88,32 @@ def test_terraform_apply_failure_routes_to_infra_despite_rejected_quote():
     assert out.get("infra_status") == "pending"  # infra reset for the fix cycle
     assert "terraform/main.tf" in out.get("healing_context", "")
     assert out.get("mission_status", "") != "verified"
+
+
+def test_flailing_heal_escalates_at_hard_cap_instead_of_crashing():
+    # A FLAILING heal changes the error text each round, so the identical-signature counter never
+    # trips. The hard total cap must still stop it cleanly (fail-closed) instead of looping to the
+    # graph recursion_limit / an LLM timeout.
+    state = _diagnosis_state()
+    state["total_fix_attempts"] = 7  # this terraform-failure round is the 8th → hard cap
+
+    ai = AIMessage(content="x", tool_calls=[{
+        "name": "request_fix",
+        "args": {"target_agent": "infra", "issue_description": "tf",
+                 "suggested_fix": "y", "evidence_quote": "Error: Unsupported argument enabled (paraphrased)"},
+        "id": "c1",
+    }])
+    llm_with_tools = MagicMock()
+    llm_with_tools.invoke.return_value = ai
+    llm = MagicMock()
+    llm.bind_tools.return_value = llm_with_tools
+
+    with patch.object(medic_mod, "get_llm", return_value=llm), \
+         patch.object(medic_mod, "store_architectural_insight", MagicMock()), \
+         patch.object(medic_mod.time, "sleep", MagicMock()):
+        out = medic_node(state)
+
+    assert out.get("fix_loop_escalated") is True, "flailing heal did not escalate at the hard cap"
+    assert out.get("mission_status") == "escalated"
+    assert out.get("medic_fix_target") == ""  # doomed route cancelled
+    assert out.get("total_fix_attempts") == 0  # counter reset for the next pipeline

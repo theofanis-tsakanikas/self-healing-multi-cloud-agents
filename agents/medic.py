@@ -873,9 +873,19 @@ def medic_node(state: AgentState):
     # surface to the user instead of looping. A DIFFERENT signature = real progress
     # through distinct errors, so the counter restarts (legit multi-fix sequences
     # are never penalised). Mirrors the ci_poll_attempt back-off pattern.
-    _MAX_FIX_ATTEMPTS = 3
+    #
+    # HARD TOTAL CAP (backstop): the identical-signature counter resets on ANY change in the error
+    # text, so a FLAILING heal — an agent that patches a structural bug into a DIFFERENT error each
+    # round (e.g. terraform "Insufficient block" → "Missing status" → "Unsupported enabled" → …) —
+    # slips past it and loops to the graph recursion_limit / an LLM timeout (a CRASH, not a clean
+    # stop). total_fix_attempts counts EVERY fix round regardless of signature and escalates the run
+    # cleanly (fail-closed, with the diagnosis) once the churn is clearly not converging.
+    _MAX_FIX_ATTEMPTS = 3        # SAME error repeated → not converging
+    _MAX_TOTAL_FIX_ATTEMPTS = 8  # ANY heal churn (even with shifting errors) → hard backstop
     escalated_fix_loop = False
     if fix_requested:
+        total_fix_attempts = state.get("total_fix_attempts", 0) + 1
+        output_state["total_fix_attempts"] = total_fix_attempts
         current_sig = hashlib.sha256(
             "||".join(sorted(filter(None, (_normalize_error_sig(p) for p in fix_signature_parts)))).encode()
         ).hexdigest()
@@ -884,21 +894,24 @@ def medic_node(state: AgentState):
         else:
             fix_attempt = 1  # new/different error → progress, restart the count
 
-        if fix_attempt >= _MAX_FIX_ATTEMPTS:
-            logger.warning(
-                f"Fix loop not converging: the same error survived {fix_attempt} "
-                f"fix attempts. Stopping self-heal and surfacing to the user."
+        _same_error = fix_attempt >= _MAX_FIX_ATTEMPTS
+        _flailing = total_fix_attempts >= _MAX_TOTAL_FIX_ATTEMPTS
+        if _same_error or _flailing:
+            _why = (
+                f"the same error survived {fix_attempt} attempts" if _same_error else
+                f"the heal churned through {total_fix_attempts} rounds without converging (the error "
+                f"keeps changing shape — the surgical patch cannot resolve it)"
             )
+            logger.warning(f"Fix loop not converging: {_why}. Stopping self-heal and surfacing to the user.")
             new_messages_for_state.append(HumanMessage(content=(
-                f"Self-healing could not resolve this after {fix_attempt} attempts — the same "
-                f"validation error keeps recurring, so the automated fix is not converging "
-                f"(the surgical patch cannot resolve it; a manual edit to the standard/prompt "
-                f"is likely needed). Last diagnosis:\n\n{healing_context}"
+                f"Self-healing could not resolve this — {_why}. The automated fix is not converging; "
+                f"a manual edit to the standard/prompt is likely needed. Last diagnosis:\n\n{healing_context}"
             )))
             output_state["messages"] = new_messages_for_state
             output_state["next_step"] = "supervisor"
             output_state["fix_attempt"] = 0
             output_state["last_fix_signature"] = ""
+            output_state["total_fix_attempts"] = 0
             output_state["healing_context"] = ""  # do NOT route the doomed fix to an agent
             output_state["medic_fix_target"] = ""  # cancel any pending ownership route
             # Explicit flag the supervisor honours — without it, supervisor RULE C would
@@ -914,6 +927,7 @@ def medic_node(state: AgentState):
         # Clean verification — reset so the next pipeline's fix cycle starts fresh.
         output_state["fix_attempt"] = 0
         output_state["last_fix_signature"] = ""
+        output_state["total_fix_attempts"] = 0
         output_state["mission_status"] = "verified"  # the ONLY terminal success signal
 
     # Apply resets and critically UPDATE infra_status (skipped when the loop guard
