@@ -211,6 +211,24 @@ _CI_INFRA_SIGNATURES = (
     "failed to install library",
     "secret does not exist",       # dbutils.secrets.get key ≠ databricks_secret key → fix Terraform
     "resource_does_not_exist",     # Databricks API code accompanying a missing secret/scope
+    # Object-storage cloud IAM / provisioning runtime failures (AWS/GCP/Azure). They surface at the
+    # pipeline's cloud write/connect line (a script frame), but the fix is the generated Terraform IAM
+    # policy / bucket — NOT the script. Without these the router falls back to the script frame and
+    # mis-sends an IAM/provisioning problem to the architect (who cannot grant a permission). These
+    # tokens never appear in a pandas/Spark logic traceback (KeyError/ValueError/…), so they are safe.
+    "accessdenied", "access denied",          # AWS S3/Glue/SSM
+    "not authorized to perform",              # AWS IAM
+    "invalidaccesskeyid", "signaturedoesnotmatch",  # AWS credential
+    "nosuchbucket", "no such bucket",         # bucket not provisioned
+    "does not have storage.",                 # GCP storage.objects.* IAM denial
+    "invalidresourcename",                    # Azure Blob (e.g. wrong container/netloc)
+    "authorizationpermissionmismatch",        # Azure RBAC on the storage account
+    # Credential-resolution failure: cloud_get() returned None (AWS IRSA missing ssm:GetParameter, or an
+    # unset GCP/Azure env var) → db_host is the string "None" → the DB connect fails. The plumbing is the
+    # generated IAM policy / K8s secret, NOT the script (which reads the host via cloud_get, never
+    # hardcodes it) — so this is infra, per CLAUDE.md ("Missing it → cloud_get() returns None → host name
+    # 'None' error"). Without it the create_engine frame mis-routes the credential plumbing to architect.
+    'host name "none"',
 )
 
 # A CI-runtime error carrying one of these is a SCRIPT-LOGIC bug → architect (on ANY cloud). These

@@ -1,18 +1,24 @@
 {
-  "corpus_cases": 13,
+  "corpus_cases": 17,
   "routing": {
-    "total": 10,
-    "correct": 10,
+    "total": 14,
+    "correct": 14,
     "accuracy_pct": 100.0,
     "failures": []
   },
   "evidence_gate": {
-    "total": 13,
-    "correct": 13,
+    "total": 17,
+    "correct": 17,
     "accuracy_pct": 100.0,
     "failures": []
   },
   "by_failure_class": {
+    "infra:cloud-iam": {
+      "routing_total": 4,
+      "routing_correct": 4,
+      "gate_total": 4,
+      "gate_correct": 4
+    },
     "infra:databricks-context-fallback": {
       "routing_total": 1,
       "routing_correct": 1,

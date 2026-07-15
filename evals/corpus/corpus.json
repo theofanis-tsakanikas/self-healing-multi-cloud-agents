@@ -148,6 +148,46 @@
       "evidence_gate": "reject",
       "source": "medic green-detection strings",
       "notes": "A green CI result must never trigger request_fix — no error marker present, so the gate refuses."
+    },
+    {
+      "id": "infra_aws_s3_accessdenied",
+      "failure_class": "infra:cloud-iam",
+      "provider": "aws",
+      "trigger_log": "Traceback (most recent call last):\n  File \"/app/scripts/pipe_eu_sales_to_s3.py\", line 118, in <module>\n    chunk.to_parquet(destination_uri, storage_options=dict())\nbotocore.exceptions.ClientError: An error occurred (AccessDenied) when calling the PutObject operation: Access Denied\nError: Process completed with exit code 1.",
+      "expected_owner": "infra",
+      "evidence_gate": "pass",
+      "source": "CLAUDE.md (terraform_aws_s3 IAM) — offline-probe gap found 2026-07-15",
+      "notes": "AccessDenied surfaces at the script's to_parquet line but the fix is the generated Terraform IAM policy (add s3:PutObject) — infra, not architect. 'accessdenied' is a _CI_INFRA_SIGNATURE. Without it the router fell to the script frame and mis-routed IAM to the architect."
+    },
+    {
+      "id": "infra_gcp_storage_iam_denied",
+      "failure_class": "infra:cloud-iam",
+      "provider": "gcp",
+      "trigger_log": "Traceback (most recent call last):\n  File \"/app/scripts/pipe_global_marketing_to_gcs.py\", line 130, in <module>\n    chunk.to_parquet(destination_uri, storage_options=dict())\ngoogle.api_core.exceptions.Forbidden: 403 POST https://storage.googleapis.com/... does not have storage.objects.create access to the Google Cloud Storage object.\nError: Process completed with exit code 1.",
+      "expected_owner": "infra",
+      "evidence_gate": "pass",
+      "source": "CLAUDE.md (terraform_gcp IAM) — offline-probe gap found 2026-07-15",
+      "notes": "GCP storage.objects.create denial is the same IAM class as AWS AccessDenied — the fix is the generated Terraform IAM binding, not the script. 'does not have storage.' is a _CI_INFRA_SIGNATURE."
+    },
+    {
+      "id": "infra_azure_rbac_mismatch",
+      "failure_class": "infra:cloud-iam",
+      "provider": "azure",
+      "trigger_log": "Traceback (most recent call last):\n  File \"/app/scripts/pipe_us_crm_to_azure.py\", line 140, in <module>\n    chunk.to_parquet(destination_uri, storage_options=dict())\nazure.core.exceptions.HttpResponseError: This request is not authorized to perform this operation using this permission. ... AuthorizationPermissionMismatch\nError: Process completed with exit code 1.",
+      "expected_owner": "infra",
+      "evidence_gate": "pass",
+      "source": "CLAUDE.md (terraform_azure IAM) — offline-probe gap found 2026-07-15",
+      "notes": "Azure Blob RBAC mismatch is the same IAM class — the fix is the managed-identity role assignment in the generated Terraform, not the script. 'authorizationpermissionmismatch' is a _CI_INFRA_SIGNATURE."
+    },
+    {
+      "id": "infra_aws_ssm_host_none",
+      "failure_class": "infra:cloud-iam",
+      "provider": "aws",
+      "trigger_log": "Traceback (most recent call last):\n  File \"/app/scripts/pipe_eu_sales_to_s3.py\", line 60, in <module>\n    engine = create_engine(url)\nsqlalchemy.exc.OperationalError: (psycopg2.OperationalError) could not translate host name \"None\" to address: Name or service not known\nError: Process completed with exit code 1.",
+      "expected_owner": "infra",
+      "evidence_gate": "pass",
+      "source": "CLAUDE.md (SSM via IRSA — 'Missing it -> cloud_get() returns None -> host name None error') — offline-probe gap found 2026-07-15",
+      "notes": "cloud_get() returned None (IRSA missing ssm:GetParameter, or unset GCP/Azure env var) so db_host is the literal 'None'. The plumbing is the IAM policy / K8s secret, not the script — infra. 'host name \"none\"' is a _CI_INFRA_SIGNATURE."
     }
   ]
 }
