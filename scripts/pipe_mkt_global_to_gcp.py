@@ -15,14 +15,14 @@ _CLOUD = os.getenv("CLOUD_PROVIDER", "aws")
 if _CLOUD == "aws":
     import boto3
 elif _CLOUD == "gcp":
-    from google.cloud import storage   # used as storage.Client()
+    from google.cloud import storage
 elif _CLOUD == "azure":
     from azure.storage.blob import BlobServiceClient
 
 logging.basicConfig(level=logging.INFO)
 
 def run():
-    logging.info("Pipeline starting: pipe_mkt_global_to_gcp")  # ← MUST be the very first line
+    logging.info("Pipeline starting: pipe_mkt_global_to_gcp")
 
     # ── 1. IDEMPOTENCY CHECK ──────────────────────────────────────────────────
     run_date = datetime.date.today().isoformat()
@@ -55,60 +55,60 @@ def run():
 
     # ── 2. CREDENTIALS via cloud_get() ───────────────────────────────────────
     if _CLOUD == "aws":
-        host = cloud_get("aws", "db_host",     db_type="postgres")
-        port = cloud_get("aws", "db_port",     db_type="postgres") or "5432"
-        user = cloud_get("aws", "db_user",     db_type="postgres")
-        pw   = cloud_get("aws", "db_password", db_type="postgres")
-        db   = cloud_get("aws", "db_name",     db_type="postgres")
-        connection_string = (
-            f"postgresql+psycopg2://{user}:{pw}"
-            f"@{host}:{port}/{db}"
-        )
+        host = cloud_get("aws", "db_host", db_type="mysql")
+        port = cloud_get("aws", "db_port", db_type="mysql") or "3306"
+        user = cloud_get("aws", "db_user", db_type="mysql")
+        pw = cloud_get("aws", "db_password", db_type="mysql")
+        db = cloud_get("aws", "db_name", db_type="mysql")
+        connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
     elif _CLOUD == "gcp":
-        host = cloud_get("gcp", "db_host",     db_type="mysql")
-        port = cloud_get("gcp", "db_port",     db_type="mysql") or "3306"
-        user = cloud_get("gcp", "db_user",     db_type="mysql")
-        pw   = cloud_get("gcp", "db_password", db_type="mysql")
-        db   = cloud_get("gcp", "db_name",     db_type="mysql")
+        host = cloud_get("gcp", "db_host", db_type="mysql")
+        port = cloud_get("gcp", "db_port", db_type="mysql") or "3306"
+        user = cloud_get("gcp", "db_user", db_type="mysql")
+        pw = cloud_get("gcp", "db_password", db_type="mysql")
+        db = cloud_get("gcp", "db_name", db_type="mysql")
         connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
     elif _CLOUD == "azure":
-        host = cloud_get("azure", "db_host",     db_type="postgres")
-        port = cloud_get("azure", "db_port",     db_type="postgres") or "5432"
-        user = cloud_get("azure", "db_user",     db_type="postgres")
-        pw   = cloud_get("azure", "db_password", db_type="postgres")
-        db   = cloud_get("azure", "db_name",     db_type="postgres")
-        connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
+        host = cloud_get("azure", "db_host", db_type="mysql")
+        port = cloud_get("azure", "db_port", db_type="mysql") or "3306"
+        user = cloud_get("azure", "db_user", db_type="mysql")
+        pw = cloud_get("azure", "db_password", db_type="mysql")
+        db = cloud_get("azure", "db_name", db_type="mysql")
+        connection_string = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
 
     # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
-    rejected_by_reason = {}    # rule_name → cumulative dropped rows (one entry per row-removing rule)
-    query = "SELECT * FROM raw_global_marketing"  # source table from context
+    rejected_by_reason = {}
+    query = "SELECT * FROM raw_global_marketing"
 
     try:
         engine = create_engine(connection_string)
         for i, chunk in enumerate(pd.read_sql_query(query, engine, chunksize=1000)):
-
             # Business rules implementation
             chunk['ad_spend'] = pd.to_numeric(chunk['ad_spend'], errors='coerce')
-            chunk['ad_spend'] = chunk['ad_spend'].fillna(0).clip(lower=0)  # spend integrity
-            _before = len(chunk)
+            chunk['ad_spend'] = chunk['ad_spend'].fillna(0).clip(lower=0)
+
             _before = len(chunk)
             chunk['event_timestamp'] = pd.to_datetime(chunk['event_timestamp'], errors='coerce')
-            chunk = chunk[chunk['event_timestamp'] <= pd.Timestamp.now()]  # temporal validity
+            _future = chunk['event_timestamp'] > pd.Timestamp.now()
+            if _future.any():
+                logging.warning(f"Excluded {_future.sum()} future-dated rows (temporal_validity).")
+            chunk = chunk[~_future]
             rejected_by_reason['temporal_validity'] = rejected_by_reason.get('temporal_validity', 0) + (_before - len(chunk))
-            chunk = chunk.dropna(subset=['campaign_id'])  # completeness enforcement
-            rejected_by_reason['completeness_enforcement'] = rejected_by_reason.get('completeness_enforcement', 0) + (_before - len(chunk))
-            chunk['campaign_id'] = chunk['campaign_id'].where(chunk['campaign_id'].str.match(r'^CMP-\\d{4}$'), other='UNASSIGNED_CAMPAIGN')  # campaign standardization
-            _suspicious_engagement = (chunk['clicks'] > chunk['impressions']) | (chunk['clicks'] >= 1000000)  # engagement logic check + volume sanity check
-            chunk['is_suspicious'] = _suspicious_engagement
 
-            # Type casting
-            int_cols = [c for c in chunk.select_dtypes(include='float64').columns if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
+            _before = len(chunk)
+            chunk = chunk.dropna(subset=['campaign_id'])
+            rejected_by_reason['completeness_enforcement'] = rejected_by_reason.get('completeness_enforcement', 0) + (_before - len(chunk))
+
+            chunk['campaign_id'] = chunk['campaign_id'].where(chunk['campaign_id'].str.match(r'CMP-\d{4}'), other='UNASSIGNED_CAMPAIGN')
+
+            chunk['is_suspicious'] = (chunk['clicks'] > chunk['impressions']) | (chunk['clicks'] >= 1000000)
+
+            int_cols = [c for c in chunk.select_dtypes(include='float64').columns if any(kw in c.lower() for kw in ['clicks'])]
             for col in int_cols:
                 chunk[col] = chunk[col].astype('Int64')
 
-            # Write to parquet
             chunk.to_parquet(
                 f"{partition_uri}part_{i}.parquet",
                 engine="pyarrow",
@@ -124,7 +124,7 @@ def run():
         raise
 
     rejected_rows = sum(rejected_by_reason.values())
-    duration_seconds = time.time() - start_time   # for pipeline_duration_seconds metric
+    duration_seconds = time.time() - start_time
     logging.info(f"Pipeline completed. Rows: {total_rows}, rejected: {rejected_rows}, duration: {duration_seconds:.1f}s")
 
     # ── 4. TRINO PARTITION REGISTRATION ──────────────────────────────────────
@@ -146,7 +146,7 @@ def run():
 
     # ── 5. METRICS EMISSION ───────────────────────────────────────────────────
     pushgateway_url = os.getenv("PUSHGATEWAY_URL", "http://pushgateway.monitoring.svc.cluster.local:9091")
-    project_id     = os.getenv("PROJECT_ID", "unknown")
+    project_id = os.getenv("PROJECT_ID", "unknown")
     cloud_provider = os.getenv("CLOUD_PROVIDER", "unknown")
 
     registry = CollectorRegistry()
