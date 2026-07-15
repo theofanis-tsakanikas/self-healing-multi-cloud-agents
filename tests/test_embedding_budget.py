@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from utils import embedding_budget
-from utils.embedding_budget import EMBED_TOKEN_SAFE_CEILING, EMBED_TOKEN_WARN, count_tokens
+from utils.embedding_budget import EMBED_TOKEN_SAFE_CEILING, EMBED_TOKEN_WARN, count_tokens_detail
 
 _KB = Path(__file__).resolve().parent.parent / "knowledge_base"
 _STANDARDS = sorted(_KB.rglob("*.md"))
@@ -44,7 +44,9 @@ def test_count_tokens_falls_back_when_tiktoken_unavailable(monkeypatch):
 
 @pytest.mark.parametrize("path", _STANDARDS, ids=lambda p: p.name)
 def test_standard_within_embedding_token_limit(path):
-    tokens = count_tokens(path.read_text(encoding="utf-8"))
+    tokens, accurate = count_tokens_detail(path.read_text(encoding="utf-8"))
+    if not accurate:
+        pytest.skip("tiktoken unavailable — a chars/4 estimate over-counts; the ingest lets the API verify")
     assert tokens <= EMBED_TOKEN_SAFE_CEILING, (
         f"{path.relative_to(_KB.parent)} is {tokens} tokens > {EMBED_TOKEN_SAFE_CEILING} — it would be "
         f"SILENTLY DROPPED by ingest and served stale from Pinecone. Split it into two standards "

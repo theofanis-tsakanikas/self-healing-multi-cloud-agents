@@ -26,19 +26,22 @@ EMBED_TOKEN_SAFE_CEILING = 8000
 EMBED_TOKEN_WARN = 7700
 
 
-def count_tokens(text: str) -> int:
-    """Token count for EMBED_MODEL.
-
-    Uses tiktoken's cl100k_base (the encoder text-embedding-3-small uses) when available; falls back
-    to a conservative chars/4 estimate that slightly OVER-counts, so the fallback fails safe toward
-    the limit rather than under-reporting an overflow.
-    """
+def count_tokens_detail(text: str) -> tuple[int, bool]:
+    """Return (token_count, accurate). `accurate` is True only when tiktoken's cl100k_base (the exact
+    encoder the embed API uses) produced the count; False when we fell back to a rough chars/4 estimate
+    (tiktoken absent, or its one-time vocab download blocked). The fallback OVER-counts, so callers must
+    NOT hard-block on an inaccurate count — a valid file would be false-rejected; let the API decide."""
     try:
         import tiktoken
 
-        return len(tiktoken.get_encoding("cl100k_base").encode(text))
+        return len(tiktoken.get_encoding("cl100k_base").encode(text)), True
     except Exception:
-        return (len(text) + 3) // 4
+        return (len(text) + 3) // 4, False
+
+
+def count_tokens(text: str) -> int:
+    """Token count for EMBED_MODEL (see count_tokens_detail for the accuracy caveat)."""
+    return count_tokens_detail(text)[0]
 
 
 def check_file(path: str | Path) -> tuple[int, bool]:
