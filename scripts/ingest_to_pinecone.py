@@ -1,4 +1,5 @@
 import os
+import sys
 import datetime
 import yaml
 import argparse
@@ -8,6 +9,16 @@ from glob import glob
 from pinecone import Pinecone
 from openai import OpenAI
 from dotenv import load_dotenv
+
+# Shared token-budget guard (utils is on sys.path via PYTHONPATH=/app in the image; for local runs
+# the repo root is the CWD). Import defensively so the ingest still runs if utils is unavailable.
+try:
+    from utils.embedding_budget import EMBED_TOKEN_LIMIT, count_tokens
+except Exception:  # pragma: no cover - fallback for odd sys.path setups
+    EMBED_TOKEN_LIMIT = 8191
+
+    def count_tokens(text):
+        return (len(text) + 3) // 4
 
 # --- LOGGING CONFIGURATION ---
 logging.basicConfig(
@@ -22,7 +33,9 @@ load_dotenv() # Load from .env if local
 # --- CLIENT INITIALIZATION ---
 PINECONE_KEY = os.getenv("PINECONE_API_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "data-fabric-knowledge")
+# Default MUST match .env.example and agents/tools.py (store_architectural_insight) so an unset
+# PINECONE_INDEX_NAME resolves to the same index everywhere — otherwise ingest and retrieval diverge.
+INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "unified-intelligence-fabric")
 
 if not PINECONE_KEY or not OPENAI_KEY:
     logger.error("Missing API Keys! Ensure PINECONE_API_KEY and OPENAI_API_KEY are set.")
@@ -78,6 +91,18 @@ def upload_file_to_pinecone(file_path):
 
         # Create a unique ID to avoid duplicates.
         vector_id = f"spec_{category}_{file_name}".replace(".", "_")
+
+        # PRE-FLIGHT TOKEN GUARD — the embed model rejects inputs over EMBED_TOKEN_LIMIT. Catch it
+        # here and FAIL LOUD: previously the OpenAI error was swallowed into a None embedding and the
+        # file was silently skipped, leaving a STALE version live in Pinecone. Never silent again.
+        tokens = count_tokens(raw_content)
+        if tokens > EMBED_TOKEN_LIMIT:
+            logger.error(
+                f"❌ {file_name} is {tokens} tokens > {EMBED_TOKEN_LIMIT} limit for the embed model. "
+                f"Pinecone will serve the STALE version. Split this standard before re-ingesting."
+            )
+            return False
+
         embedding = get_embedding(raw_content)
 
         if embedding:
@@ -97,11 +122,14 @@ def upload_file_to_pinecone(file_path):
                 namespace="engineering-standards"
             )
             logger.info(f"✅ Ingested: {file_name} -> [engineering-standards / {category}]")
+            return True
         else:
-            logger.warning(f"⚠️ Failed to generate embedding for {file_name}")
+            logger.error(f"❌ Failed to generate embedding for {file_name}")
+            return False
 
     except Exception as e:
         logger.error(f"Failed to process file {file_path}: {e}")
+        return False
 
 def main():
     parser = argparse.ArgumentParser(description="Unified Intelligence Fabric - Knowledge Ingestor")
@@ -134,12 +162,19 @@ def main():
 
     logger.info(f"🚀 Starting ingestion of {len(files)} files from {kb_path}...")
 
-    count = 0
+    synced, failed = 0, []
     for file_path in files:
-        upload_file_to_pinecone(file_path)
-        count += 1
+        if upload_file_to_pinecone(file_path):
+            synced += 1
+        else:
+            failed.append(file_path)
 
-    logger.info(f"✨ Process completed. Total files synced: {count}")
+    logger.info(f"✨ Process completed. Synced {synced}/{len(files)} files.")
+    if failed:
+        # Fail LOUD so CI / the operator sees a partial sync instead of a green run that quietly
+        # left standards stale in Pinecone.
+        logger.error(f"❌ {len(failed)} file(s) FAILED to ingest: {', '.join(failed)}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
