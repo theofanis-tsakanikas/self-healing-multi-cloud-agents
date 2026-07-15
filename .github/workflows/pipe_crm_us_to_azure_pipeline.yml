@@ -20,29 +20,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4
+      - name: Azure Login
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5  # v2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_DEFAULT_REGION }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64  # v2
-
-      - name: Build & Push Image
+      - name: ACR Login
         run: |
-          docker build -t 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} -f Dockerfile .
-          docker push 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}
-          docker tag 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }} 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
-          docker push 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:latest
+          REG="$(echo 'mcselfhealagentacr.azurecr.io' | cut -d'.' -f1)"
+          for i in 1 2 3; do
+            az acr login --name "$REG" && break || { echo "ACR login attempt $i failed (transient), retrying in 10s..."; sleep 10; }
+          done
+
+      - name: Build Azure Storage Connection String + inject Trino ABFS key
+        run: |
+          KEY=$(az storage account keys list -g multi-cloud-agent-rg -n uscrminsightsstorage --query '[0].value' -o tsv)
+          echo "AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=uscrminsightsstorage;AccountKey=$KEY;EndpointSuffix=core.windows.net" >> "$GITHUB_ENV"
+          sed -i "s|__ABFS_KEY__|$KEY|g" k8s/configmaps.yaml
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }} -f Dockerfile .
+          docker push mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}
+          docker tag mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }} mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:latest
+          docker push mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:latest
 
       - name: Update Kubeconfig
-        run: aws eks update-kubeconfig --region ${{ vars.AWS_DEFAULT_REGION }} --name multi-cloud-agent-cluster
+        run: az aks get-credentials --resource-group multi-cloud-agent-rg --name multi-cloud-agent-aks
 
       - name: Set Image Tag in Job Manifest
         run: |
-          sed -i 's|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo.*|image: 387229419515.dkr.ecr.eu-central-1.amazonaws.com/eu-sales-pipeline-repo:${{ github.sha }}|' k8s/job.yaml
+          sed -i 's|image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:.*|image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}|' k8s/job.yaml
 
       - name: Create Grafana Admin Secret
         env:
@@ -67,7 +75,13 @@ jobs:
 
       - name: Create DB Credentials Secret
         run: |
-          kubectl create secret generic pipe-eu-sales-to-s3-db-credentials -n analytics \
+          kubectl create secret generic pipe-crm-us-to-azure-db-credentials -n analytics \
+            --from-literal=CRM_DB_HOST=${{ vars.CRM_DB_HOST }} \
+            --from-literal=CRM_DB_PORT=${{ vars.CRM_DB_PORT }} \
+            --from-literal=CRM_DB_USER=${{ vars.CRM_DB_USER }} \
+            --from-literal=CRM_DB_NAME=${{ vars.CRM_DB_NAME }} \
+            --from-literal=CRM_DB_PASSWORD=${{ secrets.AZURE_DB_PASSWORD }} \
+            --from-literal=AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy Pipeline Job to Kubernetes

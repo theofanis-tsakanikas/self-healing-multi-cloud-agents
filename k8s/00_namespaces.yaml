@@ -11,7 +11,9 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: eu-sales-insights-sa
+  name: us-crm-insights-sa
   namespace: analytics
   annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::387229419515:role/eu-sales-insights-role
+    azure.workload.identity/client-id: "5480d15d-1925-4f42-8c85-9e016aa44d41"
+  labels:
+    azure.workload.identity/use: "true"
