@@ -49,15 +49,18 @@ def _stream(updates):
 
 class TestSupervisorTerminalStatus:
 
-    def test_verified_finish_sets_mission_status(self):
-        # Supervisor scans AIMessages only — a HumanMessage would be ignored.
+    def test_verified_finish_preserves_mission_status(self):
+        # Success is deterministic: the Medic sets mission_status="verified" from a confirmed green
+        # CI run, then the supervisor routes to FINISH. No LLM-prose token can manufacture success.
         state = _make_state(
             last_agent="medic",
-            messages=[AIMessage(content="ALIGNMENT_OK — everything verified")],
+            mission_status="verified",
+            messages=[AIMessage(content="...Everything looks green!")],
         )
         result = supervisor_node(state)
         assert result["next_step"] == "FINISH"
-        assert result["mission_status"] == "verified"
+        # the supervisor must not downgrade the deterministic verified status
+        assert result.get("mission_status", state["mission_status"]) == "verified"
 
     def test_escalated_finish_does_not_claim_verified(self):
         state = _make_state(

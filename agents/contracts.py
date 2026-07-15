@@ -27,8 +27,9 @@ AUTOVAL_FAILED_PREFIX = "AUTO-VALIDATION FAILED"
 # execute_terraform state-lock short-circuit — medic escalates instead of calling request_fix.
 STATE_LOCK_ERROR = "STATE_LOCK_ERROR"
 
-# supervisor terminal signals.
-ALIGNMENT_OK = "ALIGNMENT_OK"
+# supervisor terminal signal. (There is deliberately NO LLM-prose success token — success is the
+# deterministic mission_status=="verified" only; the former ALIGNMENT_OK path was removed as a
+# fail-closed hole.)
 INFRA_COMPLETE = "INFRA_COMPLETE"
 
 # k8s job.yaml image sentinel — the CI `sed` step rewrites it to the real registry URL.

@@ -83,14 +83,23 @@ class TestRuleBInfra:
 
 class TestRuleCMedic:
 
-    def test_medic_alignment_ok_routes_to_finish(self):
-        # Supervisor scans AIMessages only — a HumanMessage would be ignored.
+    def test_medic_verified_routes_to_finish(self):
+        # The ONLY success path: the Medic set mission_status="verified" deterministically from a
+        # confirmed green CI run.
+        state = _make_state(last_agent="medic", mission_status="verified", next_step="")
+        assert supervisor_node(state)["next_step"] == "FINISH"
+
+    def test_medic_alignment_ok_prose_is_not_success(self):
+        # Regression (fail-closed hardening): an LLM emitting "ALIGNMENT_OK" in prose must NOT mark an
+        # unverified deploy as success. Without a deterministic mission_status="verified", the token
+        # falls through to the LLM fallback (mocked → not FINISH), never a verified success.
         state = _make_state(
             last_agent="medic",
-            messages=[AIMessage(content="ALIGNMENT_OK")],
+            messages=[AIMessage(content="ALIGNMENT_OK — everything aligns.")],
             next_step="",
         )
-        assert supervisor_node(state)["next_step"] == "FINISH"
+        result = supervisor_node(state)
+        assert not (result.get("next_step") == "FINISH" and result.get("mission_status") == "verified")
 
     def test_loose_verified_prose_is_not_success(self):
         # Regression (false-success bug, 2026-06-13): "could not be verified" CONTAINS "verified",
