@@ -10,7 +10,7 @@ Key docs: `docs/ARCHITECTURE.md` (as-built), `docs/RUNBOOK.md` (verification/ops
 
 ```bash
 make install                  # uv sync
-make test                     # 190+ hermetic unit tests — no cloud, no credentials
+make test                     # hermetic unit tests — no cloud, no credentials
 make lint                     # ruff, same command CI runs
 make run p=<pipeline>         # eu_sales | us_crm | global_marketing | sales_lakehouse
 make ingest                   # sync knowledge_base/ -> Pinecone (REQUIRED after editing any standard)
