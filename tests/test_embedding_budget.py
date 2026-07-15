@@ -11,7 +11,12 @@ from pathlib import Path
 import pytest
 
 from utils import embedding_budget
-from utils.embedding_budget import EMBED_TOKEN_SAFE_CEILING, EMBED_TOKEN_WARN, count_tokens_detail
+from utils.embedding_budget import (
+    EMBED_TOKEN_SAFE_CEILING,
+    EMBED_TOKEN_WARN,
+    count_tokens,
+    count_tokens_detail,
+)
 
 _KB = Path(__file__).resolve().parent.parent / "knowledge_base"
 _STANDARDS = sorted(_KB.rglob("*.md"))
