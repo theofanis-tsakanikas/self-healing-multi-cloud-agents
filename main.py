@@ -143,10 +143,14 @@ def _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
     print("=" * 75 + "\n")
 
     try:
+        # thread_id keys the checkpointer. When durable resume is enabled (LANGGRAPH_CHECKPOINT_DB),
+        # use a STABLE id (the pipeline id, no timestamp) so a crash-and-restart reloads the SAME run's
+        # checkpoint instead of starting a fresh thread. Otherwise keep the per-run unique id.
+        thread_id = pipeline_id if os.getenv("LANGGRAPH_CHECKPOINT_DB") else unique_project_id
         run_config = {
             "run_name": f"Run_{pipeline_id}_{timestamp}",
             "recursion_limit": 200,
-            "configurable": {"thread_id": unique_project_id},
+            "configurable": {"thread_id": thread_id},
         }
         logger.info("Handing over to LangGraph Supervisor...")
         _consume_stream(app.stream(initial_state, config=run_config))

@@ -1853,10 +1853,25 @@ def _columns_read_not_in_schema(py_content: str, schema_cols: set) -> set:
     return _unknown
 
 
+_PII_COLUMN_HINTS = (
+    "email", "phone", "mobile", "ssn", "social", "dob", "birth", "name", "address", "zip",
+    "postal", "passport", "license", "credit", "card", "iban", "account", "tax",
+)
+
+
 def _mask_sample_rows(rows: list) -> list:
-    """Redact string cell values so no raw PII reaches the LLM / LangSmith. Column keys and non-string
-    values (numbers/dates/bools/null) are kept so the architect still sees the table's structure."""
-    return [{k: ("***REDACTED***" if isinstance(v, str) else v) for k, v in row.items()} for row in rows]
+    """Redact PII from sample cells before they reach the LLM / LangSmith. Masks EVERY string value
+    (where free-text PII lives) AND any column whose NAME looks like PII regardless of dtype — phone/
+    ssn stored as INTEGER or DOB as DATE would otherwise ship raw. Non-PII numerics (amount, quantity)
+    stay so the architect still sees the table's structure."""
+    def _mask(k: str, v):
+        if isinstance(v, str):
+            return "***REDACTED***"
+        if any(h in str(k).lower() for h in _PII_COLUMN_HINTS):
+            return "***REDACTED***"
+        return v
+
+    return [{k: _mask(k, v) for k, v in row.items()} for row in rows]
 
 
 def _redact_secrets(s: str) -> str:
@@ -1877,12 +1892,14 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
     """
 
     try:
-        # 0. Reject anything that is not a plain (optionally schema-qualified) SQL identifier.
-        # table_name is UNTRUSTED — in NL mode it comes from LLM extraction of the user's free text
-        # (PipelineIntent.source_table), and this tool is LLM-callable — so it must never be
-        # string-interpolated into SQL unchecked (the LIMIT-3 query below).
-        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$", table_name or ""):
-            return f"Error: invalid table name '{table_name}' — must be a plain SQL identifier."
+        # 0. Reject anything that is not a plain, single-token SQL identifier. table_name is UNTRUSTED
+        # (in NL mode it comes from LLM extraction of the user's free text, and this tool is LLM-callable)
+        # so it must never be string-interpolated into SQL unchecked (the LIMIT-3 query below). The
+        # schema-qualified `schema.table` form is rejected on purpose: get_columns() needs the schema as
+        # a separate kwarg and quoting `schema.table` as one identifier breaks the query — all pipeline
+        # sources use a bare table name.
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", table_name or ""):
+            return f"Error: invalid table name '{table_name}' — must be a bare SQL identifier (no schema-qualifier)."
 
         # 1. Build the connection URL dynamically based on db_type + cloud provider.
         # Cloud is read from CLOUD_PROVIDER env var (set by the pipeline) so this

@@ -15,6 +15,15 @@ def test_mask_sample_rows_redacts_strings_keeps_structure():
     assert m["age"] == 30 and m["active"] is True and m["note"] is None
 
 
+def test_mask_sample_rows_redacts_numeric_pii_by_column_name():
+    # Phone/SSN stored as INTEGER, DOB as a date — masked by column name regardless of dtype;
+    # a genuinely non-PII numeric (amount) stays visible for structure.
+    rows = [{"phone_number": 5551234567, "ssn": 123456789, "amount": 42.5, "quantity": 3}]
+    m = _mask_sample_rows(rows)[0]
+    assert m["phone_number"] == "***REDACTED***" and m["ssn"] == "***REDACTED***"
+    assert m["amount"] == 42.5 and m["quantity"] == 3
+
+
 def test_pii_pipeline_without_anonymization_is_flagged(tmp_path, monkeypatch):
     monkeypatch.setenv("PII_SENSITIVE", "true")
     r = _validate(tmp_path, "import pandas as pd\nchunk['x'] = chunk['x'] + 1\n")

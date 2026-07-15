@@ -20,11 +20,16 @@ def test_read_data_schema_rejects_sql_injection_table_name():
         assert isinstance(result, str) and "invalid table name" in result, f"accepted bad name: {bad!r}"
 
 
-def test_read_data_schema_allows_valid_identifier_shapes():
-    # These pass the identifier gate (they will fail later at connect-time offline, but must NOT be
-    # rejected as invalid names).
+def test_read_data_schema_rejects_schema_qualified_name():
+    # The dotted schema.table form is rejected on purpose (it breaks introspection + quoting); all
+    # pipeline sources use a bare table name.
+    r = read_data_schema.invoke({"table_name": "analytics.raw_global_marketing"})
+    assert isinstance(r, str) and "invalid table name" in r
+
+
+def test_bare_identifiers_pass_the_gate():
     import re
 
-    pattern = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
-    for good in ("raw_eu_sales", "raw_us_crm", "analytics.raw_global_marketing"):
-        assert pattern.match(good), f"valid identifier wrongly rejected: {good}"
+    pattern = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    for good in ("raw_eu_sales", "raw_us_crm", "raw_global_marketing"):
+        assert pattern.match(good), f"valid bare identifier wrongly rejected: {good}"
