@@ -890,6 +890,18 @@ def infra_node(state: AgentState, config: RunnableConfig = None):
                 # This prevents the LLM from looping on the same command.
                 if t_name == "push_to_github":
                     push_attempted = True
+                    # A pre-push SECURITY GATE block means the fix did NOT deploy. Force github_success
+                    # False so infra_status becomes "pending" — otherwise a stale github_done (from an
+                    # earlier successful deploy) would leave infra_status="completed" and the medic would
+                    # AUTO-VERIFY the PREVIOUS deploy's green CI and report false success. agent_error is
+                    # also already set (the "Error:" prefix), so the run escalates for a real fix.
+                    if "SECURITY GATE FAILED" in result_str:
+                        github_success = False
+                        any_tool_error = True
+                        logger.error(
+                            "🚫 Pre-push security gate BLOCKED the deploy — escalating for a fix, "
+                            "NOT verifying the stale prior deploy."
+                        )
                 if "STATUS: SUCCESS" in result_str.upper():
                     if t_name == "push_to_github":
                         github_success = True
