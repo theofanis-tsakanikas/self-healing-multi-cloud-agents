@@ -12,6 +12,7 @@ from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 from utils.cloud_config import cloud_get  # SSM → bootstrap_outputs → env fallback
 
 _CLOUD = os.getenv("CLOUD_PROVIDER", "aws")
+
 if _CLOUD == "aws":
     import boto3
 elif _CLOUD == "gcp":
@@ -20,6 +21,7 @@ elif _CLOUD == "azure":
     from azure.storage.blob import BlobServiceClient
 
 logging.basicConfig(level=logging.INFO)
+
 
 def run():
     logging.info("Pipeline starting: pipe_eu_sales_to_s3")
@@ -81,8 +83,8 @@ def run():
     # ── 3. EXTRACTION + TRANSFORMATION + WRITE (one try block) ───────────────
     start_time = time.time()   # for pipeline_duration_seconds metric
     total_rows = 0
-    rejected_by_reason = {}
-    query = "SELECT * FROM raw_eu_sales"
+    rejected_by_reason = {}    # rule_name → cumulative dropped rows
+    query = "SELECT * FROM raw_eu_sales"  # source table from context
 
     try:
         engine = create_engine(connection_string)
@@ -105,9 +107,9 @@ def run():
             chunk = chunk.dropna(subset=['order_id'])
             rejected_by_reason['completeness_enforcement'] = rejected_by_reason.get('completeness_enforcement', 0) + (_before - len(chunk))
 
-            chunk['currency'] = chunk['currency'].where(chunk['currency'].isin(['EUR', 'GBP']), other='EUR')
+            chunk['currency'] = chunk['currency'].where(chunk['currency'].isin(['EUR', 'GBP']), other='EUR')  # DEFAULT_VALUE
 
-            chunk['is_suspicious'] = (chunk['quantity'] >= 1000) | (chunk['quantity'] <= 0)
+            chunk['is_suspicious'] = (chunk['quantity'] >= 1000) | (chunk['quantity'] <= 0)  # FLAG_AS_SUSPICIOUS
 
             int_cols = [c for c in chunk.select_dtypes(include='float64').columns
                         if any(kw in c.lower() for kw in ['quantity', 'qty', 'count', 'units'])]
