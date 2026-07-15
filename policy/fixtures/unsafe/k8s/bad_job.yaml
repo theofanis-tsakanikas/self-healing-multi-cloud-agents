@@ -1,0 +1,19 @@
+# UNSAFE FIXTURE — trips IMAGE_PUBLIC_LATEST (public grafana on :latest) + K8S_INLINE_SECRET
+# (a credential env with an inline literal value). Not deployed; only fed to the gate in tests.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bad-pipeline
+  namespace: analytics
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: some-sa
+      containers:
+        - name: pipeline
+          image: grafana/grafana:latest
+          env:
+            - name: DB_PASSWORD
+              value: "hunter2-plaintext"

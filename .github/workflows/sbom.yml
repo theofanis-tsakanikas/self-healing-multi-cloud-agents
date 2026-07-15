@@ -1,0 +1,37 @@
+# Software Bill of Materials — supply-chain hygiene for a "production-grade" claim.
+# Generates a CycloneDX SBOM of the locked Python dependency tree (the same tree that ships in the
+# pipeline image) on every push to main and weekly, and uploads it as a build artifact. Complements
+# security.yml's trivy CVE scan: the scan says "are there known-vulnerable deps", the SBOM says
+# "exactly which components and versions shipped" — the record you need to answer a future CVE fast.
+name: sbom
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # weekly, alongside security.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate CycloneDX SBOM (filesystem)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: sbom.cyclonedx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cyclonedx.json
+          retention-days: 90
