@@ -39,6 +39,10 @@ dependencies = [
     "prometheus-client>=0.20.0",
     # MySQL driver for GCP Cloud SQL
     "pymysql>=1.1.1",
+    # The tokenizer for the embed model (cl100k_base) — a DIRECT dep so the KB token-budget guard
+    # (utils/embedding_budget) always counts accurately instead of falling back to a chars/4 estimate
+    # that over-counts and false-rejects valid standards where tiktoken isn't otherwise installed (CI).
+    "tiktoken>=0.7.0",
 ]
 
 [project.optional-dependencies]

@@ -1791,6 +1791,7 @@ dependencies = [
     { name = "s3fs", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "sqlalchemy", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "streamlit", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "tiktoken", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "trino", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
 ]
 
@@ -1841,6 +1842,7 @@ requires-dist = [
     { name = "s3fs", specifier = ">=2024.3.0" },
     { name = "sqlalchemy", specifier = ">=2.0.49" },
     { name = "streamlit", specifier = ">=1.33.0" },
+    { name = "tiktoken", specifier = ">=0.7.0" },
     { name = "trino", specifier = ">=0.328.0" },
 ]
 provides-extras = ["anthropic", "vertexai"]

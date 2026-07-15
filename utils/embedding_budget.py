@@ -13,13 +13,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# text-embedding-3-small hard per-input limit (what the OpenAI API actually rejects at).
+# text-embedding-3-small hard per-input limit (what the OpenAI API rejects at). tiktoken's cl100k_base
+# is the SAME tokenizer the API uses, so count_tokens matches the API exactly — provided tiktoken is
+# installed (it is now a DIRECT dependency; see pyproject). If it ever isn't, count_tokens falls back
+# to a chars/4 estimate that OVER-counts.
 EMBED_MODEL = "text-embedding-3-small"
 EMBED_TOKEN_LIMIT = 8191
-# We count with tiktoken locally, but the OpenAI embeddings endpoint counts ~1.4% HIGHER (observed:
-# a file tiktoken measured at 8190 was rejected by the API at 8302). So local tiktoken passing the
-# raw 8191 limit does NOT guarantee the API accepts it. Enforce a SAFE CEILING with margin instead —
-# tokens below this are guaranteed under the real API limit. This is the number the guard + CI test use.
+# Enforce a SAFE CEILING a bit under the hard limit: it leaves headroom for tokenizer edge cases and
+# keeps standards from creeping right up to the wall. This is the number the guard + CI test use.
 EMBED_TOKEN_SAFE_CEILING = 8000
 # Standards above this are getting close to the safe ceiling and should be split BEFORE more content.
 EMBED_TOKEN_WARN = 7700
