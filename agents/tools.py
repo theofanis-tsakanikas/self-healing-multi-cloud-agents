@@ -2405,6 +2405,25 @@ def push_to_github(project_id: str, commit_message: str):
     Identity is automated as github-actions[bot].
     """
     try:
+        # 0. PRE-PUSH SECURITY GATE — the push is what triggers the deploy workflow, so this is the
+        # enforcement point. Refuse to push a generated bundle with HIGH security findings (unsafe
+        # Dockerfile / manifest / workflow / Terraform). Fails CLOSED on a HIGH finding; fails OPEN
+        # (logs + proceeds) if the gate itself errors, so a gate bug can never brick a deploy.
+        try:
+            from policy.security_analyzer import analyze
+
+            gate = analyze(REPO_ROOT)
+            if gate.get("high_count", 0) > 0:
+                highs = [f for f in gate["findings"] if f["severity"] == "HIGH"]
+                detail = "; ".join(f"{f['rule']} @ {f['object']}" for f in highs)
+                logger.error(f"Pre-push security gate BLOCKED the push: {detail}")
+                return (
+                    f"Error: SECURITY GATE FAILED — refusing to push {gate['high_count']} HIGH "
+                    f"finding(s) in the generated bundle: {detail}"
+                )
+        except Exception as e:  # gate bug must not brick a deploy — fail open with a warning
+            logger.warning(f"Pre-push security gate could not run (failing open): {e}")
+
         # 1. Identity Config
         subprocess.run(["git", "config", "user.name", "github-actions[bot]"], cwd=REPO_ROOT, check=True)
         subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], cwd=REPO_ROOT, check=True)

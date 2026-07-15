@@ -49,6 +49,11 @@ jobs:
         # fails if the committed report is stale or any deterministic check regressed. No LLM.
         run: make eval-check
 
+      - name: Security gate over the generated infra (blocking)
+        # Blocks a committed generated bundle with HIGH findings (unsafe Dockerfile / manifest /
+        # workflow / Terraform). The same gate also runs pre-push inside push_to_github at deploy time.
+        run: make security-gate
+
   terraform-fmt:
     # Formatting gate for the HAND-WRITTEN Terraform only (bootstrap/). The
     # pipeline stack under terraform/ is an agent-generated output with its own

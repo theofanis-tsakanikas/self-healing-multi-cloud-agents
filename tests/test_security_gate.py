@@ -24,6 +24,10 @@ _EXPECTED_UNSAFE_RULES = {
     "K8S_INLINE_SECRET",
     "IMAGE_PUBLIC_LATEST",
     "WORKFLOW_INLINE_SECRET",
+    "TF_PUBLIC_DB",
+    "TF_IAM_WILDCARD_RESOURCE",
+    "TF_OPEN_INGRESS",
+    "TF_PUBLIC_BUCKET_ACL",
 }
 
 
@@ -45,6 +49,20 @@ def test_unsafe_fixture_is_refused():
 def test_each_high_rule_fires_on_the_unsafe_fixture(rule):
     fired = {f.rule for f in derive_findings(extract_context(_UNSAFE)) if f.severity == "HIGH"}
     assert rule in fired
+
+
+def test_resolve_from_tf_sentinel_image_is_not_flagged(tmp_path):
+    # The pre-sed job.yaml image sentinel is a valid placeholder, not a public :latest image.
+    from policy.security_analyzer import RESOLVE_FROM_TF
+
+    k8s = tmp_path / "k8s"
+    k8s.mkdir()
+    (k8s / "job.yaml").write_text(
+        "apiVersion: batch/v1\nkind: Job\nmetadata:\n  name: j\nspec:\n  template:\n    spec:\n"
+        f"      containers:\n        - name: pipeline\n          image: {RESOLVE_FROM_TF}\n"
+    )
+    fired = {f["rule"] for f in analyze(tmp_path)["findings"] if f["severity"] == "HIGH"}
+    assert "IMAGE_PUBLIC_LATEST" not in fired
 
 
 def _run_conftest(context: dict) -> set[str]:
