@@ -228,13 +228,23 @@ def validate_generated_code(filename: str) -> str:
             (r"(?<![\w.])eval\s*\(", "eval()"),
             (r"(?<![\w.])exec\s*\(", "exec()"),
             (r"\b__import__\s*\(", "__import__()"),
+            (r"(?m)^\s*import\s+importlib\b|\bimportlib\.import_module\s*\(", "importlib"),
             (r"(?m)^\s*import\s+socket\b|\bsocket\.socket\s*\(", "socket"),
             # Block network clients — but NOT urllib.parse (URL/string parsing is a legit pipeline
             # idiom, e.g. quote_plus / urlparse for the abfss container). Only urllib.request/urlopen.
             (r"(?m)^\s*import\s+(?:requests|httpx)\b|\burllib\.request\b|\.urlopen\s*\(", "network client (requests/urllib.request/httpx)"),
+            (r"(?m)^\s*(?:import|from)\s+(?:http\.client|ftplib|smtplib|telnetlib)\b", "network client (http.client/ftplib/smtplib)"),
             (r"(?m)^\s*import\s+pickle\b|\bpickle\.loads\s*\(", "pickle"),
+            # Reflection indirection used to defeat the name-based checks above.
+            (r"\bgetattr\s*\(\s*(?:os|builtins|__builtins__)\b", "getattr indirection on os/builtins"),
+            (r"\b__builtins__\b", "__builtins__ access"),
         ]
-        _dangerous_hits = sorted({label for pat, label in _DANGEROUS_CONSTRUCTS if re.search(pat, py_content)})
+        # Scan CODE only, not comments: the standards/prompt echo warnings like "never call eval()/
+        # subprocess.run()" verbatim as comments, and a raw scan would flag that guidance text → a
+        # SECURITY error the architect can't resolve → dead-loop. (Same treatment as the rejected_rows
+        # check below.)
+        _py_code_only = "\n".join(_ln.split("#", 1)[0] for _ln in py_content.splitlines())
+        _dangerous_hits = sorted({label for pat, label in _DANGEROUS_CONSTRUCTS if re.search(pat, _py_code_only)})
         if _dangerous_hits:
             errors.append(
                 "SECURITY: generated script uses forbidden construct(s): "
@@ -247,15 +257,17 @@ def validate_generated_code(filename: str) -> str:
         # config) must ANONYMIZE PII before writing, or raw customer data ships to cloud storage while
         # the run reports success. Two concrete failure modes the standard itself warns about:
         if os.getenv("PII_SENSITIVE", "false").lower() == "true":
-            _has_hash = "hashlib" in py_content or re.search(r"\.sha256\s*\(", py_content)
-            _has_regex_mask = re.search(r"regex\s*=\s*True", py_content)
+            # Code only — a comment mentioning "hashlib"/"regex=True" must not falsely PASS the gate,
+            # and a "regex=False" in a comment must not falsely FAIL it.
+            _has_hash = "hashlib" in _py_code_only or re.search(r"\.sha256\s*\(", _py_code_only)
+            _has_regex_mask = re.search(r"regex\s*=\s*True", _py_code_only)
             if not (_has_hash or _has_regex_mask):
                 errors.append(
                     "PII: this is a pii_sensitive pipeline but the script shows NO anonymization — hash "
                     "identifiers via hashlib.sha256 and/or mask email/phone via .str.replace(..., regex=True) "
                     "BEFORE the write, or raw PII ships to storage."
                 )
-            if re.search(r"\.replace\s*\([^)]*regex\s*=\s*False", py_content):
+            if re.search(r"\.replace\s*\([^)]*regex\s*=\s*False", _py_code_only):
                 errors.append(
                     "PII: a masking .replace(...) uses regex=False — it SILENTLY no-ops (pandas 2.x "
                     "default), leaving the PII column exposed with no error. Use regex=True."
