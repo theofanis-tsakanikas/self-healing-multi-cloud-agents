@@ -81,6 +81,10 @@ def _consume_stream(stream) -> str:
                 stream.throw(MissionFailedError(
                     f"mission_status='{mission_status or 'unset'}' — "
                     f"{mission_failure_summary(mission_status)}"
+                    f"\n\n⚠️  COST/CLEANUP: a failed run may have left PAID cloud resources running "
+                    f"(cluster + node groups, DB, LoadBalancer Services, images). Verify and tear down: "
+                    f"run the `destroy.yml` workflow (or `make {{aws,azure,gcp}}-pause`) and confirm no "
+                    f"orphaned LBs/instances remain. See docs/RUNBOOK.md."
                 ))
     return mission_status
 

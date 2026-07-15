@@ -31,9 +31,12 @@ jobs:
         run: aws eks update-kubeconfig --region ${{ vars.AWS_DEFAULT_REGION }} --name multi-cloud-agent-cluster
 
       - name: Delete pipeline Job and Secret
+        # pipeline_id via env (never interpolated straight into the shell — it is a free-string input).
+        env:
+          PIPELINE_ID: ${{ inputs.pipeline_id }}
         run: |
           kubectl delete job -l component=pipeline-job -n analytics --ignore-not-found=true
-          kubectl delete secret ${{ inputs.pipeline_id }}-db-credentials -n analytics --ignore-not-found=true
+          kubectl delete secret "${PIPELINE_ID}-db-credentials" -n analytics --ignore-not-found=true
 
       - name: Delete Deployments
         run: |

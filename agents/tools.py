@@ -2514,8 +2514,12 @@ def push_to_github(project_id: str, commit_message: str):
                     f"Error: SECURITY GATE FAILED — refusing to push {gate['high_count']} HIGH "
                     f"finding(s) in the generated bundle: {detail}"
                 )
-        except Exception as e:  # gate bug must not brick a deploy — fail open with a warning
-            logger.warning(f"Pre-push security gate could not run (failing open): {e}")
+        except Exception as e:
+            # FAIL CLOSED: extract_context already swallows per-file IO errors internally, so an
+            # exception here means the gate itself is broken (import/attribute/logic bug) — which is
+            # indistinguishable from a malformed bundle and must NOT silently ship an unvetted deploy.
+            logger.error(f"Pre-push security gate errored — blocking the push (fail closed): {e}")
+            return f"Error: SECURITY GATE FAILED — the gate could not run ({type(e).__name__}: {e}); refusing to push."
 
         # 1. Identity Config
         subprocess.run(["git", "config", "user.name", "github-actions[bot]"], cwd=REPO_ROOT, check=True)
