@@ -21,7 +21,7 @@ jobs:
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3
         with:
           terraform_wrapper: false
-      - uses: databricks/setup-cli@772863b94473abd8b0cacbec8b6f80fa0cbe1136  # v1.2.1
+      - uses: databricks/setup-cli@bc7e6aabb6006d8d1758bd25ee1a100935c9cb7c  # v1.7.0
 
       - name: Upload Spark script to DBFS
         run: |
