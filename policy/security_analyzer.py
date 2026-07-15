@@ -79,7 +79,7 @@ def _image_is_latest(ref: str) -> bool:
 def _extract_dockerfile(path: Path) -> dict:
     text = path.read_text(encoding="utf-8", errors="replace")
     has_nonroot_user = bool(re.search(r"(?im)^\s*USER\s+(?!root\s*$)\S+", text))
-    copies_env = bool(re.search(r"(?im)^\s*COPY\b.*(?:^|[\s/])\.env\b", text))
+    copies_env = bool(re.search(r"(?im)^\s*(?:COPY|ADD)\b.*(?:^|[\s/])\.env\b", text))
     return {"path": path.name, "has_nonroot_user": has_nonroot_user, "copies_env": copies_env}
 
 
@@ -121,6 +121,7 @@ def _extract_k8s(path: Path, ctx: Context) -> None:
                 name = str(env.get("name", "")).lower()
                 if "value" in env and any(s in name for s in _SECRETISH):
                     inline_secret = True
+        privileged = any((c.get("securityContext") or {}).get("privileged") is True for c in containers)
         ctx.pods.append(
             {
                 "manifest": path.name,
@@ -128,6 +129,8 @@ def _extract_k8s(path: Path, ctx: Context) -> None:
                 "has_service_account": bool(pod.get("serviceAccountName")),
                 "runs_nonroot": _pod_runs_nonroot(pod, containers),
                 "inline_secret": inline_secret,
+                "host_network": pod.get("hostNetwork") is True,
+                "privileged": privileged,
             }
         )
 
@@ -185,12 +188,22 @@ def extract_context(artifact_dir: str | Path) -> Context:
 def _extract_terraform(path: Path) -> dict:
     """Regex-scan generated Terraform for the clearest HIGH signals (no HCL parser dependency)."""
     text = path.read_text(encoding="utf-8", errors="replace")
+    # A bare "*" in a Resource/Action value — the value may be a single string OR a list ("*" as ANY
+    # element, possibly multi-line), which a naive `= "*"` regex misses.
+    iam_wildcard = False
+    for m in re.finditer(r'(?i)"?(?:Resource|Action)"?\s*[=:]\s*(\[[\s\S]*?\]|"[^"]*")', text):
+        if re.search(r'"\*"', m.group(1)):
+            iam_wildcard = True
+            break
     return {
         "path": path.name,
         "publicly_accessible": bool(re.search(r"(?im)^\s*publicly_accessible\s*=\s*true", text)),
-        "iam_wildcard_resource": bool(re.search(r'(?i)"?Resource"?\s*[=:]\s*\[?\s*"\*"', text)),
-        "open_ingress": bool(re.search(r'0\.0\.0\.0/0', text)),
-        "public_acl": bool(re.search(r'(?i)acl\s*=\s*"public-read(-write)?"', text)),
+        "iam_wildcard_resource": iam_wildcard,
+        "open_ingress": bool(re.search(r"0\.0\.0\.0/0|::/0", text)),  # IPv4 and IPv6 open ingress
+        "public_acl": bool(
+            re.search(r'(?i)acl\s*=\s*"public-read(-write)?"', text)
+            or re.search(r"(?im)^\s*block_public_acls\s*=\s*false", text)  # the modern way buckets go public
+        ),
     }
 
 
@@ -211,6 +224,10 @@ def derive_findings(ctx: Context) -> list[Finding]:
         # already enforced by validate_generated_code. Flagging every pod would false-positive.
         if pod["inline_secret"]:
             out.append(Finding("K8S_INLINE_SECRET", "HIGH", obj, "credential env with an inline literal value"))
+        if pod.get("host_network"):
+            out.append(Finding("K8S_HOST_NETWORK", "HIGH", obj, "hostNetwork: true (shares the node's network namespace)"))
+        if pod.get("privileged"):
+            out.append(Finding("K8S_PRIVILEGED", "HIGH", obj, "privileged container (full host access)"))
         if not pod["runs_nonroot"]:
             out.append(Finding("POD_NOT_NONROOT", "ADVISORY", obj, "no runAsNonRoot (SECURITY.md trade-off #3)"))
     for img in ctx.images:
@@ -231,7 +248,7 @@ def derive_findings(ctx: Context) -> list[Finding]:
         if tf["publicly_accessible"]:
             out.append(Finding("TF_PUBLIC_DB", "HIGH", tf["path"], "publicly_accessible = true on a database"))
         if tf["iam_wildcard_resource"]:
-            out.append(Finding("TF_IAM_WILDCARD_RESOURCE", "HIGH", tf["path"], 'IAM policy grants Resource = "*"'))
+            out.append(Finding("TF_IAM_WILDCARD_RESOURCE", "HIGH", tf["path"], 'IAM policy grants Resource/Action "*"'))
         if tf["open_ingress"]:
             out.append(Finding("TF_OPEN_INGRESS", "HIGH", tf["path"], "0.0.0.0/0 in generated Terraform"))
         if tf["public_acl"]:
