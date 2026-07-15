@@ -316,6 +316,21 @@ def _accumulate_healing_context(existing: str, new_chunk: str) -> str:
     return "\n\n---\n\n".join(filter(None, [existing, new_chunk]))
 
 
+def _evidence_has_provenance(quote: str, messages: list) -> bool:
+    """True if the (whitespace-normalized) evidence_quote actually appears in a real message/tool
+    output. Guards against an LLM FABRICATING an evidence_quote just to satisfy the request_fix marker
+    gate. Short quotes are handled by the caller (too generic to verify); the deterministic ownership
+    routing is the backstop regardless."""
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", " ", s or "").lower()
+
+    parts = []
+    for m in messages:
+        c = getattr(m, "content", "")
+        parts.append(c if isinstance(c, str) else str(c))
+    return _norm(quote) in _norm(" ".join(parts))
+
+
 def medic_node(state: AgentState):
     """
     Medic (Diagnostic) Node: Analyzes logs and failures.
@@ -599,6 +614,25 @@ def medic_node(state: AgentState):
                 # and pollute the convergence signature. Rejected calls fall through: the
                 # ToolMessage is still appended below so the LLM sees the rejection and
                 # self-corrects.
+                #
+                # PROVENANCE — the marker gate only checks the quote CONTAINS an error marker, not
+                # that it is REAL. A quote ≥12 chars must also actually appear in a prior tool/message
+                # output; otherwise it is a likely fabrication and we do not honour the routing (the
+                # ToolMessage is still shown so the LLM self-corrects).
+                _quote = str(tool_args.get("evidence_quote", "")).strip()
+                if len(_quote) >= 12 and not _evidence_has_provenance(_quote, state["messages"]):
+                    logger.warning(
+                        f"request_fix evidence_quote not found in any real output — not honouring "
+                        f"routing (possible hallucination): {_quote[:60]!r}"
+                    )
+                    t_msg = ToolMessage(
+                        tool_call_id=tool_call["id"],
+                        content=result_str + "\n[MEDIC: evidence_quote not found in real tool output — routing NOT honoured.]",
+                    )
+                    messages.append(t_msg)
+                    new_messages_for_state.append(t_msg)
+                    continue
+
                 target = str(tool_args.get("target_agent", "")).lower()
                 if "arch" in target:
                     reset_architect = True
