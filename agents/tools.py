@@ -216,6 +216,31 @@ def validate_generated_code(filename: str) -> str:
         with open(filename, encoding="utf-8") as f:
             py_content = f.read()
 
+        # SECURITY (prompt-injection / exfiltration backstop): a data pipeline must never run shell
+        # commands, eval/exec arbitrary code, or make ad-hoc network calls. A prompt-injected source
+        # column name, sample value, or CI log could steer the LLM into emitting exactly that. The
+        # validated pipelines use only pandas/Spark + cloud SDKs, so this is a hard allow-list.
+        # (`eval(`/`exec(` are matched only as BUILTINS — pandas `df.eval(`/`pd.eval(` are excluded.)
+        _DANGEROUS_CONSTRUCTS = [
+            (r"\bos\.system\s*\(", "os.system()"),
+            (r"\bos\.popen\s*\(", "os.popen()"),
+            (r"(?m)^\s*import\s+subprocess\b|\bsubprocess\.\w+\s*\(", "subprocess"),
+            (r"(?<![\w.])eval\s*\(", "eval()"),
+            (r"(?<![\w.])exec\s*\(", "exec()"),
+            (r"\b__import__\s*\(", "__import__()"),
+            (r"(?m)^\s*import\s+socket\b|\bsocket\.socket\s*\(", "socket"),
+            (r"(?m)^\s*import\s+(?:requests|httpx)\b|^\s*(?:import|from)\s+urllib\b", "network client (requests/urllib/httpx)"),
+            (r"(?m)^\s*import\s+pickle\b|\bpickle\.loads\s*\(", "pickle"),
+        ]
+        _dangerous_hits = sorted({label for pat, label in _DANGEROUS_CONSTRUCTS if re.search(pat, py_content)})
+        if _dangerous_hits:
+            errors.append(
+                "SECURITY: generated script uses forbidden construct(s): "
+                + ", ".join(_dangerous_hits)
+                + ". A data pipeline must not run shell commands, eval/exec, or make arbitrary network "
+                "calls — use pandas/Spark + the cloud SDKs only (prompt-injection/exfiltration backstop)."
+            )
+
         # Detect the cloud provider declared in the file.
         # Matches: _CLOUD = os.getenv("CLOUD_PROVIDER", "aws") or _CLOUD = "gcp"
         _cloud_detect = re.search(
