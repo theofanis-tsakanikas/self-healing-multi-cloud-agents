@@ -28,3 +28,11 @@ def test_pandas_eval_and_os_getenv_are_not_flagged(tmp_path):
     code = "import os\nimport pandas as pd\ndest = os.getenv('DESTINATION_URI')\npd.eval('a + b')\n"
     r = _validate(tmp_path, code)
     assert "SECURITY: generated script uses forbidden" not in r
+
+
+def test_urllib_parse_is_not_flagged(tmp_path):
+    # urllib.parse (URL/string parsing, e.g. quote_plus / urlparse for the abfss container) is a legit
+    # pipeline idiom — only urllib.request/urlopen (network) is blocked.
+    code = "from urllib.parse import quote_plus, urlparse\nx = quote_plus('a@b')\n"
+    r = _validate(tmp_path, code)
+    assert "SECURITY: generated script uses forbidden" not in r

@@ -229,7 +229,9 @@ def validate_generated_code(filename: str) -> str:
             (r"(?<![\w.])exec\s*\(", "exec()"),
             (r"\b__import__\s*\(", "__import__()"),
             (r"(?m)^\s*import\s+socket\b|\bsocket\.socket\s*\(", "socket"),
-            (r"(?m)^\s*import\s+(?:requests|httpx)\b|^\s*(?:import|from)\s+urllib\b", "network client (requests/urllib/httpx)"),
+            # Block network clients — but NOT urllib.parse (URL/string parsing is a legit pipeline
+            # idiom, e.g. quote_plus / urlparse for the abfss container). Only urllib.request/urlopen.
+            (r"(?m)^\s*import\s+(?:requests|httpx)\b|\burllib\.request\b|\.urlopen\s*\(", "network client (requests/urllib.request/httpx)"),
             (r"(?m)^\s*import\s+pickle\b|\bpickle\.loads\s*\(", "pickle"),
         ]
         _dangerous_hits = sorted({label for pat, label in _DANGEROUS_CONSTRUCTS if re.search(pat, py_content)})
