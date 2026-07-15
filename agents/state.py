@@ -118,3 +118,42 @@ class AgentState(TypedDict):
     #                     FINISH) — fail-safe: entry points treat anything that is not
     #                     "verified" as failure
     mission_status: str
+
+
+def build_initial_state(project_id: str, task: str, raw_configs: dict, target_infra: str = "") -> "AgentState":
+    """Canonical, COMPLETE initial AgentState — used by BOTH entry points (main.py CLI + Streamlit).
+
+    Having one factory means the two paths can never drift on which keys are set: previously Streamlit
+    omitted ~9 keys and only worked because every node reads via `.get(...)`; the first bare
+    `state[key]` read (or a new field added to one dict but not the other) would KeyError in one path
+    and pass in the other. `tests/test_state_lifecycle.py` asserts this covers every AgentState field.
+    """
+    return {
+        "task": task,
+        "messages": [],
+        "error_log": "",
+        "project_id": project_id,
+        "config_path": "",
+        "target_infra": target_infra,
+        "next_step": "",
+        "last_agent": "None",
+        "raw_configs": raw_configs,
+        "written_files": [],
+        "infra_provisioned": False,
+        "infra_status": "",
+        "architect_status": "",
+        "collected_specs": {},
+        "schema_discovered": False,
+        "github_done": False,
+        "last_push_sha": "",
+        "ecr_repository_url": "",
+        "medic_fix_requested": False,
+        "agent_error": False,
+        "ci_poll_attempt": 0,
+        "fix_attempt": 0,
+        "last_fix_signature": "",
+        "fix_loop_escalated": False,
+        "medic_fix_target": "",
+        "healing_context": "",
+        "mission_status": "",
+    }
