@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from utils import embedding_budget
 from utils.embedding_budget import EMBED_TOKEN_LIMIT, EMBED_TOKEN_WARN, count_tokens
 
 _KB = Path(__file__).resolve().parent.parent / "knowledge_base"
@@ -19,6 +20,26 @@ _STANDARDS = sorted(_KB.rglob("*.md"))
 def test_knowledge_base_has_standards():
     # Guard against the glob silently matching nothing (which would make the budget test vacuous).
     assert _STANDARDS, f"No standards found under {_KB}"
+
+
+def test_check_file_reports_within_limit():
+    tokens, within = embedding_budget.check_file(_STANDARDS[0])
+    assert isinstance(tokens, int) and tokens > 0
+    assert within is True
+
+
+def test_count_tokens_falls_back_when_tiktoken_unavailable(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "tiktoken":
+            raise ImportError("simulated: no tiktoken")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    assert count_tokens("a" * 40) == 10  # conservative chars/4, rounded up
 
 
 @pytest.mark.parametrize("path", _STANDARDS, ids=lambda p: p.name)
