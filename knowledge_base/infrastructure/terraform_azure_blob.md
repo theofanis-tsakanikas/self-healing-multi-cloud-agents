@@ -116,7 +116,7 @@ data "azurerm_user_assigned_identity" "pipeline" {
 ## 2. STORAGE ACCOUNT PROVISIONING (ADLS GEN2)
 
 ### 2.1 Core Storage Account
-- `account_tier`: `Std`
+- `account_tier`: `Standard`
 - `account_replication_type`: `LRS` (dev) or `GRS` (prod)
 - `account_kind`: `StorageV2`
 - **`is_hns_enabled = true`**: This enables ADLS Gen2 (hierarchical namespace). Never omit it.
@@ -128,7 +128,7 @@ resource "azurerm_storage_account" "data" {
   name                            = var.storage_account_name
   resource_group_name             = data.azurerm_resource_group.main.name
   location                        = data.azurerm_resource_group.main.location
-  account_tier                    = "Std"
+  account_tier                    = "Standard"
   account_replication_type        = "LRS"
   account_kind                    = "StorageV2"
   is_hns_enabled                  = true
