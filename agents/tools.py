@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
 import yaml
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import URL, create_engine, inspect, text
 from openai import OpenAI
 from pinecone import Pinecone
 import time
@@ -1796,6 +1796,16 @@ def _columns_read_not_in_schema(py_content: str, schema_cols: set) -> set:
     return _unknown
 
 
+def _redact_secrets(s: str) -> str:
+    """Strip credentials a DB/driver error may embed before the string leaves the process (to the
+    LLM, LangSmith, or logs). Masks DSN `user:pass@host` and `password=…`/`pwd=…` patterns."""
+    if not s:
+        return s
+    s = re.sub(r"([A-Za-z0-9+.\-]+://)[^:/@\s]+:[^@/\s]+@", r"\1***:***@", s)  # scheme://user:pass@host
+    s = re.sub(r"(?i)\b(password|passwd|pwd|pass)\s*=\s*[^\s;,'\"]+", r"\1=***", s)
+    return s
+
+
 @tool
 def read_data_schema(table_name: str, db_type: str = "postgres"):
     """
@@ -1804,26 +1814,39 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
     """
 
     try:
+        # 0. Reject anything that is not a plain (optionally schema-qualified) SQL identifier.
+        # table_name is UNTRUSTED — in NL mode it comes from LLM extraction of the user's free text
+        # (PipelineIntent.source_table), and this tool is LLM-callable — so it must never be
+        # string-interpolated into SQL unchecked (the LIMIT-3 query below).
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$", table_name or ""):
+            return f"Error: invalid table name '{table_name}' — must be a plain SQL identifier."
+
         # 1. Build the connection URL dynamically based on db_type + cloud provider.
         # Cloud is read from CLOUD_PROVIDER env var (set by the pipeline) so this
         # tool works for any cloud+DB combination without hardcoded assumptions.
+        # URL.create keeps the password OUT of the string form (repr shows ***), so a leaked/logged
+        # URL or a driver error embedding the DSN cannot expose the credential.
         cloud = os.getenv("CLOUD_PROVIDER", "aws").lower()
 
         if db_type == "postgres":
-            host = cloud_get(cloud, "db_host",     db_type="postgres")
-            port = cloud_get(cloud, "db_port",     db_type="postgres") or "5432"
-            user = cloud_get(cloud, "db_user",     db_type="postgres")
-            pw   = cloud_get(cloud, "db_password", db_type="postgres")
-            db   = cloud_get(cloud, "db_name",     db_type="postgres")
-            db_url = f"postgresql://{user}:{pw}@{host}:{port}/{db}"
+            db_url = URL.create(
+                "postgresql",
+                username=cloud_get(cloud, "db_user", db_type="postgres"),
+                password=cloud_get(cloud, "db_password", db_type="postgres"),
+                host=cloud_get(cloud, "db_host", db_type="postgres"),
+                port=cloud_get(cloud, "db_port", db_type="postgres") or "5432",
+                database=cloud_get(cloud, "db_name", db_type="postgres"),
+            )
 
         elif db_type == "mysql":
-            host = cloud_get(cloud, "db_host",     db_type="mysql")
-            port = cloud_get(cloud, "db_port",     db_type="mysql") or "3306"
-            user = cloud_get(cloud, "db_user",     db_type="mysql")
-            pw   = cloud_get(cloud, "db_password", db_type="mysql")
-            db   = cloud_get(cloud, "db_name",     db_type="mysql")
-            db_url = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
+            db_url = URL.create(
+                "mysql+pymysql",
+                username=cloud_get(cloud, "db_user", db_type="mysql"),
+                password=cloud_get(cloud, "db_password", db_type="mysql"),
+                host=cloud_get(cloud, "db_host", db_type="mysql"),
+                port=cloud_get(cloud, "db_port", db_type="mysql") or "3306",
+                database=cloud_get(cloud, "db_name", db_type="mysql"),
+            )
 
         elif db_type == "sqlite":
             # For SQLite, read the URL/path directly from .env
@@ -1855,10 +1878,11 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
         except Exception:
             pass
 
-        # 3. Fetch sample data
+        # 3. Fetch sample data. Quote the (already identifier-validated) table via the dialect's
+        # preparer as defence-in-depth before it is interpolated into the LIMIT-3 query.
+        safe_table = engine.dialect.identifier_preparer.quote(table_name)
         with engine.connect() as conn:
-            # LIMIT 3 is enough for the agent to infer structure
-            result = conn.execute(text(f"SELECT * FROM {table_name} LIMIT 3"))
+            result = conn.execute(text(f"SELECT * FROM {safe_table} LIMIT 3"))
             sample = [dict(row._mapping) for row in result.fetchall()]
 
         return {
@@ -1870,7 +1894,9 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
         }
 
     except Exception as e:
-        return f"Database Error on {db_type}: {str(e)}"
+        # Redact any credential that a driver/DSN error may embed before it reaches the LLM,
+        # LangSmith, or the logs. Return the exception TYPE, not its raw text.
+        return f"Database Error on {db_type}: {_redact_secrets(str(e))} [{type(e).__name__}]"
 
 
 # --- TERRAFORM TOOLS ---
