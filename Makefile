@@ -184,6 +184,10 @@ heal: ## Route + validate ANY failing CI log through the real Medic logic (offli
 	@$(if $(LOG),,$(error Error: LOG is undefined. Usage: make heal LOG=run.log))
 	$(PYTHON) -m evals.heal --log $(LOG)
 
+.PHONY: cost
+cost: ## Print the per-cloud monthly bootstrap-footprint estimate (deterministic list prices)
+	$(PYTHON) -m utils.cost_estimator
+
 .PHONY: security-gate
 security-gate: ## Security gate over the LIVE generated bundle (k8s/, Dockerfile, .github/workflows/pipe_*)
 	$(PYTHON) -m policy.security_analyzer .
