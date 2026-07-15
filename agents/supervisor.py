@@ -187,13 +187,13 @@ def supervisor_node(state: AgentState):
             logger.info("Medic signaled pending logs. Re-routing to MEDIC.")
             return {"next_step": "medic"}
 
-        # Final Sign-off — the explicit Phase-1 ALIGNMENT_OK token ONLY. NOT a loose "verified"
-        # substring: that also matches "could not be verified" / an LLM hallucinating "verified"
-        # in prose after a 404, which marked a FAILED deploy as success. Real green-CI success is
-        # the deterministic mission_status=="verified" check at the top of this block.
-        if "alignment_ok" in normalized_last:
-            logger.info("✅ Mission accomplished (ALIGNMENT_OK). System signaling FINISH.")
-            return {"next_step": "FINISH", "mission_status": "verified"}
+        # NO LLM-prose success path. Success is EXCLUSIVELY the deterministic mission_status=="verified"
+        # set in Python from a confirmed green CI run (checked at the top of this block). We deliberately
+        # do NOT finish-as-success on an "ALIGNMENT_OK"/"verified" token in the Medic's text: that let an
+        # LLM mark an UNVERIFIED deploy as a success (the deterministic green never fired, yet the model
+        # emitted the token). An inconclusive Medic outcome now falls through to the LLM fallback, and an
+        # LLM FINISH there leaves mission_status unset → MissionFailedError (fails closed). This is the
+        # fail-closed contract: "the graph reached FINISH" is never success by itself.
 
     # 4. LLM FALLBACK (Enhanced with State Context)
     # We pass the actual status values to the LLM so it makes an informed decision

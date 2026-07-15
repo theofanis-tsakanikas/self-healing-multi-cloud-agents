@@ -22,9 +22,12 @@ def _infer_provider(model: str) -> str:
 
 
 def get_llm(temperature=0):
-    model       = os.getenv("LLM_MODEL", "gpt-4o")
-    timeout     = float(os.getenv("LLM_TIMEOUT_SEC", "120"))
-    max_retries = int(os.getenv("LLM_MAX_RETRIES", "1"))
+    # `or <default>` (not getenv's default arg) so a set-but-EMPTY env var — e.g. an unset GitHub
+    # Actions `vars.LLM_MODEL` that expands to "" — falls back instead of yielding "" → _infer_provider("")
+    # raising, or int("") crashing.
+    model       = os.getenv("LLM_MODEL") or "gpt-4o"
+    timeout     = float(os.getenv("LLM_TIMEOUT_SEC") or "120")
+    max_retries = int(os.getenv("LLM_MAX_RETRIES") or "1")
 
     # LLM_PROVIDER can override auto-detection (edge cases / private endpoints)
     provider = (os.getenv("LLM_PROVIDER") or _infer_provider(model)).lower()

@@ -239,7 +239,13 @@ resource "aws_iam_role_policy" "irsa_eu_sales" {
           "glue:GetPartitions", "glue:GetPartition", "glue:BatchGetPartition",
           "glue:BatchCreatePartition", "glue:BatchDeletePartition", "glue:UpdatePartition",
         ]
-        Resource = "*"
+        # Scoped to THIS account+region's Glue catalog/databases/tables (was Resource="*", which also
+        # granted every OTHER account/region if the policy were ever reused).
+        Resource = [
+          "arn:aws:glue:${var.region}:${data.aws_caller_identity.current.account_id}:catalog",
+          "arn:aws:glue:${var.region}:${data.aws_caller_identity.current.account_id}:database/*",
+          "arn:aws:glue:${var.region}:${data.aws_caller_identity.current.account_id}:table/*/*",
+        ]
       },
       {
         Effect = "Allow"
@@ -317,7 +323,13 @@ resource "aws_iam_role_policy" "irsa_pipelines" {
           "glue:GetPartitions", "glue:GetPartition", "glue:BatchGetPartition",
           "glue:BatchCreatePartition", "glue:BatchDeletePartition", "glue:UpdatePartition",
         ]
-        Resource = "*"
+        # Scoped to THIS account+region's Glue catalog/databases/tables (was Resource="*", which also
+        # granted every OTHER account/region if the policy were ever reused).
+        Resource = [
+          "arn:aws:glue:${var.region}:${data.aws_caller_identity.current.account_id}:catalog",
+          "arn:aws:glue:${var.region}:${data.aws_caller_identity.current.account_id}:database/*",
+          "arn:aws:glue:${var.region}:${data.aws_caller_identity.current.account_id}:table/*/*",
+        ]
       },
       {
         Effect = "Allow"

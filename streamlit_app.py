@@ -833,6 +833,7 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
         # as before) and early so the except handler below always has the name bound.
         from main import MissionFailedError, mission_failure_summary
         graph = get_graph()
+        from agents.state import build_initial_state  # lazy, matches get_graph's deferred import
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
         project_id = f"{pipeline_id.upper()}-{timestamp}"
         os.environ["PROJECT_ID"] = project_id
@@ -841,18 +842,20 @@ def _run_agent(pipe_conf, db_conf, rules_conf, infra_conf,
         # Without these a non-AWS / Databricks NL run silently uses the wrong creds / K8s path.
         os.environ["CLOUD_PROVIDER"] = pipe_conf.get("cloud_provider", "aws")
         os.environ["PIPELINE_PLATFORM"] = infra_conf.get("provider", "kubernetes").lower()
+        # Same PII posture as the CLI: mask sample rows to the LLM + enforce the anonymization gate.
+        os.environ["PII_SENSITIVE"] = "true" if pipe_conf.get("pii_sensitive") else "false"
 
-        initial_state = {
-            "task": task, "messages": [], "error_log": "",
-            "project_id": project_id, "config_path": "",
-            "target_infra": infra_conf.get("service_name", pipe_conf.get("cloud_provider", "unknown")),
-            "written_files": [], "infra_provisioned": False, "collected_specs": {},
-            "architect_status": "", "infra_status": "", "schema_discovered": False,
-            "github_done": False, "last_push_sha": "", "medic_fix_requested": False,
-            "mission_status": "",
-            "raw_configs": {"pipeline": pipe_conf, "database": db_conf,
-                            "rules": rules_conf, "infrastructure": infra_conf},
-        }
+        # Shared factory with main.py — the two entry points can never drift on which state keys are
+        # set. (Structured JSON logging via setup_logging is CLI-only by design; here the live run
+        # streams to the UI through the _QH queue handler installed in _run_agent, so we must NOT call
+        # setup_logging — it would drop that handler.)
+        initial_state = build_initial_state(
+            project_id=project_id,
+            task=task,
+            raw_configs={"pipeline": pipe_conf, "database": db_conf,
+                         "rules": rules_conf, "infrastructure": infra_conf},
+            target_infra=infra_conf.get("service_name", pipe_conf.get("cloud_provider", "unknown")),
+        )
 
         log_q.put(("head", f"🚀  Pipeline : {pipeline_id}"))
         log_q.put(("head", f"🆔  Project  : {project_id}"))

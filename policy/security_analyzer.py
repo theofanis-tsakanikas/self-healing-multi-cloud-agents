@@ -22,6 +22,11 @@ from pathlib import Path
 
 import yaml
 
+try:
+    from agents.contracts import RESOLVE_FROM_TF
+except Exception:  # keep policy usable even if agents isn't importable
+    RESOLVE_FROM_TF = "RESOLVE_FROM_EXECUTE_TERRAFORM_OUTPUT"
+
 # Private registries whose `:latest` is acceptable (the project pushes an immutable :sha alongside).
 _PRIVATE_REGISTRY = (".pkg.dev", ".dkr.ecr.", ".azurecr.io", ".azurecr.us")
 # Env-var name fragments that mark a credential; an inline literal value for one is a plaintext leak.
@@ -47,6 +52,7 @@ class Context:
     pods: list[dict] = field(default_factory=list)
     images: list[dict] = field(default_factory=list)
     workflows: list[dict] = field(default_factory=list)
+    terraform: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -54,6 +60,7 @@ class Context:
             "pods": self.pods,
             "images": self.images,
             "workflows": self.workflows,
+            "terraform": self.terraform,
         }
 
 
@@ -148,7 +155,11 @@ def _extract_workflow(path: Path) -> dict:
 # Segments skipped ONLY when they appear in a path RELATIVE to the scan root — so `analyze(".")` over
 # the live repo ignores the test fixtures/goldens and vendored dirs, while `analyze(fixtures/unsafe)`
 # pointed straight at a fixture still scans it (the ignored segment isn't in its relative path).
-_IGNORE_SEGMENTS = frozenset({".git", ".venv", "venv", "node_modules", "__pycache__", "fixtures", "goldens"})
+# "bootstrap" is excluded: the gate governs the agent's GENERATED infra, not the human-authored
+# one-time bootstrap, whose public DB endpoints / demo trade-offs are documented in SECURITY.md.
+_IGNORE_SEGMENTS = frozenset(
+    {".git", ".venv", "venv", "node_modules", "__pycache__", "fixtures", "goldens", "bootstrap"}
+)
 
 
 def extract_context(artifact_dir: str | Path) -> Context:
@@ -162,11 +173,25 @@ def extract_context(artifact_dir: str | Path) -> Context:
         name = p.name.lower()
         if name == "dockerfile":
             ctx.dockerfiles.append(_extract_dockerfile(p))
+        elif p.suffix == ".tf":
+            ctx.terraform.append(_extract_terraform(p))
         elif p.suffix in (".yaml", ".yml") and "workflow" in str(p.parent).lower():
             ctx.workflows.append(_extract_workflow(p))
         elif p.suffix in (".yaml", ".yml"):
             _extract_k8s(p, ctx)
     return ctx
+
+
+def _extract_terraform(path: Path) -> dict:
+    """Regex-scan generated Terraform for the clearest HIGH signals (no HCL parser dependency)."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return {
+        "path": path.name,
+        "publicly_accessible": bool(re.search(r"(?im)^\s*publicly_accessible\s*=\s*true", text)),
+        "iam_wildcard_resource": bool(re.search(r'(?i)"?Resource"?\s*[=:]\s*\[?\s*"\*"', text)),
+        "open_ingress": bool(re.search(r'0\.0\.0\.0/0', text)),
+        "public_acl": bool(re.search(r'(?i)acl\s*=\s*"public-read(-write)?"', text)),
+    }
 
 
 # ------------------------------------------------------------------------------- rules (Python) --- #
@@ -189,6 +214,10 @@ def derive_findings(ctx: Context) -> list[Finding]:
         if not pod["runs_nonroot"]:
             out.append(Finding("POD_NOT_NONROOT", "ADVISORY", obj, "no runAsNonRoot (SECURITY.md trade-off #3)"))
     for img in ctx.images:
+        # The pre-sed job.yaml image sentinel is a valid placeholder (the CI step rewrites it to the
+        # real registry URL); it is NOT a public :latest image. validate_generated_code exempts it too.
+        if img["ref"] == RESOLVE_FROM_TF:
+            continue
         if img["latest"] and not img["private"]:
             out.append(
                 Finding("IMAGE_PUBLIC_LATEST", "HIGH", f"{img['manifest']}:{img['container']}", f"public image on :latest ({img['ref']})")
@@ -198,6 +227,15 @@ def derive_findings(ctx: Context) -> list[Finding]:
             out.append(
                 Finding("WORKFLOW_INLINE_SECRET", "HIGH", wf["path"], f"inline secret literals: {', '.join(wf['inline_secret_keys'])}")
             )
+    for tf in ctx.terraform:
+        if tf["publicly_accessible"]:
+            out.append(Finding("TF_PUBLIC_DB", "HIGH", tf["path"], "publicly_accessible = true on a database"))
+        if tf["iam_wildcard_resource"]:
+            out.append(Finding("TF_IAM_WILDCARD_RESOURCE", "HIGH", tf["path"], 'IAM policy grants Resource = "*"'))
+        if tf["open_ingress"]:
+            out.append(Finding("TF_OPEN_INGRESS", "HIGH", tf["path"], "0.0.0.0/0 in generated Terraform"))
+        if tf["public_acl"]:
+            out.append(Finding("TF_PUBLIC_BUCKET_ACL", "HIGH", tf["path"], "public-read(-write) bucket ACL"))
     return out
 
 

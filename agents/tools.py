@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
 import yaml
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import URL, create_engine, inspect, text
 from openai import OpenAI
 from pinecone import Pinecone
 import time
@@ -215,6 +215,51 @@ def validate_generated_code(filename: str) -> str:
 
         with open(filename, encoding="utf-8") as f:
             py_content = f.read()
+
+        # SECURITY (prompt-injection / exfiltration backstop): a data pipeline must never run shell
+        # commands, eval/exec arbitrary code, or make ad-hoc network calls. A prompt-injected source
+        # column name, sample value, or CI log could steer the LLM into emitting exactly that. The
+        # validated pipelines use only pandas/Spark + cloud SDKs, so this is a hard allow-list.
+        # (`eval(`/`exec(` are matched only as BUILTINS — pandas `df.eval(`/`pd.eval(` are excluded.)
+        _DANGEROUS_CONSTRUCTS = [
+            (r"\bos\.system\s*\(", "os.system()"),
+            (r"\bos\.popen\s*\(", "os.popen()"),
+            (r"(?m)^\s*import\s+subprocess\b|\bsubprocess\.\w+\s*\(", "subprocess"),
+            (r"(?<![\w.])eval\s*\(", "eval()"),
+            (r"(?<![\w.])exec\s*\(", "exec()"),
+            (r"\b__import__\s*\(", "__import__()"),
+            (r"(?m)^\s*import\s+socket\b|\bsocket\.socket\s*\(", "socket"),
+            # Block network clients — but NOT urllib.parse (URL/string parsing is a legit pipeline
+            # idiom, e.g. quote_plus / urlparse for the abfss container). Only urllib.request/urlopen.
+            (r"(?m)^\s*import\s+(?:requests|httpx)\b|\burllib\.request\b|\.urlopen\s*\(", "network client (requests/urllib.request/httpx)"),
+            (r"(?m)^\s*import\s+pickle\b|\bpickle\.loads\s*\(", "pickle"),
+        ]
+        _dangerous_hits = sorted({label for pat, label in _DANGEROUS_CONSTRUCTS if re.search(pat, py_content)})
+        if _dangerous_hits:
+            errors.append(
+                "SECURITY: generated script uses forbidden construct(s): "
+                + ", ".join(_dangerous_hits)
+                + ". A data pipeline must not run shell commands, eval/exec, or make arbitrary network "
+                "calls — use pandas/Spark + the cloud SDKs only (prompt-injection/exfiltration backstop)."
+            )
+
+        # PII GATE — a pii_sensitive pipeline (PII_SENSITIVE env, set by main.py from the pipeline
+        # config) must ANONYMIZE PII before writing, or raw customer data ships to cloud storage while
+        # the run reports success. Two concrete failure modes the standard itself warns about:
+        if os.getenv("PII_SENSITIVE", "false").lower() == "true":
+            _has_hash = "hashlib" in py_content or re.search(r"\.sha256\s*\(", py_content)
+            _has_regex_mask = re.search(r"regex\s*=\s*True", py_content)
+            if not (_has_hash or _has_regex_mask):
+                errors.append(
+                    "PII: this is a pii_sensitive pipeline but the script shows NO anonymization — hash "
+                    "identifiers via hashlib.sha256 and/or mask email/phone via .str.replace(..., regex=True) "
+                    "BEFORE the write, or raw PII ships to storage."
+                )
+            if re.search(r"\.replace\s*\([^)]*regex\s*=\s*False", py_content):
+                errors.append(
+                    "PII: a masking .replace(...) uses regex=False — it SILENTLY no-ops (pandas 2.x "
+                    "default), leaving the PII column exposed with no error. Use regex=True."
+                )
 
         # Detect the cloud provider declared in the file.
         # Matches: _CLOUD = os.getenv("CLOUD_PROVIDER", "aws") or _CLOUD = "gcp"
@@ -1796,6 +1841,22 @@ def _columns_read_not_in_schema(py_content: str, schema_cols: set) -> set:
     return _unknown
 
 
+def _mask_sample_rows(rows: list) -> list:
+    """Redact string cell values so no raw PII reaches the LLM / LangSmith. Column keys and non-string
+    values (numbers/dates/bools/null) are kept so the architect still sees the table's structure."""
+    return [{k: ("***REDACTED***" if isinstance(v, str) else v) for k, v in row.items()} for row in rows]
+
+
+def _redact_secrets(s: str) -> str:
+    """Strip credentials a DB/driver error may embed before the string leaves the process (to the
+    LLM, LangSmith, or logs). Masks DSN `user:pass@host` and `password=…`/`pwd=…` patterns."""
+    if not s:
+        return s
+    s = re.sub(r"([A-Za-z0-9+.\-]+://)[^:/@\s]+:[^@/\s]+@", r"\1***:***@", s)  # scheme://user:pass@host
+    s = re.sub(r"(?i)\b(password|passwd|pwd|pass)\s*=\s*[^\s;,'\"]+", r"\1=***", s)
+    return s
+
+
 @tool
 def read_data_schema(table_name: str, db_type: str = "postgres"):
     """
@@ -1804,26 +1865,39 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
     """
 
     try:
+        # 0. Reject anything that is not a plain (optionally schema-qualified) SQL identifier.
+        # table_name is UNTRUSTED — in NL mode it comes from LLM extraction of the user's free text
+        # (PipelineIntent.source_table), and this tool is LLM-callable — so it must never be
+        # string-interpolated into SQL unchecked (the LIMIT-3 query below).
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$", table_name or ""):
+            return f"Error: invalid table name '{table_name}' — must be a plain SQL identifier."
+
         # 1. Build the connection URL dynamically based on db_type + cloud provider.
         # Cloud is read from CLOUD_PROVIDER env var (set by the pipeline) so this
         # tool works for any cloud+DB combination without hardcoded assumptions.
+        # URL.create keeps the password OUT of the string form (repr shows ***), so a leaked/logged
+        # URL or a driver error embedding the DSN cannot expose the credential.
         cloud = os.getenv("CLOUD_PROVIDER", "aws").lower()
 
         if db_type == "postgres":
-            host = cloud_get(cloud, "db_host",     db_type="postgres")
-            port = cloud_get(cloud, "db_port",     db_type="postgres") or "5432"
-            user = cloud_get(cloud, "db_user",     db_type="postgres")
-            pw   = cloud_get(cloud, "db_password", db_type="postgres")
-            db   = cloud_get(cloud, "db_name",     db_type="postgres")
-            db_url = f"postgresql://{user}:{pw}@{host}:{port}/{db}"
+            db_url = URL.create(
+                "postgresql",
+                username=cloud_get(cloud, "db_user", db_type="postgres"),
+                password=cloud_get(cloud, "db_password", db_type="postgres"),
+                host=cloud_get(cloud, "db_host", db_type="postgres"),
+                port=cloud_get(cloud, "db_port", db_type="postgres") or "5432",
+                database=cloud_get(cloud, "db_name", db_type="postgres"),
+            )
 
         elif db_type == "mysql":
-            host = cloud_get(cloud, "db_host",     db_type="mysql")
-            port = cloud_get(cloud, "db_port",     db_type="mysql") or "3306"
-            user = cloud_get(cloud, "db_user",     db_type="mysql")
-            pw   = cloud_get(cloud, "db_password", db_type="mysql")
-            db   = cloud_get(cloud, "db_name",     db_type="mysql")
-            db_url = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
+            db_url = URL.create(
+                "mysql+pymysql",
+                username=cloud_get(cloud, "db_user", db_type="mysql"),
+                password=cloud_get(cloud, "db_password", db_type="mysql"),
+                host=cloud_get(cloud, "db_host", db_type="mysql"),
+                port=cloud_get(cloud, "db_port", db_type="mysql") or "3306",
+                database=cloud_get(cloud, "db_name", db_type="mysql"),
+            )
 
         elif db_type == "sqlite":
             # For SQLite, read the URL/path directly from .env
@@ -1855,11 +1929,16 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
         except Exception:
             pass
 
-        # 3. Fetch sample data
+        # 3. Fetch sample data. Quote the (already identifier-validated) table via the dialect's
+        # preparer as defence-in-depth before it is interpolated into the LIMIT-3 query.
+        safe_table = engine.dialect.identifier_preparer.quote(table_name)
         with engine.connect() as conn:
-            # LIMIT 3 is enough for the agent to infer structure
-            result = conn.execute(text(f"SELECT * FROM {table_name} LIMIT 3"))
+            result = conn.execute(text(f"SELECT * FROM {safe_table} LIMIT 3"))
             sample = [dict(row._mapping) for row in result.fetchall()]
+
+        # For a PII-sensitive source, never ship raw rows to the LLM/LangSmith — redact string cells.
+        if os.getenv("PII_SENSITIVE", "false").lower() == "true":
+            sample = _mask_sample_rows(sample)
 
         return {
             "status": "success",
@@ -1870,7 +1949,9 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
         }
 
     except Exception as e:
-        return f"Database Error on {db_type}: {str(e)}"
+        # Redact any credential that a driver/DSN error may embed before it reaches the LLM,
+        # LangSmith, or the logs. Return the exception TYPE, not its raw text.
+        return f"Database Error on {db_type}: {_redact_secrets(str(e))} [{type(e).__name__}]"
 
 
 # --- TERRAFORM TOOLS ---
@@ -2405,6 +2486,25 @@ def push_to_github(project_id: str, commit_message: str):
     Identity is automated as github-actions[bot].
     """
     try:
+        # 0. PRE-PUSH SECURITY GATE — the push is what triggers the deploy workflow, so this is the
+        # enforcement point. Refuse to push a generated bundle with HIGH security findings (unsafe
+        # Dockerfile / manifest / workflow / Terraform). Fails CLOSED on a HIGH finding; fails OPEN
+        # (logs + proceeds) if the gate itself errors, so a gate bug can never brick a deploy.
+        try:
+            from policy.security_analyzer import analyze
+
+            gate = analyze(REPO_ROOT)
+            if gate.get("high_count", 0) > 0:
+                highs = [f for f in gate["findings"] if f["severity"] == "HIGH"]
+                detail = "; ".join(f"{f['rule']} @ {f['object']}" for f in highs)
+                logger.error(f"Pre-push security gate BLOCKED the push: {detail}")
+                return (
+                    f"Error: SECURITY GATE FAILED — refusing to push {gate['high_count']} HIGH "
+                    f"finding(s) in the generated bundle: {detail}"
+                )
+        except Exception as e:  # gate bug must not brick a deploy — fail open with a warning
+            logger.warning(f"Pre-push security gate could not run (failing open): {e}")
+
         # 1. Identity Config
         subprocess.run(["git", "config", "user.name", "github-actions[bot]"], cwd=REPO_ROOT, check=True)
         subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], cwd=REPO_ROOT, check=True)
@@ -2649,7 +2749,7 @@ def fetch_github_action_logs(project_id: str, head_sha: str = "", run_id: str = 
                     f"GH_TOKEN lacks 'actions: read' scope. This is a token configuration issue, "
                     f"not a code bug. Grant 'actions: read' permission to GH_TOKEN and retry."
                 )
-            return f"Error resolving run for SHA {head_sha}: {e}"
+            return f"PENDING: transient GitHub API error resolving run for SHA {head_sha} ({type(e).__name__}) — retry."
         runs = data.get("workflow_runs", [])
         if not runs:
             return (
@@ -2680,7 +2780,7 @@ def fetch_github_action_logs(project_id: str, head_sha: str = "", run_id: str = 
     try:
         run_data = _github_get_json(run_url, token)
     except Exception as e:
-        return f"Error fetching run metadata: {e}"
+        return f"PENDING: transient GitHub API error fetching run metadata ({type(e).__name__}) — retry."
 
     run_status = run_data.get("status")       # "queued", "in_progress", "completed"
     run_conclusion = run_data.get("conclusion")  # "success", "failure", "cancelled", "timed_out", None
@@ -2697,7 +2797,7 @@ def fetch_github_action_logs(project_id: str, head_sha: str = "", run_id: str = 
         data = _github_get_json(jobs_url, token)
         jobs = data.get("jobs", [])
     except Exception as e:
-        return f"Error fetching jobs: {e}"
+        return f"PENDING: transient GitHub API error fetching jobs ({type(e).__name__}) — retry."
 
     failed_jobs = [j for j in jobs if j.get("conclusion") in ["failure", "timed_out"]]
 

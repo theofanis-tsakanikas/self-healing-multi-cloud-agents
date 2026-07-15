@@ -23,7 +23,6 @@ _PRODUCERS = [
     (contracts.VALIDATION_FAILED, ("agents/tools.py",)),
     (contracts.AUTOVAL_FAILED_PREFIX, ("agents/infra.py",)),
     (contracts.STATE_LOCK_ERROR, ("agents/tools.py", "agents/medic.py")),
-    (contracts.ALIGNMENT_OK, ("agents/supervisor.py",)),
     (contracts.INFRA_COMPLETE, ("agents/infra.py",)),
     (contracts.RESOLVE_FROM_TF, ("agents/tools.py", "agents/codegen.py")),
 ]

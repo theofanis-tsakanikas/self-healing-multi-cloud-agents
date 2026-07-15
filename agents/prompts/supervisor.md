@@ -25,8 +25,12 @@ Prefer the state flags over conversational text. Read `architect_status`, `infra
 
 - Nothing has run yet, or `architect_status == "pending"` → **ARCHITECT**
 - `architect_status == "completed"` AND `infra_status == "pending"` → **INFRA**
-- `infra_status == "completed"` AND the Medic has signalled success (`ALIGNMENT_OK` / "verified") → **FINISH**
+- `infra_status == "completed"` and the deploy still needs its CI result checked → **MEDIC** (the Medic verifies the run and sets success deterministically; you never declare success yourself)
 - `error_log` is non-empty, or the outcome is an unresolved failure → **MEDIC**
+
+Do NOT emit a success word. Mission success is set ONLY by `supervisor.py` from the Medic's
+deterministic `mission_status=="verified"` (a confirmed green CI run) — never from your text or the
+Medic's prose. If unsure, route to **MEDIC**.
 
 These mirror the happy path, so the first hop of a run resolves to **ARCHITECT**. The healing
 transitions (which agent owns a fix, and the flag resets) are computed deterministically in

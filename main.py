@@ -5,6 +5,7 @@ import logging
 from dotenv import load_dotenv
 
 from agents.constants import CONFIGS_DIR
+from agents.state import build_initial_state
 from utils.prompt_utils import format_prompt
 from utils.file_utils import read_file
 from utils.config_utils import load_pipeline_bundle
@@ -115,38 +116,21 @@ def _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
     # pyspark-only) or that a .json is a Lakeview dashboard. "kubernetes" for the object-storage clouds.
     os.environ["PIPELINE_PLATFORM"] = infra_conf.get("provider", "kubernetes").lower()
 
-    initial_state = {
-        "task": task,
-        "messages": [],
-        "error_log": "",
-        "project_id": unique_project_id,
-        "config_path": "",
-        "target_infra": infra_conf.get("service_name", pipe_conf.get("cloud_provider", "unknown")),
-        "written_files": [],
-        "infra_provisioned": False,
-        "collected_specs": {},
-        "architect_status": "",
-        "infra_status": "",
-        "schema_discovered": False,
-        "github_done": False,
-        "last_push_sha": "",
-        "ecr_repository_url": "",
-        "medic_fix_requested": False,
-        "agent_error": False,
-        "ci_poll_attempt": 0,
-        "fix_attempt": 0,
-        "last_fix_signature": "",
-        "fix_loop_escalated": False,
-        "medic_fix_target": "",
-        "healing_context": "",
-        "mission_status": "",
-        "raw_configs": {
+    # PII_SENSITIVE lets read_data_schema mask sample rows (no raw PII to the LLM/LangSmith) and lets
+    # validate_generated_code enforce that the generated script actually anonymizes PII before writing.
+    os.environ["PII_SENSITIVE"] = "true" if pipe_conf.get("pii_sensitive") else "false"
+
+    initial_state = build_initial_state(
+        project_id=unique_project_id,
+        task=task,
+        raw_configs={
             "pipeline": pipe_conf,
             "database": db_conf,
             "rules": rules_conf,
             "infrastructure": infra_conf,
         },
-    }
+        target_infra=infra_conf.get("service_name", pipe_conf.get("cloud_provider", "unknown")),
+    )
 
     print("\n" + "=" * 75)
     print(f"🚀 LAUNCHING PIPELINE: {pipeline_id.upper()}")

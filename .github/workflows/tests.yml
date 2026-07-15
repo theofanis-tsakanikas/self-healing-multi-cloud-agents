@@ -22,15 +22,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
 
       - name: Install dependencies (incl. dev group)
         run: uv sync --group dev
@@ -49,13 +49,18 @@ jobs:
         # fails if the committed report is stale or any deterministic check regressed. No LLM.
         run: make eval-check
 
+      - name: Security gate over the generated infra (blocking)
+        # Blocks a committed generated bundle with HIGH findings (unsafe Dockerfile / manifest /
+        # workflow / Terraform). The same gate also runs pre-push inside push_to_github at deploy time.
+        run: make security-gate
+
   terraform-fmt:
     # Formatting gate for the HAND-WRITTEN Terraform only (bootstrap/). The
     # pipeline stack under terraform/ is an agent-generated output with its own
     # validation path — not gated here.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3
       - name: terraform fmt -check (bootstrap/)
         run: terraform fmt -check -recursive bootstrap/

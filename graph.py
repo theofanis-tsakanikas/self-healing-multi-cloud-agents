@@ -113,29 +113,31 @@ workflow.add_conditional_edges(
 )
 
 def _build_checkpointer():
-    """Opt-in durable state so a crash mid-heal can resume instead of losing the whole run.
+    """Opt-in DURABLE state so a crash mid-heal can resume instead of losing the whole run.
 
     Default (no LANGGRAPH_CHECKPOINT_DB): return None → `compile()` behaves exactly as before, so no
-    validated run changes. Set LANGGRAPH_CHECKPOINT_DB=<path> to persist to SQLite (durable across a
-    process crash — needs `langgraph-checkpoint-sqlite`); if that package is absent we fall back to an
-    in-process MemorySaver and WARN that it is not crash-durable, rather than silently pretending.
+    validated run changes. Set LANGGRAPH_CHECKPOINT_DB=<path.sqlite> for crash-durable SQLite state.
+
+    We construct SqliteSaver DIRECTLY from a connection — NOT via `SqliteSaver.from_conn_string`, which
+    is a @contextmanager that returns a context-manager object (compiling with it yields an app whose
+    "checkpointer" has no get_tuple/put and crashes on first stream). And if the opt-in is requested but
+    the package is missing, we FAIL LOUD rather than silently falling back to a non-durable MemorySaver
+    (which would break the very durability promise the env var asks for).
     """
     db = os.getenv("LANGGRAPH_CHECKPOINT_DB")
     if not db:
         return None
     try:
+        import sqlite3
+
         from langgraph.checkpoint.sqlite import SqliteSaver
-
-        return SqliteSaver.from_conn_string(db)
-    except Exception:
-        from langgraph.checkpoint.memory import MemorySaver
-
-        logger.warning(
-            "LANGGRAPH_CHECKPOINT_DB set but langgraph-checkpoint-sqlite is unavailable; using an "
-            "in-process MemorySaver — state survives within the process but NOT a crash. "
-            "Install langgraph-checkpoint-sqlite for durable resume."
-        )
-        return MemorySaver()
+    except ImportError as e:
+        raise RuntimeError(
+            "LANGGRAPH_CHECKPOINT_DB is set but langgraph-checkpoint-sqlite is not installed. "
+            "Install it (`uv add langgraph-checkpoint-sqlite`) for durable resume, or unset the env var."
+        ) from e
+    conn = sqlite3.connect(db, check_same_thread=False)
+    return SqliteSaver(conn)
 
 
 def build_app(checkpointer=None):
