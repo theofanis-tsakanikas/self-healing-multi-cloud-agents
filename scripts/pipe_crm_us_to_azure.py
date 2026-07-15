@@ -9,10 +9,10 @@ import pandas as pd
 from sqlalchemy import create_engine
 from trino.dbapi import connect as trino_connect
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
-
 from utils.cloud_config import cloud_get  # SSM → bootstrap_outputs → env fallback
 
 _CLOUD = os.getenv("CLOUD_PROVIDER", "aws")
+
 if _CLOUD == "aws":
     import boto3
 elif _CLOUD == "gcp":
@@ -61,9 +61,7 @@ def run():
         user = cloud_get("aws", "db_user", db_type="postgres")
         pw = cloud_get("aws", "db_password", db_type="postgres")
         db = cloud_get("aws", "db_name", db_type="postgres")
-        connection_string = (
-            f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
-        )
+        connection_string = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
     elif _CLOUD == "gcp":
         host = cloud_get("gcp", "db_host", db_type="mysql")
         port = cloud_get("gcp", "db_port", db_type="mysql") or "3306"
@@ -105,8 +103,7 @@ def run():
             rejected_by_reason['mandatory_contact_info'] = rejected_by_reason.get('mandatory_contact_info', 0) + (_before - len(chunk))
 
             # 3. entity_uniqueness
-            _mask = chunk.duplicated(subset=['cust_id'], keep=False)
-            chunk['is_suspicious'] = _mask
+            chunk['is_suspicious'] = chunk.duplicated(subset=['cust_id'], keep=False)
 
             # Type casting
             int_cols = [c for c in chunk.select_dtypes(include='float64').columns
