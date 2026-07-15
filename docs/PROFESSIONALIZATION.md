@@ -44,9 +44,15 @@ moment a bootstrap is live and one e2e run per touched cloud can confirm them.
 | **Terraform modules refactor** | State-address migration must run against live state or it corrupts it. |
 | **Model-matrix evals** (`eval-live` across models) | Needs LLM API keys; proves the guards are model-agnostic. |
 
-## 📋 Remaining offline-safe items (in progress on this branch)
+## 📋 Also shipped this pass
 
-- Durable LangGraph checkpointer (opt-in, so default behavior is unchanged).
-- Structured JSON logging + correlation IDs (additive).
-- Swappable RAG backend (the offline `local_kb` already exists; make it a first-class toggle).
-- Raise deterministic-core coverage.
+- **Durable LangGraph checkpointer** — opt-in via `LANGGRAPH_CHECKPOINT_DB`; default unchanged. A
+  mid-heal crash can resume. (`graph.build_app`, `tests/test_graph_integration.py`.)
+- **Structured JSON logging + correlation id** — opt-in via `LOG_FORMAT=json`; default unchanged.
+  (`utils/logging_setup.py`, `tests/test_logging_setup.py`.)
+- **Coverage floor 28 → 45** (real ~53% after the added tests).
+- **Process hygiene documented** — branch protection, required checks, local gates, and the
+  swappable-RAG-backend design in `CONTRIBUTING.md`.
+
+The RAG-backend swap itself (moving the *production* path off Pinecone) stays in the deferred list —
+the offline `local_kb` is the reference contract, but flipping the live retrieval path needs a run.
