@@ -826,7 +826,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 """
 
 _WF_GRAFANA_SECRET = """
@@ -899,14 +899,14 @@ def _render_workflow_aws(pipe_conf: dict, registry_url: str) -> str:
     url = registry_url
     return (_WF_HEADER + f"""
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4
         with:
           aws-access-key-id: ${{{{ secrets.AWS_ACCESS_KEY_ID }}}}
           aws-secret-access-key: ${{{{ secrets.AWS_SECRET_ACCESS_KEY }}}}
           aws-region: ${{{{ vars.AWS_DEFAULT_REGION }}}}
 
       - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64  # v2
 
       - name: Build & Push Image
         run: |
@@ -943,7 +943,7 @@ def _render_workflow_azure(pipe_conf: dict, registry_url: str) -> str:
     secret_name = f"{_rfc1123(pipe_conf.get('pipeline_id', ''))}-db-credentials"
     return (_WF_HEADER + f"""
       - name: Azure Login
-        uses: azure/login@v2
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5  # v2
         with:
           creds: ${{{{ secrets.AZURE_CREDENTIALS }}}}
 
@@ -996,12 +996,12 @@ def _render_workflow_gcp(pipe_conf: dict, registry_url: str) -> str:
     secret_name = f"{_rfc1123(pipe_conf.get('pipeline_id', ''))}-db-credentials"
     return (_WF_HEADER + f"""
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
         with:
           credentials_json: ${{{{ secrets.GCP_SA_KEY_JSON }}}}
 
       - name: Set up gcloud + GKE auth plugin
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f  # v2
         with:
           install_components: 'gke-gcloud-auth-plugin'
 
@@ -1051,11 +1051,11 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{{{ secrets.AWS_SECRET_ACCESS_KEY }}}}
       AWS_DEFAULT_REGION:    ${{{{ vars.AWS_DEFAULT_REGION }}}}
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3
         with:
           terraform_wrapper: false
-      - uses: databricks/setup-cli@v1.2.1
+      - uses: databricks/setup-cli@772863b94473abd8b0cacbec8b6f80fa0cbe1136  # v1.2.1
 
       - name: Upload Spark script to DBFS
         run: |

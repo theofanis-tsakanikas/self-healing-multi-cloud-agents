@@ -152,7 +152,16 @@ def _extract_workflow(path: Path) -> dict:
         # A GitHub expression (${{ secrets.* }} / ${{ vars.* }}) or an empty value is fine; a literal is a leak.
         if value and not value.startswith("${{"):
             hits.append(m.group(1))
-    return {"path": path.name, "inline_secret_keys": hits}
+    # A third-party `uses: owner/repo@<ref>` must be pinned to a 40-hex commit SHA — a mutable tag can
+    # be moved/compromised and would run attacker code with the workflow's cloud credentials. Local
+    # (./…) and docker refs are exempt.
+    unpinned = []
+    for m in re.finditer(r"(?im)^\s*-?\s*uses:\s*([^\s@#]+)@([^\s#]+)", text):
+        action, ref = m.group(1), m.group(2)
+        if "/" in action and not action.startswith(".") and not action.startswith("docker://") \
+                and not re.fullmatch(r"[0-9a-f]{40}", ref):
+            unpinned.append(f"{action}@{ref}")
+    return {"path": path.name, "inline_secret_keys": hits, "unpinned_actions": unpinned}
 
 
 # Segments skipped ONLY when they appear in a path RELATIVE to the scan root — so `analyze(".")` over
@@ -243,6 +252,11 @@ def derive_findings(ctx: Context) -> list[Finding]:
         if wf["inline_secret_keys"]:
             out.append(
                 Finding("WORKFLOW_INLINE_SECRET", "HIGH", wf["path"], f"inline secret literals: {', '.join(wf['inline_secret_keys'])}")
+            )
+        if wf.get("unpinned_actions"):
+            out.append(
+                Finding("WORKFLOW_UNPINNED_ACTION", "HIGH", wf["path"],
+                        f"third-party action(s) not SHA-pinned: {', '.join(sorted(set(wf['unpinned_actions'])))}")
             )
     for tf in ctx.terraform:
         if tf["publicly_accessible"]:
