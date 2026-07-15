@@ -115,6 +115,10 @@ def _launch(pipe_conf, db_conf, rules_conf, infra_conf, pipeline_id, task):
     # pyspark-only) or that a .json is a Lakeview dashboard. "kubernetes" for the object-storage clouds.
     os.environ["PIPELINE_PLATFORM"] = infra_conf.get("provider", "kubernetes").lower()
 
+    # PII_SENSITIVE lets read_data_schema mask sample rows (no raw PII to the LLM/LangSmith) and lets
+    # validate_generated_code enforce that the generated script actually anonymizes PII before writing.
+    os.environ["PII_SENSITIVE"] = "true" if pipe_conf.get("pii_sensitive") else "false"
+
     initial_state = {
         "task": task,
         "messages": [],

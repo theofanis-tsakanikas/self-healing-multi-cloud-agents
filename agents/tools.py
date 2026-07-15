@@ -243,6 +243,24 @@ def validate_generated_code(filename: str) -> str:
                 "calls — use pandas/Spark + the cloud SDKs only (prompt-injection/exfiltration backstop)."
             )
 
+        # PII GATE — a pii_sensitive pipeline (PII_SENSITIVE env, set by main.py from the pipeline
+        # config) must ANONYMIZE PII before writing, or raw customer data ships to cloud storage while
+        # the run reports success. Two concrete failure modes the standard itself warns about:
+        if os.getenv("PII_SENSITIVE", "false").lower() == "true":
+            _has_hash = "hashlib" in py_content or re.search(r"\.sha256\s*\(", py_content)
+            _has_regex_mask = re.search(r"regex\s*=\s*True", py_content)
+            if not (_has_hash or _has_regex_mask):
+                errors.append(
+                    "PII: this is a pii_sensitive pipeline but the script shows NO anonymization — hash "
+                    "identifiers via hashlib.sha256 and/or mask email/phone via .str.replace(..., regex=True) "
+                    "BEFORE the write, or raw PII ships to storage."
+                )
+            if re.search(r"\.replace\s*\([^)]*regex\s*=\s*False", py_content):
+                errors.append(
+                    "PII: a masking .replace(...) uses regex=False — it SILENTLY no-ops (pandas 2.x "
+                    "default), leaving the PII column exposed with no error. Use regex=True."
+                )
+
         # Detect the cloud provider declared in the file.
         # Matches: _CLOUD = os.getenv("CLOUD_PROVIDER", "aws") or _CLOUD = "gcp"
         _cloud_detect = re.search(
@@ -1823,6 +1841,12 @@ def _columns_read_not_in_schema(py_content: str, schema_cols: set) -> set:
     return _unknown
 
 
+def _mask_sample_rows(rows: list) -> list:
+    """Redact string cell values so no raw PII reaches the LLM / LangSmith. Column keys and non-string
+    values (numbers/dates/bools/null) are kept so the architect still sees the table's structure."""
+    return [{k: ("***REDACTED***" if isinstance(v, str) else v) for k, v in row.items()} for row in rows]
+
+
 def _redact_secrets(s: str) -> str:
     """Strip credentials a DB/driver error may embed before the string leaves the process (to the
     LLM, LangSmith, or logs). Masks DSN `user:pass@host` and `password=…`/`pwd=…` patterns."""
@@ -1911,6 +1935,10 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
         with engine.connect() as conn:
             result = conn.execute(text(f"SELECT * FROM {safe_table} LIMIT 3"))
             sample = [dict(row._mapping) for row in result.fetchall()]
+
+        # For a PII-sensitive source, never ship raw rows to the LLM/LangSmith — redact string cells.
+        if os.getenv("PII_SENSITIVE", "false").lower() == "true":
+            sample = _mask_sample_rows(sample)
 
         return {
             "status": "success",
