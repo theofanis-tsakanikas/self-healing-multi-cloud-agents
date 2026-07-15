@@ -1,6 +1,6 @@
 {
-  "uid": "us-crm-data-observability",
-  "title": "US Crm Data Observability",
+  "uid": "global-marketing-data-observability",
+  "title": "Global Marketing Data Observability",
   "schemaVersion": 37,
   "version": 1,
   "refresh": "5m",
@@ -10,8 +10,8 @@
   },
   "tags": [
     "data-pipeline",
-    "us-crm",
-    "azure"
+    "global-marketing",
+    "gcp"
   ],
   "templating": {
     "list": [

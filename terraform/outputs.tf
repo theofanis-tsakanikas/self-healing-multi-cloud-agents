@@ -1,19 +1,19 @@
-output "storage_account_name" {
-  value = azurerm_storage_account.data.name
+output "bucket_name" {
+  value = google_storage_bucket.data.name
 }
 
-output "container_name" {
-  value = azurerm_storage_container.data.name
+output "bucket_url" {
+  value = google_storage_bucket.data.url
 }
 
-output "managed_identity_client_id" {
-  value = data.azurerm_user_assigned_identity.pipeline.client_id
+output "service_account_email" {
+  value = data.google_service_account.pipeline.email
 }
 
-output "managed_identity_id" {
-  value = data.azurerm_user_assigned_identity.pipeline.id
+output "service_account_id" {
+  value = data.google_service_account.pipeline.id
 }
 
-output "resource_group_name" {
-  value = data.azurerm_resource_group.main.name
+output "project_id" {
+  value = var.project_id
 }

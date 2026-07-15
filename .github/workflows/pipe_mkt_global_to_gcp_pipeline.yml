@@ -20,37 +20,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
-      - name: Azure Login
-        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5  # v2
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
 
-      - name: ACR Login
-        run: |
-          REG="$(echo 'mcselfhealagentacr.azurecr.io' | cut -d'.' -f1)"
-          for i in 1 2 3; do
-            az acr login --name "$REG" && break || { echo "ACR login attempt $i failed (transient), retrying in 10s..."; sleep 10; }
-          done
+      - name: Set up gcloud + GKE auth plugin
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f  # v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
 
-      - name: Build Azure Storage Connection String + inject Trino ABFS key
-        run: |
-          KEY=$(az storage account keys list -g multi-cloud-agent-rg -n uscrminsightsstorage --query '[0].value' -o tsv)
-          echo "AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=uscrminsightsstorage;AccountKey=$KEY;EndpointSuffix=core.windows.net" >> "$GITHUB_ENV"
-          sed -i "s|__ABFS_KEY__|$KEY|g" k8s/configmaps.yaml
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker europe-west3-docker.pkg.dev --quiet
 
-      - name: Build and Push Docker Image
+      - name: Build & Push Image
         run: |
-          docker build -t mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }} -f Dockerfile .
-          docker push mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}
-          docker tag mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }} mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:latest
-          docker push mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:latest
+          docker build -t europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260715-1121:${{ github.sha }} -f Dockerfile .
+          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260715-1121:${{ github.sha }}
+          docker tag europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260715-1121:${{ github.sha }} europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260715-1121:latest
+          docker push europe-west3-docker.pkg.dev/multi-cloud-self-healing-agent/multi-cloud-agent-repo/pipe-mkt-global-to-gcp-20260715-1121:latest
 
       - name: Update Kubeconfig
-        run: az aks get-credentials --resource-group multi-cloud-agent-rg --name multi-cloud-agent-aks
-
-      - name: Set Image Tag in Job Manifest
-        run: |
-          sed -i 's|image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:.*|image: mcselfhealagentacr.azurecr.io/pipe-crm-us-to-azure:${{ github.sha }}|' k8s/job.yaml
+        run: gcloud container clusters get-credentials multi-cloud-agent-gke --region europe-west3 --project ${{ vars.GCP_PROJECT_ID }}
 
       - name: Create Grafana Admin Secret
         env:
@@ -75,13 +66,12 @@ jobs:
 
       - name: Create DB Credentials Secret
         run: |
-          kubectl create secret generic pipe-crm-us-to-azure-db-credentials -n analytics \
-            --from-literal=CRM_DB_HOST=${{ vars.CRM_DB_HOST }} \
-            --from-literal=CRM_DB_PORT=${{ vars.CRM_DB_PORT }} \
-            --from-literal=CRM_DB_USER=${{ vars.CRM_DB_USER }} \
-            --from-literal=CRM_DB_NAME=${{ vars.CRM_DB_NAME }} \
-            --from-literal=CRM_DB_PASSWORD=${{ secrets.AZURE_DB_PASSWORD }} \
-            --from-literal=AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING" \
+          kubectl create secret generic pipe-mkt-global-to-gcp-db-credentials -n analytics \
+            --from-literal=MYSQL_DB_HOST=${{ vars.MYSQL_DB_HOST }} \
+            --from-literal=MYSQL_DB_PORT=${{ vars.MYSQL_DB_PORT }} \
+            --from-literal=MYSQL_DB_USER=${{ vars.MYSQL_DB_USER }} \
+            --from-literal=MYSQL_DB_NAME=${{ vars.MYSQL_DB_NAME }} \
+            --from-literal=MYSQL_DB_PASSWORD=${{ secrets.MYSQL_DB_PASSWORD }} \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy Pipeline Job to Kubernetes

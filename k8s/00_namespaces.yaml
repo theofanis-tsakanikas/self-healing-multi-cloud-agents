@@ -11,9 +11,7 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: us-crm-insights-sa
+  name: global-mkt-insights-sa
   namespace: analytics
   annotations:
-    azure.workload.identity/client-id: "5480d15d-1925-4f42-8c85-9e016aa44d41"
-  labels:
-    azure.workload.identity/use: "true"
+    iam.gke.io/gcp-service-account: "global-mkt-insights-sa@multi-cloud-self-healing-agent.iam.gserviceaccount.com"

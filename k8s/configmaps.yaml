@@ -7,18 +7,20 @@ metadata:
     project_id: multi-cloud-self-healing-agent
 data:
   setup_trino.sql: |
-    CREATE SCHEMA IF NOT EXISTS hive.crm_us;
-    DROP TABLE IF EXISTS hive.crm_us.pipe_crm_us_to_azure;
-    CREATE TABLE hive.crm_us.pipe_crm_us_to_azure (
-        cust_id BIGINT,
-        full_name VARCHAR,
-        email_address VARCHAR,
-        phone_number VARCHAR,
+    CREATE SCHEMA IF NOT EXISTS hive.marketing_global;
+    DROP TABLE IF EXISTS hive.marketing_global.pipe_mkt_global_to_gcp;
+    CREATE TABLE hive.marketing_global.pipe_mkt_global_to_gcp (
+        campaign_id VARCHAR,
+        platform_name VARCHAR,
+        ad_spend DECIMAL(18,2),
+        clicks BIGINT,
+        impressions DOUBLE,
+        event_timestamp TIMESTAMP,
         is_suspicious BOOLEAN,
         run_date DATE
     ) WITH (
         format = 'PARQUET',
-        external_location = 'abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/processed/',
+        external_location = 'gs://global-marketing-insights-data/processed/',
         partitioned_by = ARRAY['run_date']
     );
 ---
@@ -33,9 +35,8 @@ data:
   hive.properties: |
     connector.name=hive
     hive.metastore=file
-    hive.metastore.catalog.dir=abfss://us-crm-insights-data@uscrminsightsstorage.dfs.core.windows.net/metastore/
-    hive.azure.abfs-storage-account=uscrminsightsstorage
-    hive.azure.abfs-access-key=__ABFS_KEY__
+    hive.metastore.catalog.dir=gs://global-marketing-insights-data/metastore/
+    hive.gcs.use-access-token=false
     hive.allow-drop-table=true
     hive.allow-rename-table=true
 ---
@@ -60,8 +61,8 @@ data:
         path: /etc/grafana/provisioning/dashboards
   monitoring_specs.json: |
     {
-      "uid": "us-crm-data-observability",
-      "title": "US Crm Data Observability",
+      "uid": "global-marketing-data-observability",
+      "title": "Global Marketing Data Observability",
       "schemaVersion": 37,
       "version": 1,
       "refresh": "5m",
@@ -71,8 +72,8 @@ data:
       },
       "tags": [
         "data-pipeline",
-        "us-crm",
-        "azure"
+        "global-marketing",
+        "gcp"
       ],
       "templating": {
         "list": [

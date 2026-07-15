@@ -16,4 +16,4 @@ COPY dashboards/ dashboards/
 RUN useradd --no-create-home --shell /bin/false appuser
 USER appuser
 
-CMD ["python", "scripts/pipe_crm_us_to_azure.py"]
+CMD ["python", "scripts/pipe_mkt_global_to_gcp.py"]

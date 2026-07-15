@@ -2,20 +2,19 @@ terraform {
   required_version = ">= 1.6"
 
   required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 3.100"
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.0"
     }
   }
 
-  backend "azurerm" {
-    resource_group_name  = "multi-cloud-agent-rg"
-    storage_account_name = "multicloudagenttfstate"
-    container_name       = "tfstate"
-    key                  = "azure/us-crm-insights/terraform.tfstate"
+  backend "gcs" {
+    bucket = "multi-cloud-agent-tfstate"
+    prefix = "gcp/global-marketing-insights/terraform.tfstate"
   }
 }
 
-provider "azurerm" {
-  features {}
+provider "google" {
+  project = var.project_id
+  region  = var.region
 }
