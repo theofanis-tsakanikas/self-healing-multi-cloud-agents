@@ -7,13 +7,20 @@ is caught here before it can strand a run.
 """
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from graph import app, route_after_medic_tools, should_continue
+from graph import app, build_app, route_after_medic_tools, should_continue
 
 
 def test_compiled_graph_has_all_nodes():
     nodes = set(app.get_graph().nodes)
     for expected in ("supervisor", "architect", "infra", "medic", "execute_tools"):
         assert expected in nodes, f"graph is missing node {expected!r}"
+
+
+def test_build_app_compiles_with_and_without_checkpointer():
+    from langgraph.checkpoint.memory import MemorySaver
+
+    assert build_app() is not None  # default path: no checkpointer, behavior unchanged
+    assert build_app(checkpointer=MemorySaver()) is not None  # opt-in durable wiring compiles
 
 
 def test_should_continue_routes_tool_calls_to_execute_tools():
