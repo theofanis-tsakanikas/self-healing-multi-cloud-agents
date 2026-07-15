@@ -619,8 +619,13 @@ def medic_node(state: AgentState):
                 # that it is REAL. A quote ≥12 chars must also actually appear in a prior tool/message
                 # output; otherwise it is a likely fabrication and we do not honour the routing (the
                 # ToolMessage is still shown so the LLM self-corrects).
+                # Search this-turn outputs TOO, not just state["messages"]: a verification-phase heal
+                # quotes the CI log fetched by THIS turn's auto-poll / in-loop fetch, which lives only
+                # in the local accumulator (node inputs are immutable, so state["messages"] never holds
+                # anything produced this turn). Omitting it dropped every genuine CI-runtime heal.
+                _evidence_pool = list(state["messages"]) + new_messages_for_state
                 _quote = str(tool_args.get("evidence_quote", "")).strip()
-                if len(_quote) >= 12 and not _evidence_has_provenance(_quote, state["messages"]):
+                if len(_quote) >= 12 and not _evidence_has_provenance(_quote, _evidence_pool):
                     logger.warning(
                         f"request_fix evidence_quote not found in any real output — not honouring "
                         f"routing (possible hallucination): {_quote[:60]!r}"
@@ -678,13 +683,18 @@ def medic_node(state: AgentState):
     # which produce no validate_generated_code results — those keep the LLM's target.)
     deterministic_fix_target = ""  # written to state so the Supervisor routes by ownership
     if fix_requested:
+        # CI logs fetched THIS turn (auto-poll / in-loop fetch) live only in the local accumulator —
+        # node inputs are immutable, so state["messages"] never holds them within this invocation. The
+        # ownership derivation MUST search both, or a CI-runtime failure's file/signature is invisible
+        # and the fix is mis-routed (infra CI errors fell through to the architect default).
+        _all_msgs = list(state["messages"]) + new_messages_for_state
         _failed_files = [f for f, (st, _) in _validation_results.items() if st == "FAILED"]
         if not _failed_files:
             # Architect auto-validation failures never reach _validation_results (validate
             # runs in Python, not as an LLM tool call). Recover the SINGLE most-recently
             # failed file from the messages so the architect patches EXACTLY that file —
             # not every artifact it generated. (Prevents over-patching a correct SQL/dashboard.)
-            _latest_failed = _latest_autovalidation_failure(state["messages"])
+            _latest_failed = _latest_autovalidation_failure(_all_msgs)
             _failed_files = [_latest_failed] if _latest_failed else []
         if _failed_files:
             _owners = {_owner_of_file(f) for f in _failed_files}
@@ -709,7 +719,7 @@ def medic_node(state: AgentState):
                     "Target file(s) to fix: " + ", ".join(_failed_files) + "\n\n" + healing_context
                 )
                 logger.info("🩹 Injected FAILED filename(s) into healing_context for patch targeting.")
-        elif (_ci_owner := _ci_error_owner(state["messages"])) == "infra":
+        elif (_ci_owner := _ci_error_owner(_all_msgs)) == "infra":
             # CI-LOG failure with an UNAMBIGUOUS infra/dependency signature (e.g. a missing JDBC
             # driver → ClassNotFoundException). The error surfaces AT the script's read line, but
             # the fix is the Terraform job `library` block, NOT the script — so route to infra
@@ -717,11 +727,11 @@ def medic_node(state: AgentState):
             # and point healing_context at the Terraform. Mirrors the generation-phase ownership
             # routing, but keyed on the ERROR TYPE rather than the file location.
             deterministic_fix_target = "infra"
-            _ci_file = _extract_ci_failed_file(state["messages"])
+            _ci_file = _extract_ci_failed_file(_all_msgs)
             # For a secret-key mismatch, compute the EXACT one-line patch (read the current key line
             # from the file) so the infra agent copies it verbatim instead of guessing — it kept
             # patching the `scope`/`name` (named in the error) and missing the actual `key` line.
-            _exact = _databricks_secret_key_exact_fix(state["messages"])
+            _exact = _databricks_secret_key_exact_fix(_all_msgs)
             _exact_block = ""
             if _exact:
                 _old, _new = _exact
@@ -756,7 +766,7 @@ def medic_node(state: AgentState):
             # no file, the architect rejects its own patch ("not the fix target"), and the fix loops.
             if _ci_owner == "architect":
                 deterministic_fix_target = "architect"
-            _ci_file = _extract_ci_failed_file(state["messages"])
+            _ci_file = _extract_ci_failed_file(_all_msgs)
             if (_ci_file and healing_context
                     and Path(_ci_file).stem.lower() not in healing_context.lower()):
                 healing_context = "Target file to fix: " + _ci_file + "\n\n" + healing_context
