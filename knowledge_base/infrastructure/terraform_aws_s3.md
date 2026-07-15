@@ -175,7 +175,7 @@ resource "aws_s3_object" "processed_dir" {
 - **Three mandatory statements — all required:**
     - Statement 1: `s3:ListBucket` on the **Bucket ARN**.
     - Statement 2: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on the **Bucket ARN + `/processed/*`**.
-    - Statement 3: Glue permissions on `"*"` — Trino uses AWS Glue Data Catalog as metastore. Without these, `CREATE TABLE`, `DROP TABLE`, and `CALL sync_partition_metadata` all fail with access denied. Glue ARNs are complex and region/account-scoped internally — always use `Resource = ["*"]` for Glue statements.
+    - Statement 3: Glue permissions — Trino uses AWS Glue Data Catalog as metastore. Without these, `CREATE TABLE`, `DROP TABLE`, and `CALL sync_partition_metadata` all fail with access denied. Scope the `Resource` to the account's Glue **catalog / databases / tables** — `["arn:aws:glue:*:*:catalog", "arn:aws:glue:*:*:database/*", "arn:aws:glue:*:*:table/*/*"]` — NOT a bare `["*"]`: the wildcard also grants Glue connections/crawlers/jobs and is refused by the least-privilege security gate. The `*:*` leaves region+account as wildcards (no `aws_caller_identity` needed).
 - **Least Privilege:** For dedicated buckets (one pipeline per bucket), restrict Statement 2 to `/processed/*` — the pipeline writes exclusively to `{bucket}/processed/run_date=.../`. Granting `/*` is over-permissive:
 ```hcl
 # ✅ restricted to actual write path:
@@ -211,7 +211,15 @@ resource "aws_iam_policy" "s3_access_policy" {
           "glue:CreatePartition",  "glue:DeletePartition",  "glue:UpdatePartition",
           "glue:BatchCreatePartition", "glue:BatchDeletePartition"
         ]
-        Resource = ["*"]
+        # Scoped to the account's Glue catalog / databases / tables (NOT a bare "*", which also grants
+        # Glue connections/crawlers/jobs and trips the least-privilege security gate). `*:*` leaves
+        # region+account as wildcards so no aws_caller_identity data source is needed — same style as
+        # the SSM statement below. This covers every catalog operation Trino performs.
+        Resource = [
+          "arn:aws:glue:*:*:catalog",
+          "arn:aws:glue:*:*:database/*",
+          "arn:aws:glue:*:*:table/*/*"
+        ]
       },
       {
         Effect = "Allow"
