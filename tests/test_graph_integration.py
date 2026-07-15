@@ -23,6 +23,24 @@ def test_build_app_compiles_with_and_without_checkpointer():
     assert build_app(checkpointer=MemorySaver()) is not None  # opt-in durable wiring compiles
 
 
+def test_build_checkpointer_env_path_returns_a_real_durable_saver(monkeypatch, tmp_path):
+    # Regression for the from_conn_string context-manager footgun: with LANGGRAPH_CHECKPOINT_DB set,
+    # _build_checkpointer must return a real BaseCheckpointSaver (has get_tuple/put), NOT a context
+    # manager — otherwise the first app.stream crashes. Default (unset) must stay None.
+    from langgraph.checkpoint.base import BaseCheckpointSaver
+
+    from graph import _build_checkpointer
+
+    monkeypatch.delenv("LANGGRAPH_CHECKPOINT_DB", raising=False)
+    assert _build_checkpointer() is None
+
+    monkeypatch.setenv("LANGGRAPH_CHECKPOINT_DB", str(tmp_path / "ckpt.sqlite"))
+    cp = _build_checkpointer()
+    assert isinstance(cp, BaseCheckpointSaver)
+    assert hasattr(cp, "get_tuple") and hasattr(cp, "put")
+    assert build_app(checkpointer=cp) is not None
+
+
 def test_should_continue_routes_tool_calls_to_execute_tools():
     ai = AIMessage(content="", tool_calls=[{"name": "request_fix", "args": {}, "id": "call_1"}])
     assert should_continue({"messages": [ai]}) == "execute_tools"
