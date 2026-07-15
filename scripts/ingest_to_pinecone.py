@@ -13,9 +13,9 @@ from dotenv import load_dotenv
 # Shared token-budget guard (utils is on sys.path via PYTHONPATH=/app in the image; for local runs
 # the repo root is the CWD). Import defensively so the ingest still runs if utils is unavailable.
 try:
-    from utils.embedding_budget import EMBED_TOKEN_LIMIT, count_tokens
+    from utils.embedding_budget import EMBED_TOKEN_SAFE_CEILING, count_tokens
 except Exception:  # pragma: no cover - fallback for odd sys.path setups
-    EMBED_TOKEN_LIMIT = 8191
+    EMBED_TOKEN_SAFE_CEILING = 8000
 
     def count_tokens(text):
         return (len(text) + 3) // 4
@@ -92,13 +92,14 @@ def upload_file_to_pinecone(file_path):
         # Create a unique ID to avoid duplicates.
         vector_id = f"spec_{category}_{file_name}".replace(".", "_")
 
-        # PRE-FLIGHT TOKEN GUARD — the embed model rejects inputs over EMBED_TOKEN_LIMIT. Catch it
+        # PRE-FLIGHT TOKEN GUARD — the embed model rejects inputs over its limit; enforce the SAFE
+        # ceiling (tiktoken under-counts vs the API, so the raw 8191 is not a safe local check). Catch it
         # here and FAIL LOUD: previously the OpenAI error was swallowed into a None embedding and the
         # file was silently skipped, leaving a STALE version live in Pinecone. Never silent again.
         tokens = count_tokens(raw_content)
-        if tokens > EMBED_TOKEN_LIMIT:
+        if tokens > EMBED_TOKEN_SAFE_CEILING:
             logger.error(
-                f"❌ {file_name} is {tokens} tokens > {EMBED_TOKEN_LIMIT} limit for the embed model. "
+                f"❌ {file_name} is {tokens} tokens > {EMBED_TOKEN_SAFE_CEILING} safe ceiling for the embed model. "
                 f"Pinecone will serve the STALE version. Split this standard before re-ingesting."
             )
             return False
