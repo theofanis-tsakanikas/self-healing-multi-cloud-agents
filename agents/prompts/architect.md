@@ -59,7 +59,7 @@ The following structured context defines your mission. You must strictly adhere 
 ### 4. UNIVERSAL CODE GENERATION (PYTHON)
 Generate `scripts/*.py` following `arch_standard_python` exactly. The standard defines the authoritative skeleton and step ordering. These constraints must never be violated:
 
-- **Credentials:** Read the source DB host/user/password/db name directly from environment variables with `os.getenv()` — e.g. `host = os.getenv("POSTGRES_DB_HOST")`, `user = os.getenv("POSTGRES_DB_USER")`, `password = os.getenv("POSTGRES_DB_PASSWORD")`, `db = os.getenv("POSTGRES_DB_NAME")`. This is the simplest and most portable approach. Do NOT use `cloud_get()`.
+- **Credentials:** `cloud_get()` ONLY — `os.getenv()` is FORBIDDEN for host/user/password/db. It bypasses SSM and returns None in production. Every `cloud_get()` call and the `connection_string` assignment MUST be inside a cloud-specific guard (`if _CLOUD == "aws":` / `elif _CLOUD == "gcp":` / `elif _CLOUD == "azure":`). An unguarded `cloud_get("aws", ...)` hardcodes AWS into the script and makes it undeployable on GCP or Azure.
 - **Destination URI:** `destination_uri = os.getenv("DESTINATION_URI")` — never hardcode a URI string in the script. `LOGICAL_DESTINATION.uri` from context identifies the bucket but must not appear as a literal in the generated code. The K8s Job injects the real value at runtime.
 - **Partition path:** Always `{destination_uri}run_date=YYYY-MM-DD/` — never use `project_id` or the pipeline name as a path component.
 - **Error handling:** `create_engine` AND the extraction loop must be in the same `try` block.
