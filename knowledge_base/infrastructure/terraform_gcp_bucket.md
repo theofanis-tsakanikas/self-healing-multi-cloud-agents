@@ -96,7 +96,7 @@ provider "google" {
 ## 2. GCS BUCKET PROVISIONING
 
 ### 2.1 Core Bucket
-- `storage_class`: `STD`
+- `storage_class`: `STANDARD`
 - `uniform_bucket_level_access`: `true` — MANDATORY. Disables ACLs, uses IAM only. Never set to false.
 - `public_access_prevention`: `"enforced"` — blocks all public access
 - `versioning.enabled`: `true`
@@ -106,7 +106,7 @@ provider "google" {
 resource "google_storage_bucket" "data" {
   name                        = var.bucket_name
   location                    = var.region
-  storage_class               = "STD"
+  storage_class               = "STANDARD"
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 
