@@ -2749,7 +2749,7 @@ def fetch_github_action_logs(project_id: str, head_sha: str = "", run_id: str = 
                     f"GH_TOKEN lacks 'actions: read' scope. This is a token configuration issue, "
                     f"not a code bug. Grant 'actions: read' permission to GH_TOKEN and retry."
                 )
-            return f"Error resolving run for SHA {head_sha}: {e}"
+            return f"PENDING: transient GitHub API error resolving run for SHA {head_sha} ({type(e).__name__}) — retry."
         runs = data.get("workflow_runs", [])
         if not runs:
             return (
@@ -2780,7 +2780,7 @@ def fetch_github_action_logs(project_id: str, head_sha: str = "", run_id: str = 
     try:
         run_data = _github_get_json(run_url, token)
     except Exception as e:
-        return f"Error fetching run metadata: {e}"
+        return f"PENDING: transient GitHub API error fetching run metadata ({type(e).__name__}) — retry."
 
     run_status = run_data.get("status")       # "queued", "in_progress", "completed"
     run_conclusion = run_data.get("conclusion")  # "success", "failure", "cancelled", "timed_out", None
@@ -2797,7 +2797,7 @@ def fetch_github_action_logs(project_id: str, head_sha: str = "", run_id: str = 
         data = _github_get_json(jobs_url, token)
         jobs = data.get("jobs", [])
     except Exception as e:
-        return f"Error fetching jobs: {e}"
+        return f"PENDING: transient GitHub API error fetching jobs ({type(e).__name__}) — retry."
 
     failed_jobs = [j for j in jobs if j.get("conclusion") in ["failure", "timed_out"]]
 
