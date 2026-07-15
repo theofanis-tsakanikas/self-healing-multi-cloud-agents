@@ -45,6 +45,10 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: '1'
           ignore-unfixed: true
+          # policy/fixtures holds DELIBERATELY-unsafe artifacts that prove the security gate refuses
+          # them (tests/test_security_gate.py). They contain fake credential literals by design, so
+          # they must be excluded from the secret scanner — they are never deployed.
+          skip-dirs: policy/fixtures
 
   iac-scan:
     name: IaC misconfig (report-only)

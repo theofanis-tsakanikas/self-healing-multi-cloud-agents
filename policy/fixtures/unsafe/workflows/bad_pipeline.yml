@@ -6,7 +6,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      AWS_SECRET_ACCESS_KEY: AKIAIOSFODNN7EXAMPLEKEY
+      AWS_SECRET_ACCESS_KEY: EXAMPLE_FIXTURE_LITERAL_NOT_A_REAL_SECRET
       AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
     steps:
       - run: echo deploy

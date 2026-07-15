@@ -16,4 +16,4 @@ spec:
           image: grafana/grafana:latest
           env:
             - name: DB_PASSWORD
-              value: "hunter2-plaintext"
+              value: "EXAMPLE_FIXTURE_LITERAL_NOT_A_REAL_SECRET"
