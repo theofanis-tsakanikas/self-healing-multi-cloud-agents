@@ -17,15 +17,11 @@ from graph import app
 load_dotenv()
 
 # --- LOGGING CONFIGURATION ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("pipeline_execution.log", mode="a")
-    ]
-)
-logger = logging.getLogger("PIPELINE_ORCHESTRATOR")
+# Human format by default (unchanged); set LOG_FORMAT=json for one JSON object per line with a
+# per-run correlation id. See utils/logging_setup.py.
+from utils.logging_setup import setup_logging  # noqa: E402
+
+logger = setup_logging(level=logging.INFO)
 
 
 class MissionFailedError(RuntimeError):

@@ -42,10 +42,13 @@ And if a requirement changes, they start over.
 
 | Option | Best for | ~Cost/mo |
 |---|---|---|
-| 🟠 **AWS** EKS + S3 + RDS | Mature teams, S3-native workloads | ~$120 |
-| 🔵 **Azure** AKS + ADLS + PostgreSQL | GDPR/EU compliance, lowest K8s cost | ~$68 |
-| 🟢 **GCP** GKE + GCS + Cloud SQL | Analytics-heavy, Trino federation | ~$110 |
-| ⚡ **Databricks** Delta Lake + Spark + Unity Catalog | Heavy ETL, ML pipelines, Lakehouse | ~$72 |
+| 🟠 **AWS** EKS + S3 + RDS | Mature teams, S3-native workloads | ~$279 |
+| 🔵 **Azure** AKS + ADLS + PostgreSQL | GDPR/EU compliance, lowest K8s cost | ~$182 |
+| 🟢 **GCP** GKE + GCS + Cloud SQL | Analytics-heavy, Trino federation | ~$162 |
+| ⚡ **Databricks** Delta Lake + Spark + Unity Catalog | Heavy ETL, ML pipelines, Lakehouse | ~$119 |
+
+> Figures are the single-source-of-truth output of `utils/cost_estimator.py` (list prices, 50 GB,
+> ~2026-06); regenerate with `python -m utils.cost_estimator`. Do not hand-edit — update the estimator.
 
 **Databricks is recommended when:**
 - Data volume > 200 GB/day

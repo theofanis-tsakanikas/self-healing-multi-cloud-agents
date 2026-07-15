@@ -1,8 +1,14 @@
-# ⚠️ DEMO MISTAKE — TEMPORARY (revert after the Databricks self-healing recording)
+# Self-heal demo — post-mortem (INJECTED MISTAKE REVERTED)
 
-ONE deliberate mistake to demonstrate the Medic's **CI-runtime, INFRA-level** self-heal on the
+> **STATUS: REVERTED / NOT ACTIVE.** The injected mistake below has been reverted — the standard
+> `knowledge_base/infrastructure/terraform_databricks.md` now carries the CORRECT `key = "db_password"`.
+> This file is kept as the historical record of the demo and, more importantly, the five real bugs it
+> exposed (the "PERMANENT changes" section). Re-injecting the mistake for a future recording means
+> flipping the key AND re-syncing Pinecone (`sync_knowledge_base: sync` on the next run, or `make ingest`).
+
+ONE deliberate mistake was used to demonstrate the Medic's **CI-runtime, INFRA-level** self-heal on the
 Databricks `sales_lakehouse` pipeline — the job FAILS at runtime, the Medic fixes the **Terraform**
-(not the script), re-deploys, and the re-run goes green. **Revert it after recording.**
+(not the script), re-deploys, and the re-run goes green.
 
 (Replaces the retired missing-JDBC-library demo, which was a no-op: the Databricks Runtime already
 bundles the Postgres driver, so the job ran green. The secret-key mismatch below is reliable — the

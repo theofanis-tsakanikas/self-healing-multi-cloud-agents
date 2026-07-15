@@ -1,3 +1,6 @@
+import logging
+import os
+
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from agents.state import AgentState
@@ -14,6 +17,8 @@ from agents.tools import (
     request_fix,
     store_architectural_insight
 )
+
+logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION ---
 
@@ -107,4 +112,36 @@ workflow.add_conditional_edges(
     }
 )
 
-app = workflow.compile()
+def _build_checkpointer():
+    """Opt-in durable state so a crash mid-heal can resume instead of losing the whole run.
+
+    Default (no LANGGRAPH_CHECKPOINT_DB): return None → `compile()` behaves exactly as before, so no
+    validated run changes. Set LANGGRAPH_CHECKPOINT_DB=<path> to persist to SQLite (durable across a
+    process crash — needs `langgraph-checkpoint-sqlite`); if that package is absent we fall back to an
+    in-process MemorySaver and WARN that it is not crash-durable, rather than silently pretending.
+    """
+    db = os.getenv("LANGGRAPH_CHECKPOINT_DB")
+    if not db:
+        return None
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        return SqliteSaver.from_conn_string(db)
+    except Exception:
+        from langgraph.checkpoint.memory import MemorySaver
+
+        logger.warning(
+            "LANGGRAPH_CHECKPOINT_DB set but langgraph-checkpoint-sqlite is unavailable; using an "
+            "in-process MemorySaver — state survives within the process but NOT a crash. "
+            "Install langgraph-checkpoint-sqlite for durable resume."
+        )
+        return MemorySaver()
+
+
+def build_app(checkpointer=None):
+    """Compile the graph. Pass a checkpointer, or rely on LANGGRAPH_CHECKPOINT_DB; default = none."""
+    cp = checkpointer if checkpointer is not None else _build_checkpointer()
+    return workflow.compile(checkpointer=cp) if cp is not None else workflow.compile()
+
+
+app = build_app()

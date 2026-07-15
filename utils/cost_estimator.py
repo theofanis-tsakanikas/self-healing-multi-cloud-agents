@@ -134,3 +134,14 @@ def compare_clouds(storage_gb: int = _DEFAULT_STORAGE_GB) -> list[dict]:
         e["last_updated"] = PRICES_LAST_UPDATED
         e["disclaimer"] = PRICES_DISCLAIMER
     return sorted(estimates, key=lambda x: x["total"])
+
+
+if __name__ == "__main__":
+    # Single source of truth for the cost numbers quoted in docs (docs/VISION.md) and the promo
+    # captions. Run with `python -m utils.cost_estimator`; docs must be regenerated from this, not
+    # hand-edited.
+    _rows = compare_clouds()
+    print(f"Monthly cost estimate (list prices, {_DEFAULT_STORAGE_GB} GB, {PRICES_LAST_UPDATED}):\n")
+    for _e in _rows:
+        print(f"  {_e['cloud']:12} ~${round(_e['total']):>4}")
+    print(f"\n{_rows[0]['disclaimer']}")

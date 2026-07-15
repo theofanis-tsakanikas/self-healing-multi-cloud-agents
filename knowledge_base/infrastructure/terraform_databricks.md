@@ -75,8 +75,10 @@ data "aws_ssm_parameter" "db_user"     { name = "/multi-cloud-self-healing-agent
 data "aws_ssm_parameter" "db_password" { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_password" }
 
 # ONLY the password goes into the secret scope; host/name/user are non-sensitive job params.
+# CONTRACT: `key` MUST equal the key the Spark script reads via dbutils.secrets.get(scope, "db_password")
+# (see databricks_spark_standard.md). Any other key → "Secret does not exist … key: db_password" at runtime.
 resource "databricks_secret" "db_password" {
-  key          = "postgres_password"
+  key          = "db_password"
   string_value = data.aws_ssm_parameter.db_password.value
   scope        = databricks_secret_scope.pipeline.name
 }

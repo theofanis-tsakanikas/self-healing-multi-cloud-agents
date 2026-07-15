@@ -94,5 +94,6 @@ show_missing = true
 # infra_node, medic_node) are integration/eval-deferred, so total line coverage is
 # dominated by intentionally-untested code. This floor guards the deterministic logic
 # (validators, routing, cloud_get, state helpers) from silently losing coverage.
-# Raise it whenever real coverage grows (was 22 at ~26% real; now 28 at ~32% real).
-fail_under = 28
+# Raise it whenever real coverage grows (22 at ~26% real → 28 at ~32% → 45 with real at ~53%
+# after the professionalization pass added tests for the deterministic core + new modules).
+fail_under = 45

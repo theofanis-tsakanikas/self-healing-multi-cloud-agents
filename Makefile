@@ -184,6 +184,24 @@ heal: ## Route + validate ANY failing CI log through the real Medic logic (offli
 	@$(if $(LOG),,$(error Error: LOG is undefined. Usage: make heal LOG=run.log))
 	$(PYTHON) -m evals.heal --log $(LOG)
 
+.PHONY: cost
+cost: ## Print the per-cloud monthly bootstrap-footprint estimate (deterministic list prices)
+	$(PYTHON) -m utils.cost_estimator
+
+.PHONY: security-gate
+security-gate: ## Security gate over the LIVE generated bundle (k8s/, Dockerfile, .github/workflows/pipe_*)
+	$(PYTHON) -m policy.security_analyzer .
+
+.PHONY: gate-proof
+gate-proof: ## Prove the security gate REFUSES the unsafe fixtures + PASSES the clean v1.0.0 goldens
+	$(PYTHON) -m pytest tests/test_security_gate.py -v
+
+.PHONY: opa
+opa: ## Cross-check the gate with the Rego second engine (needs conftest; no-op if absent)
+	@command -v conftest >/dev/null 2>&1 || { echo "conftest not installed — the Python gate is the enforced control (make gate-proof)"; exit 0; }
+	$(PYTHON) -c "import json; from policy.security_analyzer import analyze; json.dump(analyze('tests/goldens/v1.0.0')['context'], open('.gate_ctx.json','w'))"
+	conftest test .gate_ctx.json --policy policy/opa; rm -f .gate_ctx.json
+
 .PHONY: format
 format: ## Autofix lint findings with ruff (generated pipe_*.py excluded via pyproject)
 	@echo "Fixing lint findings..."
