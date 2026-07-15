@@ -9,4 +9,5 @@ jobs:
       AWS_SECRET_ACCESS_KEY: EXAMPLE_FIXTURE_LITERAL_NOT_A_REAL_SECRET
       AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
     steps:
+      - uses: actions/checkout@v4   # unpinned mutable tag — should be flagged
       - run: echo deploy

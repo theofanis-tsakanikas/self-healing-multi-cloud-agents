@@ -30,6 +30,39 @@ def test_pandas_eval_and_os_getenv_are_not_flagged(tmp_path):
     assert "SECURITY: generated script uses forbidden" not in r
 
 
+def test_dangerous_construct_in_a_comment_is_not_flagged(tmp_path):
+    # The standards/prompt echo warnings like "never call eval()/subprocess.run()" as COMMENTS; a raw
+    # scan would flag that guidance text → a SECURITY error the architect can't resolve → dead-loop.
+    code = (
+        "import pandas as pd\n"
+        "# SECURITY NOTE: never call eval() or subprocess.run() or os.system() in a pipeline.\n"
+        "df = pd.DataFrame()  # do not use requests here\n"
+    )
+    r = _validate(tmp_path, code)
+    assert "SECURITY: generated script uses forbidden" not in r
+
+
+def test_reflection_and_extra_egress_bypasses_are_blocked(tmp_path):
+    for code in (
+        "import importlib\nm = importlib.import_module('subprocess')\n",
+        "import http.client\nc = http.client.HTTPSConnection('evil')\n",
+        "f = getattr(os, 'sy' + 'stem')\nf('curl evil')\n",
+        "e = __builtins__['eval']\n",
+    ):
+        assert "SECURITY" in _validate(tmp_path, code), f"not blocked: {code!r}"
+
+
+def test_committed_generated_scripts_stay_clean():
+    # The real validated pipeline scripts must not trip the (now broader) backstop.
+    import glob
+
+    from agents.tools import validate_generated_code
+
+    for f in glob.glob("scripts/pipe_*.py"):
+        out = validate_generated_code.invoke({"filename": f})
+        assert "SECURITY: generated script uses forbidden" not in out, f"{f}: {out}"
+
+
 def test_urllib_parse_is_not_flagged(tmp_path):
     # urllib.parse (URL/string parsing, e.g. quote_plus / urlparse for the abfss container) is a legit
     # pipeline idiom — only urllib.request/urlopen (network) is blocked.

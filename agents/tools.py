@@ -228,13 +228,23 @@ def validate_generated_code(filename: str) -> str:
             (r"(?<![\w.])eval\s*\(", "eval()"),
             (r"(?<![\w.])exec\s*\(", "exec()"),
             (r"\b__import__\s*\(", "__import__()"),
+            (r"(?m)^\s*import\s+importlib\b|\bimportlib\.import_module\s*\(", "importlib"),
             (r"(?m)^\s*import\s+socket\b|\bsocket\.socket\s*\(", "socket"),
             # Block network clients — but NOT urllib.parse (URL/string parsing is a legit pipeline
             # idiom, e.g. quote_plus / urlparse for the abfss container). Only urllib.request/urlopen.
             (r"(?m)^\s*import\s+(?:requests|httpx)\b|\burllib\.request\b|\.urlopen\s*\(", "network client (requests/urllib.request/httpx)"),
+            (r"(?m)^\s*(?:import|from)\s+(?:http\.client|ftplib|smtplib|telnetlib)\b", "network client (http.client/ftplib/smtplib)"),
             (r"(?m)^\s*import\s+pickle\b|\bpickle\.loads\s*\(", "pickle"),
+            # Reflection indirection used to defeat the name-based checks above.
+            (r"\bgetattr\s*\(\s*(?:os|builtins|__builtins__)\b", "getattr indirection on os/builtins"),
+            (r"\b__builtins__\b", "__builtins__ access"),
         ]
-        _dangerous_hits = sorted({label for pat, label in _DANGEROUS_CONSTRUCTS if re.search(pat, py_content)})
+        # Scan CODE only, not comments: the standards/prompt echo warnings like "never call eval()/
+        # subprocess.run()" verbatim as comments, and a raw scan would flag that guidance text → a
+        # SECURITY error the architect can't resolve → dead-loop. (Same treatment as the rejected_rows
+        # check below.)
+        _py_code_only = "\n".join(_ln.split("#", 1)[0] for _ln in py_content.splitlines())
+        _dangerous_hits = sorted({label for pat, label in _DANGEROUS_CONSTRUCTS if re.search(pat, _py_code_only)})
         if _dangerous_hits:
             errors.append(
                 "SECURITY: generated script uses forbidden construct(s): "
@@ -247,15 +257,17 @@ def validate_generated_code(filename: str) -> str:
         # config) must ANONYMIZE PII before writing, or raw customer data ships to cloud storage while
         # the run reports success. Two concrete failure modes the standard itself warns about:
         if os.getenv("PII_SENSITIVE", "false").lower() == "true":
-            _has_hash = "hashlib" in py_content or re.search(r"\.sha256\s*\(", py_content)
-            _has_regex_mask = re.search(r"regex\s*=\s*True", py_content)
+            # Code only — a comment mentioning "hashlib"/"regex=True" must not falsely PASS the gate,
+            # and a "regex=False" in a comment must not falsely FAIL it.
+            _has_hash = "hashlib" in _py_code_only or re.search(r"\.sha256\s*\(", _py_code_only)
+            _has_regex_mask = re.search(r"regex\s*=\s*True", _py_code_only)
             if not (_has_hash or _has_regex_mask):
                 errors.append(
                     "PII: this is a pii_sensitive pipeline but the script shows NO anonymization — hash "
                     "identifiers via hashlib.sha256 and/or mask email/phone via .str.replace(..., regex=True) "
                     "BEFORE the write, or raw PII ships to storage."
                 )
-            if re.search(r"\.replace\s*\([^)]*regex\s*=\s*False", py_content):
+            if re.search(r"\.replace\s*\([^)]*regex\s*=\s*False", _py_code_only):
                 errors.append(
                     "PII: a masking .replace(...) uses regex=False — it SILENTLY no-ops (pandas 2.x "
                     "default), leaving the PII column exposed with no error. Use regex=True."
@@ -1841,10 +1853,25 @@ def _columns_read_not_in_schema(py_content: str, schema_cols: set) -> set:
     return _unknown
 
 
+_PII_COLUMN_HINTS = (
+    "email", "phone", "mobile", "ssn", "social", "dob", "birth", "name", "address", "zip",
+    "postal", "passport", "license", "credit", "card", "iban", "account", "tax",
+)
+
+
 def _mask_sample_rows(rows: list) -> list:
-    """Redact string cell values so no raw PII reaches the LLM / LangSmith. Column keys and non-string
-    values (numbers/dates/bools/null) are kept so the architect still sees the table's structure."""
-    return [{k: ("***REDACTED***" if isinstance(v, str) else v) for k, v in row.items()} for row in rows]
+    """Redact PII from sample cells before they reach the LLM / LangSmith. Masks EVERY string value
+    (where free-text PII lives) AND any column whose NAME looks like PII regardless of dtype — phone/
+    ssn stored as INTEGER or DOB as DATE would otherwise ship raw. Non-PII numerics (amount, quantity)
+    stay so the architect still sees the table's structure."""
+    def _mask(k: str, v):
+        if isinstance(v, str):
+            return "***REDACTED***"
+        if any(h in str(k).lower() for h in _PII_COLUMN_HINTS):
+            return "***REDACTED***"
+        return v
+
+    return [{k: _mask(k, v) for k, v in row.items()} for row in rows]
 
 
 def _redact_secrets(s: str) -> str:
@@ -1865,12 +1892,14 @@ def read_data_schema(table_name: str, db_type: str = "postgres"):
     """
 
     try:
-        # 0. Reject anything that is not a plain (optionally schema-qualified) SQL identifier.
-        # table_name is UNTRUSTED — in NL mode it comes from LLM extraction of the user's free text
-        # (PipelineIntent.source_table), and this tool is LLM-callable — so it must never be
-        # string-interpolated into SQL unchecked (the LIMIT-3 query below).
-        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$", table_name or ""):
-            return f"Error: invalid table name '{table_name}' — must be a plain SQL identifier."
+        # 0. Reject anything that is not a plain, single-token SQL identifier. table_name is UNTRUSTED
+        # (in NL mode it comes from LLM extraction of the user's free text, and this tool is LLM-callable)
+        # so it must never be string-interpolated into SQL unchecked (the LIMIT-3 query below). The
+        # schema-qualified `schema.table` form is rejected on purpose: get_columns() needs the schema as
+        # a separate kwarg and quoting `schema.table` as one identifier breaks the query — all pipeline
+        # sources use a bare table name.
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", table_name or ""):
+            return f"Error: invalid table name '{table_name}' — must be a bare SQL identifier (no schema-qualifier)."
 
         # 1. Build the connection URL dynamically based on db_type + cloud provider.
         # Cloud is read from CLOUD_PROVIDER env var (set by the pipeline) so this
@@ -2502,8 +2531,12 @@ def push_to_github(project_id: str, commit_message: str):
                     f"Error: SECURITY GATE FAILED — refusing to push {gate['high_count']} HIGH "
                     f"finding(s) in the generated bundle: {detail}"
                 )
-        except Exception as e:  # gate bug must not brick a deploy — fail open with a warning
-            logger.warning(f"Pre-push security gate could not run (failing open): {e}")
+        except Exception as e:
+            # FAIL CLOSED: extract_context already swallows per-file IO errors internally, so an
+            # exception here means the gate itself is broken (import/attribute/logic bug) — which is
+            # indistinguishable from a malformed bundle and must NOT silently ship an unvetted deploy.
+            logger.error(f"Pre-push security gate errored — blocking the push (fail closed): {e}")
+            return f"Error: SECURITY GATE FAILED — the gate could not run ({type(e).__name__}: {e}); refusing to push."
 
         # 1. Identity Config
         subprocess.run(["git", "config", "user.name", "github-actions[bot]"], cwd=REPO_ROOT, check=True)

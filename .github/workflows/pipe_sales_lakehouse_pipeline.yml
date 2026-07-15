@@ -17,11 +17,11 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION:    ${{ vars.AWS_DEFAULT_REGION }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3
         with:
           terraform_wrapper: false
-      - uses: databricks/setup-cli@v1.2.1
+      - uses: databricks/setup-cli@772863b94473abd8b0cacbec8b6f80fa0cbe1136  # v1.2.1
 
       - name: Upload Spark script to DBFS
         run: |

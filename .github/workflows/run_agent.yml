@@ -278,11 +278,17 @@ jobs:
       # ── STEP 3: Inject chaos data (optional) ────────────────────────────────
       - name: Inject chaos data
         if: inputs.inject_chaos == 'inject'
+        # Inputs go through env, never interpolated straight into the shell — a free-string input
+        # (chaos_rows) could otherwise inject shell commands into the run block.
+        env:
+          CHAOS_TARGET: ${{ inputs.chaos_target }}
+          CHAOS_DB_TYPE: ${{ inputs.chaos_db_type }}
+          CHAOS_ROWS: ${{ inputs.chaos_rows }}
         run: |
           uv run python scripts/seed_chaos.py \
-            --target "${{ inputs.chaos_target }}" \
-            --db-type "${{ inputs.chaos_db_type }}" \
-            --rows "${{ inputs.chaos_rows }}"
+            --target "$CHAOS_TARGET" \
+            --db-type "$CHAOS_DB_TYPE" \
+            --rows "$CHAOS_ROWS"
 
       # ── STEP 4: Run the agent ────────────────────────────────────────────────
       - name: Run agent

@@ -11,9 +11,12 @@ spec:
     spec:
       restartPolicy: Never
       serviceAccountName: some-sa
+      hostNetwork: true
       containers:
         - name: pipeline
           image: grafana/grafana:latest
+          securityContext:
+            privileged: true
           env:
             - name: DB_PASSWORD
               value: "EXAMPLE_FIXTURE_LITERAL_NOT_A_REAL_SECRET"

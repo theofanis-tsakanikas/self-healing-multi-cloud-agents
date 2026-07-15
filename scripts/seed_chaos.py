@@ -5,7 +5,7 @@ import logging
 import numpy as np
 import pandas as pd
 from faker import Faker
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -175,8 +175,16 @@ def seed_dataframe_to_source(df: pd.DataFrame, slug: str, cloud: str = "aws") ->
     db_type = "mysql" if cloud == "gcp" else "postgres"
     engine = build_engine(db_type, target)
     table_name = f"raw_{slug}"
-    with engine.connect():  # fail fast on a bad connection before to_sql
+    with engine.connect() as _c:  # fail fast on a bad connection before to_sql
         logger.info(f"Connection OK ({cloud}/{db_type}); writing sample to '{table_name}'…")
+        try:
+            _prev = _c.execute(text(f'SELECT COUNT(*) FROM "{table_name}"')).scalar()
+            logger.warning(
+                f"♻️  REPLACING '{table_name}': dropping {_prev} existing row(s) with the uploaded "
+                f"sample ({len(df)} rows). Destructive by design (source reset)."
+            )
+        except Exception:
+            logger.info(f"'{table_name}' has no prior rows / does not exist yet — creating it.")
     df.to_sql(name=table_name, con=engine, if_exists="replace", index=False)
     logger.info(f"✅ Seeded {len(df)} rows into source table '{table_name}' ({cloud})")
     return table_name
@@ -199,6 +207,18 @@ def seed_chaos(target_arg, db_type, n_rows):
                     logger.info(f"Connection successful to {db_type} for target={target}")
 
                 logger.info(f"🔥 Injecting {n_rows} chaotic rows into '{table_name}'...")
+
+                # Transparency: this is a REPLACE (a deliberate reset to a known dirty dataset), so it
+                # DROPS whatever '{table_name}' held. Never do it silently — log the pre-existing count.
+                try:
+                    with engine.connect() as _c:
+                        _prev = _c.execute(text(f'SELECT COUNT(*) FROM "{table_name}"')).scalar()
+                    logger.warning(
+                        f"♻️  REPLACING '{table_name}': dropping {_prev} existing row(s) and reseeding "
+                        f"{n_rows} chaos rows. This is destructive by design (chaos reset)."
+                    )
+                except Exception:
+                    logger.info(f"'{table_name}' has no prior rows / does not exist yet — creating it.")
 
                 df.to_sql(
                     name=table_name,

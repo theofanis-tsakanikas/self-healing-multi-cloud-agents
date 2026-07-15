@@ -15,6 +15,8 @@ When a deployment fails, the agent reads the real CI logs, diagnoses the error w
 
 Every cell below is a real pipeline that ran to completion on live cloud infrastructure — chaos-seeded dirty source data in, partitioned clean data + populated dashboards out.
 
+> **Note:** these runs are pinned to the `v1.0.0` tag. The post-hardening deploy path (the pre-push security gate, PII enforcement, and the fail-closed supervisor added since) has **not yet been re-validated end-to-end** on live infrastructure — see `docs/PROFESSIONALIZATION.md`.
+
 | Cloud | Pipeline | Source → Destination | Compute | Observability | Validated |
 |---|---|---|---|---|---|
 | 🟠 **AWS** | `eu_sales` | RDS PostgreSQL → S3 (Parquet) | EKS | Trino + Glue · Grafana/Prometheus | ✅ 2026-06-04 |
@@ -53,7 +55,7 @@ flowchart TD
 
 **Infra** — generates the per-cloud pipeline Terraform, then pushes all artifacts and triggers CI. The Kubernetes manifests, Dockerfile and deploy workflow are rendered deterministically from config (see "Where the LLM works" below).
 
-**Medic** — watches the CI run with exponential-backoff polling, then diagnoses failures from a **structured validation summary built in Python** — never by free-form log "interpretation". Its `request_fix` tool *rejects* any diagnosis that doesn't quote a real error marker from the logs, which makes hallucinated fixes structurally impossible. Fixes are surgical patches to the named file only; clean files are off-limits.
+**Medic** — watches the CI run with exponential-backoff polling, then diagnoses failures from a **structured validation summary built in Python** — never by free-form log "interpretation". Its `request_fix` tool *rejects* any diagnosis whose evidence quote is not present verbatim in a real tool/log output (a provenance check), so a hallucinated fix has nothing to route to and is dropped. Fixes are surgical patches to the named file only; clean files are off-limits.
 
 ### The self-healing loop
 

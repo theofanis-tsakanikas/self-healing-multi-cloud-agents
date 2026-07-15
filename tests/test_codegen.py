@@ -213,10 +213,9 @@ class TestWorkflows:
         golden = (GOLDEN / "workflows" / "pipe_sales_lakehouse_pipeline.yml").read_text()
         rendered = codegen.render_workflow(
             {"pipeline_id": "pipe_sales_lakehouse"}, "aws", "", is_databricks=True)
-        # Deliberate deltas (post-tag standards changes):
-        golden = golden.replace(
-            "databricks/setup-cli@main          # the unified `databricks` CLI",
-            "databricks/setup-cli@v1.2.1")
+        # Deliberate delta (post-tag standards change): narrower trigger paths + a permissions block.
+        # (The golden's actions are now SHA-pinned in-file to match the render — round-3 supply-chain
+        # hardening; the generated deploy workflow carries all cloud credentials.)
         golden = golden.replace(
             "paths: ['scripts/**', 'sql/**', 'terraform/**']",
             "paths: ['scripts/pipe_*.py', 'sql/**', 'terraform/**']\n\npermissions:\n  contents: read")
