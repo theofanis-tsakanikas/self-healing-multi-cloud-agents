@@ -1,19 +1,3 @@
-output "bucket_name" {
-  value = google_storage_bucket.data.name
-}
-
-output "bucket_url" {
-  value = google_storage_bucket.data.url
-}
-
-output "service_account_email" {
-  value = data.google_service_account.pipeline.email
-}
-
-output "service_account_id" {
-  value = data.google_service_account.pipeline.id
-}
-
-output "project_id" {
-  value = var.project_id
-}
+output "job_id"       { value = databricks_job.pipeline.id }
+output "job_url"      { value = databricks_job.pipeline.url }
+output "dashboard_id" { value = databricks_dashboard.observability.id }

@@ -1,5 +1,2 @@
-project_id = "multi-cloud-self-healing-agent"
-region = "europe-west3"
-bucket_name = "global-marketing-insights-data"
-service_account_id = "global-mkt-insights-sa"
-k8s_service_account_name = "global-mkt-insights-sa"
+catalog = "multi_cloud_agent_workspace"
+schema = "raw"

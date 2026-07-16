@@ -1,0 +1,64 @@
+name: Deploy Pipeline
+on:
+  push:
+    paths: ['scripts/pipe_*.py', 'sql/**', 'terraform/**']
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST:          ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID:     ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION:    ${{ vars.AWS_DEFAULT_REGION }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3
+        with:
+          terraform_wrapper: false
+      - uses: databricks/setup-cli@772863b94473abd8b0cacbec8b6f80fa0cbe1136  # v1.2.1
+
+      - name: Upload Spark script to DBFS
+        run: |
+          databricks fs mkdirs "dbfs:/pipelines/pipe_sales_lakehouse" || true
+          databricks fs cp scripts/pipe_sales_lakehouse.py "dbfs:/pipelines/pipe_sales_lakehouse/pipe_sales_lakehouse.py" --overwrite
+
+      - name: Trigger job run and wait
+        working-directory: terraform
+        run: |
+          terraform init -input=false
+          JOB_ID=$(terraform output -raw job_id)
+          # --no-wait: return the run_id IMMEDIATELY so the poll loop can track it. Without it
+          # the CLI blocks until the run is terminal and, on failure, exits non-zero with an
+          # EMPTY stdout → RUN_ID="" → the loop dies with "invalid RUN_ID" and the real error
+          # never surfaces.
+          RUN_ID=$(databricks jobs run-now "$JOB_ID" --no-wait -o json | jq -r '.run_id')
+          echo "Triggered run $RUN_ID for job $JOB_ID"
+          for i in $(seq 1 80); do
+            RUN=$(databricks jobs get-run "$RUN_ID" -o json)
+            STATE=$(echo "$RUN" | jq -r '.state.life_cycle_state')
+            RESULT=$(echo "$RUN" | jq -r '.state.result_state // empty')
+            echo "run $RUN_ID: $STATE $RESULT ($i/80)"
+            if [ "$STATE" = "TERMINATED" ] || [ "$STATE" = "INTERNAL_ERROR" ]; then
+              [ "$RESULT" = "SUCCESS" ] && { echo "Job succeeded"; exit 0; }
+              # The job-level state is only the generic "Workload failed, see run output for
+              # details" — the ROOT CAUSE (the Spark task's exception + traceback) lives in the
+              # TASK run output. Print it so the Medic's CI-log fetch sees the real error and can
+              # diagnose/route it (e.g. "Secret does not exist …" → infra) instead of guessing.
+              echo "Job failed: $STATE $RESULT"
+              TASK_RUN_ID=$(echo "$RUN" | jq -r '.tasks[0].run_id // empty')
+              if [ -n "$TASK_RUN_ID" ]; then
+                databricks jobs get-run-output "$TASK_RUN_ID" -o json | jq -r '.error // empty, .error_trace // empty'
+              fi
+              exit 1
+            fi
+            sleep 15
+          done
+          echo "Timeout waiting for run"; exit 1
+
+      - run: echo "Deployment Complete"
