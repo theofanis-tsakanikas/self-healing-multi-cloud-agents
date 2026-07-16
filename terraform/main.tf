@@ -8,7 +8,7 @@ data "aws_ssm_parameter" "db_user"     { name = "/multi-cloud-self-healing-agent
 data "aws_ssm_parameter" "db_password" { name = "/multi-cloud-self-healing-agent/aws/lakehouse_db_password" }
 
 resource "databricks_secret" "db_password" {
-  key          = "db_password"
+  key          = "postgres_password"
   string_value = data.aws_ssm_parameter.db_password.value
   scope        = databricks_secret_scope.pipeline.name
 }
