@@ -52,3 +52,10 @@ PRE-PUBLISH.md
 *.p12
 *.pfx
 *.tfvars
+
+# SSH / private keys
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*.ppk
