@@ -59,3 +59,13 @@ id_rsa.*
 id_ed25519
 id_ed25519.*
 *.ppk
+
+# Agent OUTPUTS — regenerated on every run, preserved at the v1.0.0 tag
+/Dockerfile
+/requirements.txt
+/scripts/pipe_*.py
+/k8s/
+/sql/
+/dashboards/
+/terraform/
+/.github/workflows/*_pipeline.yml

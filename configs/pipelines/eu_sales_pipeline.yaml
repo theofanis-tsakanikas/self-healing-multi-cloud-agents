@@ -1,5 +1,5 @@
 aws_setup:
-  aws_account_id: "387229419515"
+  aws_account_id: "000000000000"
   bucket_name: eu-sales-insights-data
   ecr_repository_name: eu-sales-pipeline-repo
   eks_cluster_name: multi-cloud-agent-cluster
