@@ -22,6 +22,24 @@ When a deployment fails, the agent reads the real CI logs, diagnoses the error w
 
 ---
 
+## Contents
+
+- [It fixes itself — here is the proof](#it-fixes-itself--here-is-the-proof)
+  - [It heals at runtime too](#it-heals-at-runtime-too--not-just-at-generation-time) · […and when it can't, it stops](#and-when-it-cant-fix-it-it-stops)
+- [Validated end-to-end — on all four clouds](#validated-end-to-end--on-all-four-clouds)
+- [How it works](#how-it-works)
+  - [The self-healing loop](#the-self-healing-loop) · [Where the LLM works — and where it must not](#where-the-llm-works--and-where-it-must-not) · [Standards-first generation (RAG)](#standards-first-generation-rag)
+- [Cloud-agnostic by construction](#cloud-agnostic-by-construction)
+- [Observability](#observability--provisioned-by-the-agent-not-by-hand)
+- [Natural-language authoring](#natural-language-authoring)
+- [From config to running infrastructure](#from-config-to-running-infrastructure)
+- [Repository map — source vs. generated](#repository-map--source-vs-generated)
+- [Quickstart](#quickstart) · [Testing](#testing)
+- [Engineering decisions a reviewer should notice](#engineering-decisions-a-reviewer-should-notice)
+- [Documentation](#documentation) · [License](#license)
+
+---
+
 ## It fixes itself — here is the proof
 
 A generated pipeline script failed validation. Nobody touched it. The Medic diagnosed it, routed it to the Architect, patched the exact line, and re-validated — in **22 seconds**.
@@ -80,12 +98,14 @@ The heal is **bounded** (3 identical errors, or 8 total rounds) and **fail-close
 
 Every row is a real pipeline that ran to completion on live cloud infrastructure — chaos-seeded dirty source data in, partitioned clean data + populated dashboards out — then torn down to zero cost.
 
-| Cloud | Pipeline | Source → Destination | Compute | Observability | Deploy | Self-heal |
-|---|---|---|---|---|---|---|
-| 🟠 **AWS** | `eu_sales` | RDS PostgreSQL → S3 (Parquet) | EKS | Trino + Glue · Grafana | ✅ | ✅ architect + infra |
-| 🔵 **Azure** | `us_crm` | Azure PostgreSQL → ADLS Gen2 | AKS | Trino · Grafana | ✅ | ✅ infra |
-| 🟢 **GCP** | `global_marketing` | Cloud SQL MySQL → GCS | GKE | Trino · Grafana | ✅ | ✅ architect + infra |
-| ⚡ **Databricks** | `sales_lakehouse` | RDS PostgreSQL → Delta Lake | Spark (jobs cluster) | Unity Catalog · Lakeview | ✅ | ✅ **job-runtime** |
+| Cloud | Pipeline | Source → Destination | Compute | Observability | Validated |
+|---|---|---|---|---|---|
+| 🟠 **AWS** | `eu_sales` | RDS PostgreSQL → S3 (Parquet) | EKS | Trino + Glue · Grafana | ✅ deploy + self-heal |
+| 🔵 **Azure** | `us_crm` | Azure PostgreSQL → ADLS Gen2 | AKS | Trino · Grafana | ✅ deploy + self-heal |
+| 🟢 **GCP** | `global_marketing` | Cloud SQL MySQL → GCS | GKE | Trino · Grafana | ✅ deploy + self-heal |
+| ⚡ **Databricks** | `sales_lakehouse` | RDS PostgreSQL → Delta Lake | Spark (jobs cluster) | Unity Catalog · Lakeview | ✅ deploy + self-heal |
+
+> The self-healing loop is **one code path shared by every cloud** — the same router, the same evidence gate, the same patch mechanism. Which *kind* of failure each run happened to hit (a bad script, a bad Terraform value, a failing Spark job) differs only because a different defect was injected; it is not a per-cloud capability.
 
 The three object-storage clouds share one cloud-agnostic execution model (pandas → Parquet → Trino → Grafana on Kubernetes). Databricks is a deliberately distinct fourth model (Spark → Delta → Unity Catalog → Lakeview) selected by the same `provider:` switch — proving the architecture generalizes across genuinely different platforms, not just across vendor APIs.
 
@@ -244,10 +264,15 @@ Databricks ships the native equivalent — a **Lakeview** dashboard over a per-r
 
 <table>
 <tr>
-<td width="50%"><img src="images/databricks-lakeview-dashboard.png" alt="Databricks Lakeview dashboard"><br><sub>Lakeview dashboard — same metrics, native to the lakehouse</sub></td>
-<td width="50%"><img src="images/databricks-unity-catalog-table.png" alt="Unity Catalog Delta table"><br><sub>The Delta table in Unity Catalog — cleaned, typed, partitioned</sub></td>
+<td width="50%"><img src="images/databricks-lakeview-dashboard.png" alt="Lakeview dashboard — counters"><br><sub><b>Top</b> — rows processed, rejected, run duration, last run</sub></td>
+<td width="50%"><img src="images/dbx_dashboard.png" alt="Lakeview dashboard — rejections by reason"><br><sub><b>Bottom</b> — rejections by reason and rows over time</sub></td>
 </tr>
 </table>
+
+<p align="center">
+  <img src="images/databricks-unity-catalog-table.png" alt="Unity Catalog Delta table" width="90%"><br>
+  <sub>The Delta table in Unity Catalog — cleaned, typed, partitioned by <code>run_date</code>.</sub>
+</p>
 
 ---
 
@@ -263,6 +288,15 @@ Describe a pipeline in plain English → the system extracts a typed intent, fil
 <tr>
 <td width="50%"><img src="images/streamlit-business-rules.png" alt="Business rules"><br><sub><b>3 · Rules</b> — plain-language quality rules → real pandas conditions</sub></td>
 <td width="50%"><img src="images/streamlit-cost-comparison-full-tight.png" alt="Cost comparison"><br><sub><b>4 · Price it</b> — itemized monthly cost, all four platforms</sub></td>
+</tr>
+</table>
+
+Rules can come from a file, be suggested for your domain — or you can **build them yourself**, column by column, with the action and the generated condition shown as you go:
+
+<table>
+<tr>
+<td width="50%"><img src="images/build_my_rules.png" alt="Build your own rule"><br><sub>Pick the columns, the check and the failure action</sub></td>
+<td width="50%"><img src="images/build_my_rules1.png" alt="Rule added to the set"><br><sub>The rule joins the set — editable, removable, ready to generate</sub></td>
 </tr>
 </table>
 
@@ -337,10 +371,12 @@ make run p=sales_lakehouse    # Databricks
 
 Everything is also operable from GitHub Actions (`run_agent.yml` — `workflow_dispatch` with bootstrap / chaos / KB-sync / pipeline inputs), and every cloud tears down with one button (`destroy.yml`, typed confirmation).
 
-<p align="center">
-  <img src="images/github-run-workflow-trigger.png" alt="Run workflow" width="70%"><br>
-  <sub>One dispatch: pick the pipeline, optionally re-sync the knowledge base and seed chaos data.</sub>
-</p>
+<table>
+<tr>
+<td width="50%"><img src="images/github-run-workflow-trigger.png" alt="Pick the pipeline"><br><sub><b>Pick the pipeline</b> — <code>eu_sales</code>, <code>us_crm</code>, <code>global_marketing</code> or <code>sales_lakehouse</code></sub></td>
+<td width="50%"><img src="images/gh_kb_sync.png" alt="Sync knowledge base and seed chaos"><br><sub><b>Same dispatch</b> — re-sync the standards to Pinecone and seed dirty rows to prove the healing</sub></td>
+</tr>
+</table>
 
 ### Natural-language authoring (demo UI)
 
