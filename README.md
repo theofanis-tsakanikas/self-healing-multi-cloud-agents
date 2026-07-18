@@ -1,30 +1,105 @@
-# Multi-Cloud Self-Healing Data Engineer Agent
+<p align="center">
+  <img src="images/banner.png" alt="Multi-Agent · Multi-Cloud · Self-Healing" width="100%">
+</p>
 
-[![Tests](https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/actions/workflows/tests.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Python](https://img.shields.io/badge/python-3.12%2B-blue)
-![Clouds](https://img.shields.io/badge/clouds-AWS%20%C2%B7%20Azure%20%C2%B7%20GCP%20%C2%B7%20Databricks-success)
+<h1 align="center">Multi-Cloud Self-Healing Data Engineer Agent</h1>
+
+<p align="center">
+  <a href="https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/actions/workflows/tests.yml"><img src="https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python">
+  <img src="https://img.shields.io/badge/clouds-AWS%20%C2%B7%20Azure%20%C2%B7%20GCP%20%C2%B7%20Databricks-success" alt="Clouds">
+  <img src="https://img.shields.io/badge/model-gpt--4o--mini-lightgrey" alt="Model">
+</p>
+
+<p align="center"><b>Build. Deploy. Self-heal.</b></p>
 
 An AI orchestration system that **designs, deploys, and repairs production data pipelines end-to-end** — Python ETL, SQL DDL, Terraform, Kubernetes, CI/CD, and observability dashboards — on **AWS, Azure, GCP, and Databricks**, from a single YAML config or a plain-English description.
 
-When a deployment fails, the agent reads the real CI logs, diagnoses the error with quoted evidence, patches the exact file, and redeploys — **without a human in the loop**.
+When a deployment fails, the agent reads the real CI logs, diagnoses the error with quoted evidence, patches the exact file, and redeploys — **without a human in the loop**. And when it *can't* fix something, it stops, fails closed, and hands you the exact diagnosis.
+
+> Runs on **gpt-4o-mini**. The reliability lives in the architecture — deterministic routing, evidence gates, golden-tested code generation — not in model size.
 
 ---
 
-## Validated end-to-end
+## It fixes itself — here is the proof
 
-Every cell below is a real pipeline that ran to completion on live cloud infrastructure — chaos-seeded dirty source data in, partitioned clean data + populated dashboards out.
+A generated pipeline script failed validation. Nobody touched it. The Medic diagnosed it, routed it to the Architect, patched the exact line, and re-validated — in **22 seconds**.
 
-> **Note:** these runs are pinned to the `v1.0.0` tag. The post-hardening deploy path (the pre-push security gate, PII enforcement, and the fail-closed supervisor added since) has **not yet been re-validated end-to-end** on live infrastructure — see `docs/PROFESSIONALIZATION.md`.
+<table>
+<tr>
+<td width="50%"><img src="images/gcp-architect-validation-failed.png" alt="Validation failed, routing to Medic"><br><sub><b>1 · Break</b> — <code>AUTO-VALIDATION FAILED</code> → <i>“Architect explicit error flag set. Routing to MEDIC.”</i></sub></td>
+<td width="50%"><img src="images/gcp-architect-heal-passed.png" alt="Validation passed after patch"><br><sub><b>2 · Heal</b> — <i>“Medic requested Logic fix”</i> → Fix mode → <code>AUTO-VALIDATION PASSED after patch</code> → routing to INFRA</sub></td>
+</tr>
+</table>
 
-| Cloud | Pipeline | Source → Destination | Compute | Observability | Validated |
-|---|---|---|---|---|---|
-| 🟠 **AWS** | `eu_sales` | RDS PostgreSQL → S3 (Parquet) | EKS | Trino + Glue · Grafana/Prometheus | ✅ 2026-06-04 |
-| 🔵 **Azure** | `us_crm` | Azure PostgreSQL → ADLS Gen2 | AKS | Trino · Grafana/Prometheus | ✅ 2026-06-04 |
-| 🟢 **GCP** | `global_marketing` | Cloud SQL MySQL → GCS | GKE | Trino · Grafana/Prometheus | ✅ 2026-06-06 |
-| ⚡ **Databricks** | `sales_lakehouse` | RDS PostgreSQL → Delta Lake | Spark (jobs cluster) | Unity Catalog · Lakeview dashboard | ✅ 2026-06-08 |
+The diagnosis is not a guess. Here is the same heal inside LangSmith — the error, the Medic's fix request, the **exact one-line patch**, and the re-validation:
+
+<table>
+<tr>
+<td width="50%"><img src="images/langsmith-validation-failed-diagnosis.png" alt="Validation error detail"><br><sub><b>The error</b> — <code>.astype(float)</code> crashes on the first dirty value; use <code>pd.to_numeric(..., errors='coerce')</code></sub></td>
+<td width="50%"><img src="images/langsmith-medic-request-fix.png" alt="Medic request_fix"><br><sub><b>The diagnosis</b> — <code>request_fix</code> with a verbatim evidence quote, a suggested fix, and <code>target_agent: architect</code></sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="images/langsmith-patch-applied.png" alt="Patch applied"><br><sub><b>The patch</b> — surgical <code>old</code> → <code>new</code> replacement. <code>PATCH APPLIED … replaced (1x)</code></sub></td>
+<td width="50%"><img src="images/langsmith-revalidation-clean.png" alt="Re-validation clean"><br><sub><b>The proof</b> — <code>CLEAN: … passed all validation checks</code></sub></td>
+</tr>
+</table>
+
+### It heals at runtime too — not just at generation time
+
+On Databricks the Spark job fails **while running on the cluster**. The Medic reads the job's own output from CI, routes it to Infra (the script was correct — the Terraform was wrong), patches the secret key, re-applies, and re-runs the job.
+
+<table>
+<tr>
+<td width="50%"><img src="images/databricks-job-secret-error.png" alt="Databricks job failed at runtime"><br><sub><b>Runtime failure</b> — <code>Secret does not exist with scope: … key: db_password</code></sub></td>
+<td width="50%"><img src="images/langsmith-dbx-patch-secret-key.png" alt="Terraform secret key patched"><br><sub><b>Infra heal</b> — <code>key = "postgres_password"</code> → <code>key = "db_password"</code>, then <code>execute_terraform</code> + push</sub></td>
+</tr>
+</table>
+
+<p align="center">
+  <img src="images/databricks-job-succeeded.png" alt="Databricks job succeeded after heal" width="85%"><br>
+  <sub>The re-run after the heal — <b>Succeeded</b>.</sub>
+</p>
+
+### …and when it can't fix it, it stops
+
+Every AI-agent demo ends green. This one is allowed to end **red** — because a system that pretends to succeed is worse than one that admits it failed.
+
+```
+Fix loop not converging: the same error survived 3 attempts.
+❌ MISSION FAILED: mission_status='escalated' — self-healing was abandoned.
+   See the Medic's last message for the exact diagnosis.
+```
+
+The heal is **bounded** (3 identical errors, or 8 total rounds) and **fail-closed**: `mission_status = "verified"` is the only success. Anything else exits non-zero, turns CI red, and surfaces the diagnosis to a human.
+
+---
+
+## Validated end-to-end — on all four clouds
+
+Every row is a real pipeline that ran to completion on live cloud infrastructure — chaos-seeded dirty source data in, partitioned clean data + populated dashboards out — then torn down to zero cost.
+
+| Cloud | Pipeline | Source → Destination | Compute | Observability | Deploy | Self-heal |
+|---|---|---|---|---|---|---|
+| 🟠 **AWS** | `eu_sales` | RDS PostgreSQL → S3 (Parquet) | EKS | Trino + Glue · Grafana | ✅ | ✅ architect + infra |
+| 🔵 **Azure** | `us_crm` | Azure PostgreSQL → ADLS Gen2 | AKS | Trino · Grafana | ✅ | ✅ infra |
+| 🟢 **GCP** | `global_marketing` | Cloud SQL MySQL → GCS | GKE | Trino · Grafana | ✅ | ✅ architect + infra |
+| ⚡ **Databricks** | `sales_lakehouse` | RDS PostgreSQL → Delta Lake | Spark (jobs cluster) | Unity Catalog · Lakeview | ✅ | ✅ **job-runtime** |
 
 The three object-storage clouds share one cloud-agnostic execution model (pandas → Parquet → Trino → Grafana on Kubernetes). Databricks is a deliberately distinct fourth model (Spark → Delta → Unity Catalog → Lakeview) selected by the same `provider:` switch — proving the architecture generalizes across genuinely different platforms, not just across vendor APIs.
+
+**One code path, three cloud APIs.** The same deterministic routing fix healed an invalid Terraform value on all three object-storage clouds — three different providers, three different error formats, zero cloud-specific code:
+
+| AWS | Azure | GCP |
+|---|---|---|
+| `expected …status to be one of [Enabled Disabled Suspended]` | `expected account_tier to be one of ["Premium" "Standard"]` | `googleapi: Error 400: Invalid storage class "STD"` |
+| `On` → `Enabled` | `Std` → `Standard` | `STD` → `STANDARD` |
+
+<p align="center">
+  <img src="images/aws_run_9m17s_cropped.png" alt="MISSION VERIFIED" width="90%"><br>
+  <sub><code>✅ MISSION VERIFIED — deployment completed and validated end-to-end</code>, with the full agent routing trace above it.</sub>
+</p>
 
 ---
 
@@ -49,28 +124,165 @@ flowchart TD
     GH -- "CI logs" --> M
 ```
 
+Hub-and-spoke: the Supervisor routes to Architect / Infra / Medic and each returns to it. The Supervisor is the **mission-outcome node** — it turns green only when the deployment is verified end-to-end.
+
+<table>
+<tr>
+<td width="50%"><img src="images/streamlit-agent-graph-tight.png" alt="Agent graph mid-run"><br><sub><b>Mid-run</b> — Architect ✓, Medic ✓, Infra active</sub></td>
+<td width="50%"><img src="images/streamlit-agent-graph-final.png" alt="Agent graph all complete"><br><sub><b>Mission complete</b> — every node green, 21 supervisor turns</sub></td>
+</tr>
+</table>
+
 **Supervisor** — a deterministic router (the LLM emits exactly one word). Routing invariants live in Python, not in prompt prose.
 
-**Architect** — generates the two judgment artifacts: the pipeline implementation (chunked ETL with real pandas business-rule logic — no stub `is_suspicious = False` — idempotency checks, typed casts, per-rule rejection metrics) and the Trino/Unity Catalog DDL with schema-derived columns. Works phase-gated: Discovery → Schema → Implementation, one tool per phase.
+**Architect** — generates the two judgment artifacts: the pipeline implementation (chunked ETL with real pandas business-rule logic — no stub `is_suspicious = False` — idempotency checks, typed casts, per-rule rejection metrics) and the Trino/Unity Catalog DDL with schema-derived columns. Phase-gated: Discovery → Schema → Implementation, one tool per phase.
 
-**Infra** — generates the per-cloud pipeline Terraform, then pushes all artifacts and triggers CI. The Kubernetes manifests, Dockerfile and deploy workflow are rendered deterministically from config (see "Where the LLM works" below).
+**Infra** — generates the per-cloud pipeline Terraform, then pushes all artifacts and triggers CI. The Kubernetes manifests, Dockerfile and deploy workflow are rendered deterministically from config.
 
-**Medic** — watches the CI run with exponential-backoff polling, then diagnoses failures from a **structured validation summary built in Python** — never by free-form log "interpretation". Its `request_fix` tool *rejects* any diagnosis whose evidence quote is not present verbatim in a real tool/log output (a provenance check), so a hallucinated fix has nothing to route to and is dropped. Fixes are surgical patches to the named file only; clean files are off-limits.
+**Medic** — watches the CI run with exponential-backoff polling, then diagnoses failures from a **structured validation summary built in Python** — never by free-form log "interpretation". Its `request_fix` tool *rejects* any diagnosis whose evidence quote is not present verbatim in a real tool/log output (a provenance check), so a hallucinated fix has nothing to route to. Fixes are surgical patches to the named file only; clean files are off-limits.
 
 ### The self-healing loop
 
-1. Chaos-seeded source data or a generated-code defect breaks the CI deploy.
-2. Medic fetches the actual GitHub Actions logs and quotes the failing lines as evidence.
-3. `request_fix` routes a one-shot `healing_context` to the owning agent (Architect for code, Infra for infra).
-4. The agent applies a minimal patch (`patch_project_file` — never a full rewrite), auto-validates, and re-pushes.
-5. Medic re-polls. Loop until green or escalation to the user.
+```mermaid
+sequenceDiagram
+    participant CI as GitHub Actions
+    participant M as 🩺 Medic
+    participant S as 🧭 Supervisor
+    participant O as Owning agent<br/>(Architect / Infra)
 
-### Engineering decisions a reviewer should notice
+    CI-->>M: failing logs (poll w/ backoff)
+    M->>M: parse to structured summary (Python)
+    M->>M: evidence gate — quote must exist verbatim
+    alt evidence is real
+        M->>S: request_fix(file, evidence, owner)
+        S->>O: one-shot healing_context
+        O->>O: patch_project_file (surgical) + auto-validate
+        O->>CI: re-push → redeploy
+        CI-->>M: re-poll
+        M-->>S: mission_status = "verified" ✅
+    else no convergence (3 same / 8 total)
+        M-->>S: mission_status = "escalated" ❌
+        S-->>CI: exit 1 — red, with the diagnosis
+    end
+```
 
-- **Standards-first generation.** Agents don't improvise conventions — they retrieve versioned engineering standards (`knowledge_base/*.md`, served via Pinecone RAG) covering Terraform, K8s, Spark/Delta, CI/CD, SQL, and dashboards. When output is wrong, the *standard* gets fixed, never the generated file.
-- **Where the LLM works vs. where code works — measured, not assumed.** Every artifact was scored by input variability: where the input is open (an arbitrary source schema, business rules in natural language, unpredictable CI failure logs), the LLM does the work — the pipeline script, the SQL DDL, the Terraform, and all diagnosis. Where the structure is fixed (`requirements.txt`, the Grafana/Lakeview dashboards, the Dockerfile, all six K8s manifests, the deploy workflow), deterministic code renders it from config (`agents/codegen.py`), golden-tested against the validated v1.0.0 artifacts. The LLM was *removed* from everything it used to merely copy — an agent that knows where NOT to use the LLM is the difference between an AI system and an expensive template engine. Orchestration is deterministic too: tool sequencing (`tool_choice="required"`, pre-computed args), validation gates, guaranteed injections. No "prompt harder and hope".
-- **Validation as a safety net, not a crutch.** `validate_generated_code` enforces policy (credential access only via the sanctioned resolver, no hardcoded regions, no template literals inside K8s manifests) before anything reaches CI.
-- **Cloud-agnostic by construction.** No default cloud anywhere — the provider is always read from config, and generated scripts keep the full three-cloud skeleton with only the active branch executing.
+### Where the LLM works — and where it must not
+
+Every artifact was scored by **input variability**. Where the input is open, the LLM works. Where there is exactly one correct answer, deterministic code renders it from config and a golden test pins it.
+
+```mermaid
+flowchart LR
+    subgraph LLM["🧠 LLM-owned — judgment under variability"]
+        L1["Pipeline script<br/>pandas / PySpark"]
+        L2["SQL DDL<br/>Trino / Unity Catalog"]
+        L3["Pipeline Terraform"]
+        L4["Diagnosis"]
+    end
+    subgraph CODE["⚙️ Code-owned — agents/codegen.py, golden-tested"]
+        C1["requirements.txt"]
+        C2["Dockerfile"]
+        C3["6× K8s manifests"]
+        C4["Deploy workflow ×4 clouds"]
+        C5["Dashboards"]
+    end
+    V["validate_generated_code<br/>policy safety net"] --> LLM
+    V --> CODE
+```
+
+The LLM was *removed* from everything it used to merely copy. An agent that knows where **not** to use the LLM is the difference between an AI system and an expensive template engine.
+
+### Standards-first generation (RAG)
+
+Agents don't improvise conventions — they retrieve versioned engineering standards covering Terraform, K8s, Spark/Delta, CI/CD, SQL, and dashboards. When output is wrong, the **standard** gets fixed, never the generated file.
+
+<table>
+<tr>
+<td width="50%"><img src="images/pinecone-knowledge-base.png" alt="Pinecone knowledge base"><br><sub>The standards corpus in Pinecone — one vector per standard</sub></td>
+<td width="50%"><img src="images/langsmith-rag-retrieval.png" alt="RAG retrieval"><br><sub>Infra retrieving the GCP Terraform standard at generation time</sub></td>
+</tr>
+</table>
+
+---
+
+## Cloud-agnostic by construction
+
+The same agent, the same config shape, three different infrastructure APIs — generated per cloud, never hardcoded:
+
+<table>
+<tr>
+<td width="33%"><img src="images/langsmith-infra-terraform.png" alt="AWS Terraform"><br><sub>🟠 <b>AWS</b> — S3 + public-access block + KMS + lifecycle</sub></td>
+<td width="33%"><img src="images/langsmith-azure-terraform.png" alt="Azure Terraform"><br><sub>🔵 <b>Azure</b> — ADLS Gen2 container + managed-identity role</sub></td>
+<td width="33%"><img src="images/langsmith-gcp-terraform.png" alt="GCP Terraform"><br><sub>🟢 <b>GCP</b> — GCS bucket + IAM member + Workload Identity</sub></td>
+</tr>
+</table>
+
+**Real data landed, on every cloud** — partitioned by `run_date`, written by the generated pipeline:
+
+<table>
+<tr>
+<td width="33%"><img src="images/aws-s3-output-parquet.png" alt="AWS S3 output"><br><sub>🟠 S3 — <code>run_date=…/part_0.parquet</code></sub></td>
+<td width="33%"><img src="images/azure-storage-output-parquet.png" alt="Azure ADLS output"><br><sub>🔵 ADLS Gen2 — same layout</sub></td>
+<td width="33%"><img src="images/gcp-storage-output-parquet.png" alt="GCS output"><br><sub>🟢 GCS — same layout</sub></td>
+</tr>
+</table>
+
+---
+
+## Observability — provisioned by the agent, not by hand
+
+Each object-storage pipeline ships with a Grafana dashboard (record count, rejection rate, run duration, per-rule rejection breakdown) fed by Prometheus Pushgateway gauges:
+
+<table>
+<tr>
+<td width="33%"><img src="images/grafana-eu-sales-dashboard.png" alt="AWS Grafana"><br><sub>🟠 <b>AWS</b> — 66 records · 34% rejected · 394 ms</sub></td>
+<td width="33%"><img src="images/grafana-crm-dashboard.png" alt="Azure Grafana"><br><sub>🔵 <b>Azure</b> — 80 records · 20% rejected · 317 ms</sub></td>
+<td width="33%"><img src="images/grafana-marketing-dashboard.png" alt="GCP Grafana"><br><sub>🟢 <b>GCP</b> — 76 records · 24% rejected · 1.06 s</sub></td>
+</tr>
+</table>
+
+Databricks ships the native equivalent — a **Lakeview** dashboard over a per-run `_audit` Delta table in Unity Catalog:
+
+<table>
+<tr>
+<td width="50%"><img src="images/databricks-lakeview-dashboard.png" alt="Databricks Lakeview dashboard"><br><sub>Lakeview dashboard — same metrics, native to the lakehouse</sub></td>
+<td width="50%"><img src="images/databricks-unity-catalog-table.png" alt="Unity Catalog Delta table"><br><sub>The Delta table in Unity Catalog — cleaned, typed, partitioned</sub></td>
+</tr>
+</table>
+
+---
+
+## Natural-language authoring
+
+Describe a pipeline in plain English → the system extracts a typed intent, fills the gaps, proposes business rules, **prices the build on all four platforms**, and deploys on confirmation.
+
+<table>
+<tr>
+<td width="50%"><img src="images/streamlit-nl-describe.png" alt="Describe in plain English"><br><sub><b>1 · Describe</b> — free text in</sub></td>
+<td width="50%"><img src="images/streamlit-fields-review.png" alt="Review extracted fields"><br><sub><b>2 · Fields</b> — extracted, typed, editable</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="images/streamlit-business-rules.png" alt="Business rules"><br><sub><b>3 · Rules</b> — plain-language quality rules → real pandas conditions</sub></td>
+<td width="50%"><img src="images/streamlit-cost-comparison-full-tight.png" alt="Cost comparison"><br><sub><b>4 · Price it</b> — itemized monthly cost, all four platforms</sub></td>
+</tr>
+</table>
+
+Nothing deploys before you see exactly what will be created:
+
+<p align="center">
+  <img src="images/streamlit-execution-plan.png" alt="Execution plan" width="90%"><br>
+  <sub><b>5 · Execution plan</b> — pipeline code, catalog, dashboards, Kubernetes, Terraform, CI/CD — then <i>Confirm &amp; Deploy</i>.</sub>
+</p>
+
+---
+
+## From config to running infrastructure
+
+<table>
+<tr>
+<td width="50%"><img src="images/architect-codegen-validation.png" alt="Architect writes and validates"><br><sub><b>Architect</b> — schema discovery → codegen → <code>AUTO-VALIDATION PASSED</code> → hand off to Infra</sub></td>
+<td width="50%"><img src="images/kubernetes-deploy-complete.png" alt="Kubernetes deployment complete"><br><sub><b>Deploy</b> — Trino, Grafana, Prometheus + the pipeline Job, all <code>Running</code></sub></td>
+</tr>
+</table>
 
 ---
 
@@ -85,10 +297,11 @@ A defining property of this repo: **part of it is the agent, part of it is the a
 | `configs/` | Pipeline definitions: objective, source DB, business rules, target infra |
 | `bootstrap/` | One-time per-cloud baseline Terraform (EKS/AKS/GKE/Databricks workspace, registries, source DBs, state) |
 | `utils/`, `tests/` | Shared libraries + hermetic unit tests (no cloud, no credentials) |
+| `evals/` | Offline self-heal eval harness (failure corpus, replay/eval modes, `heal` CLI) |
 | `streamlit_app.py`, `utils/nlp_parser.py`, `utils/cost_estimator.py` | NL authoring demo: free text → pipeline config, with a 4-cloud cost comparison before deploy |
-| **Generated:** `scripts/pipe_*.py`, `k8s/`, `sql/`, `dashboards/`, `terraform/`, `Dockerfile`, `requirements.txt`, `.github/workflows/*_pipeline.yml` | **Agent outputs** — populated by each agent run (the deploy CI consumes them from the repo), fixed only through standards/prompts, never edited by hand |
+| **Generated:** `scripts/pipe_*.py`, `k8s/`, `sql/`, `dashboards/`, `terraform/`, `Dockerfile`, `requirements.txt`, `.github/workflows/*_pipeline.yml` | **Agent outputs** — populated by each run, fixed only through standards/prompts, never edited by hand |
 
-> Note: the generated paths are empty between runs — each run commits a fresh, coherent set for its target cloud. The complete artifact set from the four validated runs is preserved permanently at the [`v1.0.0` tag](https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/tree/v1.0.0). The root `requirements.txt` (when present) is the *generated pipeline image's* dependency file — the project itself is managed with `uv` via `pyproject.toml` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+> The generated paths are empty between runs — each run commits a fresh, coherent set for its target cloud. The complete artifact set from the validated runs is preserved at the [`v1.0.0` tag](https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/tree/v1.0.0).
 
 ---
 
@@ -113,7 +326,7 @@ make ingest
 make demo-aws                 # = ingest + chaos + run p=eu_sales
 ```
 
-Or run any pipeline directly:
+Run any pipeline directly:
 
 ```bash
 make run p=eu_sales           # AWS
@@ -122,21 +335,18 @@ make run p=global_marketing   # GCP
 make run p=sales_lakehouse    # Databricks
 ```
 
-Everything is also operable from GitHub Actions (`run_agent.yml` — `workflow_dispatch` with bootstrap / chaos / KB-sync / pipeline inputs), and idle infrastructure can be paused to cut cost (`make aws-pause`, `make azure-pause`, `make gcp-pause`).
+Everything is also operable from GitHub Actions (`run_agent.yml` — `workflow_dispatch` with bootstrap / chaos / KB-sync / pipeline inputs), and every cloud tears down with one button (`destroy.yml`, typed confirmation).
+
+<p align="center">
+  <img src="images/github-run-workflow-trigger.png" alt="Run workflow" width="70%"><br>
+  <sub>One dispatch: pick the pipeline, optionally re-sync the knowledge base and seed chaos data.</sub>
+</p>
 
 ### Natural-language authoring (demo UI)
 
 ```bash
 uv run streamlit run streamlit_app.py
 ```
-
-Describe a pipeline in plain English → the system extracts a typed intent, proposes business rules, prices the build on all four platforms, and deploys on confirmation.
-
----
-
-## Observability
-
-Each object-storage pipeline ships with a provisioned Grafana dashboard (record counts, rejection rate, run duration, per-rule rejection breakdown) fed by Prometheus Pushgateway gauges. The Databricks pipeline ships the native equivalent: a Lakeview dashboard over a per-run `_audit` Delta table. Agent runs themselves are traceable in LangSmith.
 
 ---
 
@@ -150,14 +360,26 @@ make heal LOG=run.log   # route + validate ANY failing CI log through the real M
 
 CI (`tests.yml`) runs lint + the suite with a coverage floor on every push/PR. The deterministic core (routing, validators, state lifecycle, credential resolution) is unit-tested.
 
-**Self-heal eval harness ([`evals/`](evals/), [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md)).** The Medic's judgment — diagnosing a failed CI run and routing an evidence-grounded fix — is measured offline against a corpus of the documented failure classes (`evals/corpus/corpus.json`). **Replay mode** (`make eval-replay`, gated in CI) scores the *real* routing + anti-hallucination evidence gate with no LLM, no cloud, no keys — the regression net the previously eval-less whack-a-mole guards never had. **Eval mode** (`make eval-live`, needs an LLM key, model-agnostic via `get_llm`) scores the current model's diagnosis quality, catching model regressions. The `heal` CLI runs the same judgment on any failing log, decoupled from the pipelines this agent generated.
+**Self-heal eval harness ([`evals/`](evals/), [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md)).** The Medic's judgment — diagnosing a failed CI run and routing an evidence-grounded fix — is measured offline against a corpus of the documented failure classes. **Replay mode** (`make eval-replay`, gated in CI) scores the *real* routing + anti-hallucination evidence gate with **no LLM, no cloud, no keys** — 17 failure classes, routing and evidence gate at 100%. **Eval mode** (`make eval-live`) scores the current model's diagnosis quality, catching model regressions. The `heal` CLI runs the same judgment on any failing log, decoupled from the pipelines this agent generated.
+
+---
+
+## Engineering decisions a reviewer should notice
+
+- **Standards-first generation.** Conventions are retrieved, versioned artifacts — not prompt folklore. Wrong output means a wrong *standard*, and that is what gets fixed.
+- **Deterministic where it counts.** Tool sequencing (`tool_choice="required"`, pre-computed args), owner routing, validation gates, and guaranteed injections are Python — not "prompt harder and hope".
+- **Anti-hallucination by construction.** A fix request without a verbatim quote from real output is refused. Green runs and clean files cannot be "fixed".
+- **Bounded autonomy.** The heal loop has a hard stop and a fail-closed terminal contract. Unverified is never success.
+- **Validation as a safety net, not a crutch.** `validate_generated_code` enforces policy (credential access only via the sanctioned resolver, no hardcoded regions, no template literals in K8s manifests) before anything reaches CI.
+- **Cloud-agnostic by construction.** No default cloud anywhere — the provider is always read from config.
 
 ---
 
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — as-built architecture: agents, state machine, per-cloud execution models, credential resolution
-- [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md) — the offline replay + eval harness for the self-healing Medic (corpus, replay/eval modes, the `heal` CLI)
+- [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md) — the offline replay + eval harness for the self-healing Medic
+- [docs/RUNBOOK.md](docs/RUNBOOK.md) — verification steps, failure signatures, teardown procedures
 - [docs/VISION.md](docs/VISION.md) — product vision and roadmap
 - [SECURITY.md](SECURITY.md) — what is hardened, the deliberate demo trade-offs, and the production posture for each
 - [CHANGELOG.md](CHANGELOG.md) — release history
