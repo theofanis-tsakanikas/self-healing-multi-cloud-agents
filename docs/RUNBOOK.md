@@ -75,3 +75,34 @@ Local Databricks CLI with `DATABRICKS_HOST` / `DATABRICKS_TOKEN` sourced from `.
 All need the flags because the Spark job creates **managed tables at runtime** (not in terraform), so a plain destroy fails sequentially: schema *'not empty'* → external location *'N dependent managed tables'* → credential *'use force option to update'*.
 
 The job env MUST pass `TF_VAR_databricks_client_id` (the SP app id — a required, no-default bootstrap+pipeline var; without it both phases abort "No value for required variable") alongside the SP (`DATABRICKS_CLIENT_ID`/`SECRET`/`ACCOUNT_ID`) + AWS creds.
+
+---
+
+## After ANY teardown — remove the generated deploy workflow
+
+Every agent run commits its generated deploy workflow, `.github/workflows/<pipeline>_pipeline.yml`,
+which triggers on **`push`** to the artifact paths (`scripts/pipe_*.py`, `sql/**`, `k8s/**`,
+`dashboards/**`, `terraform/**`, `Dockerfile`, `requirements.txt`).
+
+Once that cloud is destroyed the workflow **can only fail** — it deploys to infrastructure that no
+longer exists. On a public repo it becomes a permanent red ✗ on `main` and turns every unrelated PR
+(including Dependabot's) red, which is exactly what happened to PR #9.
+
+**So after `destroy.yml` completes, delete the workflow from `main`:**
+
+```bash
+git rm .github/workflows/<pipeline>_pipeline.yml
+git commit -m "chore(ci): drop the <pipeline> deploy workflow after teardown"
+git push
+```
+
+Deleting it is safe and loses nothing: the workflow is a **generated OUTPUT** — the next agent run
+regenerates it from `cicd_standard.md` via `agents/codegen.py`, and the complete validated artifact
+set is preserved at the [`v1.0.0` tag](https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/tree/v1.0.0).
+
+The same applies to the other generated artifacts (`scripts/pipe_*.py`, `k8s/`, `sql/`, `dashboards/`,
+`terraform/`, `Dockerfile`, `requirements.txt`): `main` is kept clean of them between runs.
+
+> **Never add these paths to `.gitignore`.** `push_to_github` stages them with
+> `subprocess.run(["git", "add", path], check=True)`, and `git add` on an ignored path exits
+> non-zero — that would break the deploy push on the next agent run. Untracked, not ignored.

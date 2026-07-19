@@ -7,9 +7,14 @@
 <p align="center">
   <a href="https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/actions/workflows/tests.yml"><img src="https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python">
-  <img src="https://img.shields.io/badge/clouds-AWS%20%C2%B7%20Azure%20%C2%B7%20GCP%20%C2%B7%20Databricks-success" alt="Clouds">
-  <img src="https://img.shields.io/badge/model-gpt--4o--mini-lightgrey" alt="Model">
+  <img src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python 3.12+">
+  <img src="https://img.shields.io/badge/LangGraph-multi--agent-1C3C3C?logo=langgraph&logoColor=white" alt="Built with LangGraph">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/clouds-AWS%20%C2%B7%20Azure%20%C2%B7%20GCP%20%C2%B7%20Databricks-2E7D32" alt="Clouds: AWS, Azure, GCP, Databricks">
+  <a href="evals/report/REPORT.md"><img src="https://img.shields.io/badge/self--heal%20evals-17%20cases%20%C2%B7%20100%25-brightgreen" alt="Self-heal evals: 17 cases, 100%"></a>
+  <img src="https://img.shields.io/badge/model-gpt--4o--mini-lightgrey" alt="Model: gpt-4o-mini">
 </p>
 
 <p align="center"><b>Build. Deploy. Self-heal.</b></p>
