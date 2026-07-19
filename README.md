@@ -2,10 +2,10 @@
   <img src="images/banner.png" alt="Multi-Agent · Multi-Cloud · Self-Healing" width="100%">
 </p>
 
-<h1 align="center">Multi-Cloud Self-Healing Data Engineer Agent</h1>
+<h1 align="center">Self-Healing Multi-Cloud Data Pipeline Agents</h1>
 
 <p align="center">
-  <a href="https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/actions/workflows/tests.yml"><img src="https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
+  <a href="https://github.com/theofanis-tsakanikas/self-healing-multi-cloud-agents/actions/workflows/tests.yml"><img src="https://github.com/theofanis-tsakanikas/self-healing-multi-cloud-agents/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/LangGraph-multi--agent-1C3C3C?logo=langgraph&logoColor=white" alt="Built with LangGraph">
@@ -340,7 +340,7 @@ A defining property of this repo: **part of it is the agent, part of it is the a
 | `streamlit_app.py`, `utils/nlp_parser.py`, `utils/cost_estimator.py` | NL authoring demo: free text → pipeline config, with a 4-cloud cost comparison before deploy |
 | **Generated:** `scripts/pipe_*.py`, `k8s/`, `sql/`, `dashboards/`, `terraform/`, `Dockerfile`, `requirements.txt`, `.github/workflows/*_pipeline.yml` | **Agent outputs** — populated by each run, fixed only through standards/prompts, never edited by hand |
 
-> The generated paths are empty between runs — each run commits a fresh, coherent set for its target cloud. The complete artifact set from the validated runs is preserved at the [`v1.0.0` tag](https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/tree/v1.0.0).
+> The generated paths are empty between runs — each run commits a fresh, coherent set for its target cloud. The complete artifact set from the validated runs is preserved at the [`v1.0.0` tag](https://github.com/theofanis-tsakanikas/self-healing-multi-cloud-agents/tree/v1.0.0).
 
 ---
 

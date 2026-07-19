@@ -1,4 +1,4 @@
-# CLAUDE.md — Multi-Cloud Self-Healing Data Engineer Agent
+# CLAUDE.md — Self-Healing Multi-Cloud Data Pipeline Agents
 
 ## Project Identity
 

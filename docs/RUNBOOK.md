@@ -98,7 +98,7 @@ git push
 
 Deleting it is safe and loses nothing: the workflow is a **generated OUTPUT** — the next agent run
 regenerates it from `cicd_standard.md` via `agents/codegen.py`, and the complete validated artifact
-set is preserved at the [`v1.0.0` tag](https://github.com/theofanis-tsakanikas/multi-cloud-self-healing-agent/tree/v1.0.0).
+set is preserved at the [`v1.0.0` tag](https://github.com/theofanis-tsakanikas/self-healing-multi-cloud-agents/tree/v1.0.0).
 
 The same applies to the other generated artifacts (`scripts/pipe_*.py`, `k8s/`, `sql/`, `dashboards/`,
 `terraform/`, `Dockerfile`, `requirements.txt`): `main` is kept clean of them between runs.
