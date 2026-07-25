@@ -223,7 +223,7 @@ Agents don't improvise conventions — they retrieve versioned engineering stand
 <table>
 <tr>
 <td width="50%"><img src="images/pinecone-knowledge-base.png" alt="Pinecone knowledge base"><br><sub>The standards corpus in Pinecone — one vector per standard</sub></td>
-<td width="50%"><img src="images/langsmith-rag-retrieval.png" alt="RAG retrieval"><br><sub>Infra retrieving the GCP Terraform standard at generation time</sub></td>
+<td width="50%"><img src="images/query_vector_store.png" alt="RAG retrieval"><br><sub>The Architect retrieving the Python-pipelines standard at generation time — <code>query_vector_store</code> → <code>[OFFICIAL SPEC] python_standards.md</code> (relevance 0.66)</sub></td>
 </tr>
 </table>
 
