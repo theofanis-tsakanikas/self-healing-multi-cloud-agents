@@ -60,3 +60,6 @@ id_ed25519
 id_ed25519.*
 *.ppk
 
+
+# LinkedIn debut/marketing drafts — not part of the public codebase (mirrors promo/)
+/LinkedIn/
