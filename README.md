@@ -60,12 +60,12 @@ The diagnosis is not a guess. Here is the same heal inside LangSmith — the err
 
 <table>
 <tr>
-<td width="50%"><img src="images/langsmith-validation-failed-diagnosis.png" alt="Validation error detail"><br><sub><b>The error</b> — <code>.astype(float)</code> crashes on the first dirty value; use <code>pd.to_numeric(..., errors='coerce')</code></sub></td>
-<td width="50%"><img src="images/langsmith-medic-request-fix.png" alt="Medic request_fix"><br><sub><b>The diagnosis</b> — <code>request_fix</code> with a verbatim evidence quote, a suggested fix, and <code>target_agent: architect</code></sub></td>
+<td width="50%"><img src="images/langsmith_gcp_validate_error.png" alt="Validation failed on the generated script"><br><sub><b>The error</b> — <code>validate_generated_code</code> → <code>VALIDATION FAILED</code>: a temporal comparison against <code>pd.Timestamp.now()</code> on a string column with no <code>pd.to_datetime(..., errors='coerce')</code> first, which raises <i>Invalid comparison between dtype=str and Timestamp</i> at runtime</sub></td>
+<td width="50%"><img src="images/langsmith_gcp_request_fix.png" alt="Medic request_fix with evidence"><br><sub><b>The diagnosis</b> — <code>request_fix</code> with a verbatim <code>evidence_quote</code>, a concrete <code>suggested_fix</code>, and <code>target_agent: architect</code></sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="images/langsmith-patch-applied.png" alt="Patch applied"><br><sub><b>The patch</b> — surgical <code>old</code> → <code>new</code> replacement. <code>PATCH APPLIED … replaced (1x)</code></sub></td>
-<td width="50%"><img src="images/langsmith-revalidation-clean.png" alt="Re-validation clean"><br><sub><b>The proof</b> — <code>CLEAN: … passed all validation checks</code></sub></td>
+<td width="50%"><img src="images/langsmith_gcp_patch.png" alt="Surgical patch applied"><br><sub><b>The patch</b> — <code>patch_project_file</code> with a surgical <code>old</code> → <code>new</code> replacement of the exact line. <code>PATCH APPLIED … replaced (1x)</code></sub></td>
+<td width="50%"><img src="images/langsmith_gcp_validate_ok.png" alt="Re-validation clean"><br><sub><b>The proof</b> — <code>validate_generated_code</code> → <code>CLEAN: … passed all validation checks</code></sub></td>
 </tr>
 </table>
 
