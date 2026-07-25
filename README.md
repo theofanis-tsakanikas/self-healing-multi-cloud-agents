@@ -235,9 +235,9 @@ The same agent, the same config shape, three different infrastructure APIs — g
 
 <table>
 <tr>
-<td width="33%"><img src="images/langsmith-infra-terraform.png" alt="AWS Terraform"><br><sub>🟠 <b>AWS</b> — S3 + public-access block + KMS + lifecycle</sub></td>
-<td width="33%"><img src="images/langsmith-azure-terraform.png" alt="Azure Terraform"><br><sub>🔵 <b>Azure</b> — ADLS Gen2 container + managed-identity role</sub></td>
-<td width="33%"><img src="images/langsmith-gcp-terraform.png" alt="GCP Terraform"><br><sub>🟢 <b>GCP</b> — GCS bucket + IAM member + Workload Identity</sub></td>
+<td width="33%"><img src="images/aws_terraform_main.png" alt="AWS Terraform"><br><sub>🟠 <b>AWS</b> — S3 + public-access block + KMS + lifecycle</sub></td>
+<td width="33%"><img src="images/azure_terraform_main.png" alt="Azure Terraform"><br><sub>🔵 <b>Azure</b> — ADLS Gen2 container + managed-identity role</sub></td>
+<td width="33%"><img src="images/gcp_terraform_main.png" alt="GCP Terraform"><br><sub>🟢 <b>GCP</b> — GCS bucket + IAM member + Workload Identity</sub></td>
 </tr>
 </table>
 
