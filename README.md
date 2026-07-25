@@ -76,7 +76,7 @@ On Databricks the Spark job fails **while running on the cluster**. The Medic re
 <table>
 <tr>
 <td width="50%"><img src="images/databricks-job-secret-error.png" alt="Databricks job failed at runtime"><br><sub><b>Runtime failure</b> — <code>Secret does not exist with scope: … key: db_password</code></sub></td>
-<td width="50%"><img src="images/langsmith-dbx-patch-secret-key.png" alt="Terraform secret key patched"><br><sub><b>Infra heal</b> — <code>key = "postgres_password"</code> → <code>key = "db_password"</code>, then <code>execute_terraform</code> + push</sub></td>
+<td width="50%"><img src="images/patch_dbx.png" alt="Terraform secret key patched"><br><sub><b>Infra heal</b> — <code>key = "postgres_password"</code> → <code>key = "db_password"</code>, then <code>execute_terraform</code> + push</sub></td>
 </tr>
 </table>
 
