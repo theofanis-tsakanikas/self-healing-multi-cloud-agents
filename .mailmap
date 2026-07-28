@@ -1,0 +1,10 @@
+# Coalesce every identity that represents the project author into one.
+# Canonical: Theofanis Tsakanikas <theotsak90@gmail.com>
+#
+# Covers the four author spellings that already use theotsak90@gmail.com,
+# the github-actions[bot] identity (the project's own automation, committing
+# on the author's behalf), and the GitHub no-reply address.
+# dependabot[bot] is intentionally left as itself (genuine third-party bot).
+Theofanis Tsakanikas <theotsak90@gmail.com>
+Theofanis Tsakanikas <theotsak90@gmail.com> <github-actions[bot]@users.noreply.github.com>
+Theofanis Tsakanikas <theotsak90@gmail.com> <218610429+theofanis-tsakanikas@users.noreply.github.com>
