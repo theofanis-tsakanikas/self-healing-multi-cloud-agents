@@ -458,56 +458,59 @@ A portfolio that lists only what works is a sales page. This is the rest of it �
 ## Cost
 
 **Nothing is standing today.** Each cloud baseline is stood up, exercised and destroyed. What follows
-is what it would cost *while it stands* — list-price estimates, not a measured bill.
+is what it would cost *while it stands* — list prices **verified 2026-08-12**.
 
 This is the largest footprint here: **three managed Kubernetes clusters and four managed databases**,
-one set per cloud. That is precisely why `bootstrap` is per-cloud rather than one target — you are
-meant to stand up **one** at a time.
+one set per cloud. That is precisely why `bootstrap` is per-cloud — you are meant to stand up **one**
+at a time.
 
 | Resource | Spec | Rate | Monthly |
 |---|---|---|---:|
 | **AWS baseline** | | | |
-| EKS — control plane | 1 cluster, Auto Mode | $0.10/hr | $73.00 |
-| EKS — Auto Mode compute | `general-purpose` + `system` node pools | EC2 + ~12% management fee | ~$140 |
-| RDS PostgreSQL | `db.t4g.micro`, 20 GB gp3 | $0.016/hr + $0.092/GB-mo | ~$14 |
-| S3 + ECR + SSM | pipeline output, images, parameters | — | ~$2 |
+| EKS — control plane | 1 cluster | $0.10/hr | $73.00 |
+| EKS — Auto Mode compute | `general-purpose` + `system` node pools | EC2 + **10–12%** | ~$140 |
+| RDS PostgreSQL | `db.t4g.micro`, 20 GB gp3 | $0.016/hr | ~$14 |
+| S3 + ECR + SSM | — | — | ~$2 |
 | | | *AWS subtotal* | ***≈ $229*** |
 | **Azure baseline** | | | |
 | AKS — control plane | Free tier | $0.00 | $0.00 |
-| AKS — node pool | **2 × `Standard_D2s_v6`** | ~$0.115/hr each | ~$168 |
-| PostgreSQL Flexible | `B_Standard_B1ms`, 32 GB | ~$0.017/hr + storage | ~$16 |
+| AKS — node pool | **2 × `Standard_D2s_v6`** | **$0.101/hr** | **$147.46** |
+| PostgreSQL Flexible | `B_Standard_B1ms`, 32 GB | ~$0.017/hr | ~$16 |
 | Storage account + ACR | — | — | ~$7 |
-| | | *Azure subtotal* | ***≈ $191*** |
+| | | *Azure subtotal* | ***≈ $170*** |
 | **GCP baseline** | | | |
-| GKE Autopilot — cluster fee | 1 cluster | $0.10/hr | $73.00 |
-| GKE Autopilot — pod resources | Trino, Grafana, Prometheus, the pipeline Job | ~$0.0445/vCPU-hr | ~$95 |
-| Cloud SQL | `db-f1-micro`, 10 GB | ~$0.0105/hr + storage | ~$9 |
+| GKE Autopilot — cluster fee | 1 cluster, **less the $74.40 free-tier credit** | $0.10/hr | **$0.00** |
+| GKE Autopilot — pod resources | Trino, Grafana, Prometheus, the pipeline Job | $0.0445/vCPU-hr | ~$95 |
+| Cloud SQL | `db-f1-micro`, 10 GB | ~$0.0105/hr | ~$9 |
 | GCS + Artifact Registry | — | — | ~$2 |
-| | | *GCP subtotal* | ***≈ $179*** |
+| | | *GCP subtotal* | ***≈ $106*** |
 | **Databricks baseline** | | | |
 | Jobs cluster | `m5d.xlarge`, **1 worker** + driver, on-demand runs | $0.15/DBU + EC2 | ~$25 |
-| SQL warehouse | serverless `2X-Small`, auto-stop 10 min | $0.70/DBU | ~$30 |
+| SQL warehouse | serverless `2X-Small`, auto-stop 10 min | **$0.91/DBU (EU)** | ~$36 |
 | Source RDS | `db.t4g.micro`, 20 GB | $0.016/hr | ~$14 |
 | Unity Catalog + workspace | control plane | free | $0.00 |
-| | | *Databricks subtotal* | ***≈ $69*** |
+| | | *Databricks subtotal* | ***≈ $75*** |
 | **The agent run itself** | | | |
 | OpenAI `gpt-4o-mini` | ~40 calls per mission, ~20 missions/mo | $0.15/M in · $0.60/M out | ~$2 |
 | Pinecone | starter index, ~50 standards | free tier | $0.00 |
-| **Total — all four clouds up** | | | **≈ $670 / month** |
+| **Total — all four clouds up** | | | **≈ $583 / month** |
 | **Total — one cloud (AWS) up** | | | **≈ $231 / month** |
 
-**The Kubernetes control planes and node pools are about 80% of this**, and they bill by the hour
-whether or not a pipeline ever runs. The agent itself is a rounding error: **~$2/month of
-`gpt-4o-mini`** against ~$670 of infrastructure — which is the cost argument behind
-[ADR-0008](docs/adr/0008-small-model-strong-architecture.md) seen from the other side. Model spend was
-never the thing worth optimising here.
+**Kubernetes is about 75% of this**, and it bills by the hour whether or not a pipeline ever runs.
+The agent itself is a rounding error: **~$2/month of `gpt-4o-mini` against ~$583 of infrastructure** —
+which is [ADR-0008](docs/adr/0008-small-model-strong-architecture.md) seen from the cost side. Model
+spend was never the thing worth optimising here.
+
+Two rates moved in the same direction on verification: `Standard_D2s_v6` lists at **$0.101/hr** rather
+than the $0.115 previously assumed, and GKE's **$74.40/month free-tier credit** covers the Autopilot
+cluster fee for a single cluster.
 
 `destroy.yml` tears any cloud down from GitHub Actions behind a typed confirmation. On Databricks the
 teardown is **two-phase** by necessity: runtime-created managed tables need `force_destroy` applied
 into state before `terraform destroy`, so a plain destroy always fails — documented in
 [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
-*Rates are list prices and change; verify before quoting.*
+*Rates verified 2026-08-12 against public pricing sources; verify before quoting.*
 
 ---
 
