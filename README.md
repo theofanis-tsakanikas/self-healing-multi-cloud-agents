@@ -15,9 +15,14 @@
   <img src="https://img.shields.io/badge/clouds-AWS%20%C2%B7%20Azure%20%C2%B7%20GCP%20%C2%B7%20Databricks-2E7D32" alt="Clouds: AWS, Azure, GCP, Databricks">
   <a href="evals/report/REPORT.md"><img src="https://img.shields.io/badge/self--heal%20evals-17%20cases%20%C2%B7%20100%25-brightgreen" alt="Self-heal evals: 17 cases, 100%"></a>
   <img src="https://img.shields.io/badge/model-gpt--4o--mini-lightgrey" alt="Model: gpt-4o-mini">
+  <img src="https://img.shields.io/badge/tests-380%20·%20hermetic-2ea44f" alt="380 hermetic tests">
 </p>
 
 <p align="center"><b>Build. Deploy. Self-heal.</b></p>
+
+---
+
+## The problem
 
 An AI orchestration system that **designs, deploys, and repairs production data pipelines end-to-end** — Python ETL, SQL DDL, Terraform, Kubernetes, CI/CD, and observability dashboards — on **AWS, Azure, GCP, and Databricks**, from a single YAML config or a plain-English description.
 
@@ -29,7 +34,7 @@ When a deployment fails, the agent reads the real CI logs, diagnoses the error w
 
 ## Contents
 
-- [It fixes itself — here is the proof](#it-fixes-itself--here-is-the-proof)
+- [The problem](#the-problem) · [It fixes itself — here is the proof](#it-fixes-itself--here-is-the-proof)
   - [It heals at runtime too](#it-heals-at-runtime-too--not-just-at-generation-time) · […and when it can't, it stops](#and-when-it-cant-fix-it-it-stops)
 - [Validated end-to-end — on all four clouds](#validated-end-to-end--on-all-four-clouds)
 - [How it works](#how-it-works)
@@ -40,8 +45,9 @@ When a deployment fails, the agent reads the real CI logs, diagnoses the error w
 - [From config to running infrastructure](#from-config-to-running-infrastructure)
 - [Repository map — source vs. generated](#repository-map--source-vs-generated)
 - [Quickstart](#quickstart) · [Testing](#testing)
-- [Engineering decisions a reviewer should notice](#engineering-decisions-a-reviewer-should-notice)
-- [Documentation](#documentation) · [License](#license)
+- [Engineering decisions a reviewer should notice](#engineering-decisions-a-reviewer-should-notice) · [Decisions](#decisions)
+- [What this does not do](#what-this-does-not-do) · [Cost](#cost)
+- [Documentation](#documentation) · [Security](#security) · [License](#license)
 
 ---
 
@@ -399,7 +405,11 @@ make eval-replay  # offline Medic self-heal eval — score the failure corpus, n
 make heal LOG=run.log   # route + validate ANY failing CI log through the real Medic logic (offline)
 ```
 
-CI (`tests.yml`) runs lint + the suite with a coverage floor on every push/PR. The deterministic core (routing, validators, state lifecycle, credential resolution) is unit-tested.
+**380 tests**, all **hermetic** — no cloud, no credentials, every external dependency mocked, so the suite runs anywhere in seconds. The deterministic core is what they cover: supervisor routing invariants, the `validate_generated_code` policy checks, `agents/codegen.py` renders against goldens pinned to the `v1.0.0` artifacts, state lifecycle (`healing_context` being one-shot, `medic_fix_requested` across both scenarios), per-cloud credential resolution, and each generation guarantee that exists because the model once got it wrong.
+
+CI (`tests.yml`) runs lint + the suite with a coverage floor on every push and pull request.
+
+**What the tests do not cover:** the LLM. No test asserts that a generated pipeline script is *good*, because that is a judgment call under an open input — which is exactly why the eval harness below exists, and why the boundary between LLM-owned and code-owned artifacts is drawn where it is ([ADR-0002](docs/adr/0002-the-llm-deterministic-boundary.md)). Nor is any cloud exercised: the four validated runs in the table above are evidence from real deployments, not assertions in CI.
 
 **Self-heal eval harness ([`evals/`](evals/), [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md)).** The Medic's judgment — diagnosing a failed CI run and routing an evidence-grounded fix — is measured offline against a corpus of the documented failure classes. **Replay mode** (`make eval-replay`, gated in CI) scores the *real* routing + anti-hallucination evidence gate with **no LLM, no cloud, no keys** — 17 failure classes, routing and evidence gate at 100%. **Eval mode** (`make eval-live`) scores the current model's diagnosis quality, catching model regressions. The `heal` CLI runs the same judgment on any failing log, decoupled from the pipelines this agent generated.
 
@@ -414,6 +424,54 @@ CI (`tests.yml`) runs lint + the suite with a coverage floor on every push/PR. T
 - **Validation as a safety net, not a crutch.** `validate_generated_code` enforces policy (credential access only via the sanctioned resolver, no hardcoded regions, no template literals in K8s manifests) before anything reaches CI.
 - **Cloud-agnostic by construction.** No default cloud anywhere — the provider is always read from config.
 
+## Decisions
+
+Eight records in [`docs/adr/`](docs/adr/) — the same decisions above, with what was **rejected** and what each one cost.
+
+| | Decision | Rejected |
+|---|---|---|
+| [0001](docs/adr/0001-standards-first-generation.md) | Conventions are retrieved, versioned standards in a vector store | Prompt folklore · hardcoded one-off fixes to generated files |
+| [0002](docs/adr/0002-the-llm-deterministic-boundary.md) | The LLM owns judgment under variability; code owns what is mechanically determined | An LLM step with repair code underneath it |
+| [0003](docs/adr/0003-evidence-gate-against-hallucination.md) | `request_fix` is refused without a verbatim quote from real output | Trusting the model to interpret logs |
+| [0004](docs/adr/0004-bounded-autonomy-fail-closed.md) | A hard stop, and `verified` as the only success | "The graph ran to completion" as success |
+| [0005](docs/adr/0005-deterministic-ci-polling.md) | The verification fetch happens in Python, not in the LLM's turn | Leaving the re-poll to the model — it skipped it, and the loop stalled |
+| [0006](docs/adr/0006-no-default-cloud.md) | No default cloud anywhere; the provider is always read from config | One primary cloud with "support" for the others |
+| [0007](docs/adr/0007-databricks-as-a-distinct-execution-model.md) | Databricks as a fourth provider with its own execution model | Bending Spark/Delta into the object-storage + Kubernetes model |
+| [0008](docs/adr/0008-small-model-strong-architecture.md) | `gpt-4o-mini`, with reliability in the architecture | A larger model to paper over a weaker harness |
+
+---
+
+## What this does not do
+
+A portfolio that lists only what works is a sales page. This is the rest of it — the full version, with the production posture for each, is in [SECURITY.md](SECURITY.md#deliberate-demo-trade-offs-and-the-production-posture).
+
+- **The source databases have public endpoints**, restricted by CIDR allowlist. The agent, the chaos seeder and GitHub-hosted runners all connect from outside the VPCs; private endpoints would need per-cloud VPN or self-hosted runners, which is real fixed cost for a demo.
+- **Grafana is on a public LoadBalancer**, password-protected. It is the demo's visible artifact. Trino, by contrast, is ClusterIP-only — and has no authentication *because* it is never exposed.
+- **Generated manifests do not pin `runAsNonRoot`/`runAsUser`.** The images already run as non-root, but several upstream ones declare non-numeric users, so a blanket policy fails kubelet verification. Deferred deliberately rather than half-applied.
+- **`GH_PAT` is a classic personal access token.** The built-in `GITHUB_TOKEN` cannot push to `.github/workflows/` and its pushes do not re-trigger CI — both of which this agent needs. A GitHub App installation token is the production answer.
+- **The knowledge base lives in Pinecone**, a third-party SaaS. The corpus is audited to hold no credentials, but it does carry naming conventions and the SSM namespace — classification *internal*, not *secret*.
+- **The eval harness measures the Medic, not the pipelines.** 17 failure classes, routing and evidence gate at 100% in replay mode. That is a regression score for the *judgment*, not a claim about generated-code quality.
+- **Every validated run was a fresh build.** The four clouds in the table above were each deployed, healed, captured and destroyed. Nothing has been kept running, and no run has been repeated on an estate that already existed.
+
+---
+
+## Cost
+
+**This is the most expensive footprint in the portfolio to stand up, and the cheapest to leave alone** — because nothing is meant to stay standing.
+
+The one-time `bootstrap/` per cloud is what costs money while it exists:
+
+| Cloud | What the baseline provisions |
+|---|---|
+| **AWS** | EKS cluster · RDS PostgreSQL · S3 · ECR · SSM parameters |
+| **Azure** | AKS cluster · Azure PostgreSQL Flexible · storage · ACR |
+| **GCP** | GKE cluster · Cloud SQL · GCS · Artifact Registry |
+| **Databricks** | Workspace + Unity Catalog · a 1-worker jobs cluster · serverless SQL warehouse · its own source RDS |
+
+A managed Kubernetes control plane and a managed database bill by the hour whether or not a pipeline runs, so **bootstrap one cloud at a time** — that is why `make bootstrap-aws` is per-cloud rather than a single target. The agent run itself is negligible: `gpt-4o-mini` tokens, a Pinecone starter index, and the Kubernetes Job that executes the pipeline for seconds.
+
+`destroy.yml` tears any cloud down from GitHub Actions behind a typed confirmation. On Databricks the teardown is **two-phase** by necessity: runtime-created managed tables need `force_destroy` applied into state before `terraform destroy`, so a plain destroy always fails — documented in [docs/RUNBOOK.md](docs/RUNBOOK.md).
+
 ---
 
 ## Documentation
@@ -426,6 +484,15 @@ CI (`tests.yml`) runs lint + the suite with a coverage floor on every push/PR. T
 - [CHANGELOG.md](CHANGELOG.md) — release history
 - [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, dependency management
 - [CLAUDE.md](CLAUDE.md) — the project's full engineering rulebook (also used by AI coding assistants)
+
+## Security
+
+What is hardened, the eight deliberate demo trade-offs, and the production posture for each:
+[SECURITY.md](SECURITY.md). The short version — credentials in generated pipelines may only be read
+through the sanctioned resolver (a policy the validator enforces before anything reaches CI), no
+long-lived cloud key is stored where a generated artifact can reach it, `gitleaks` runs pre-commit
+and in CI, and the knowledge base is audited to carry no secrets because it is uploaded to a
+third-party vector store.
 
 ## License
 
