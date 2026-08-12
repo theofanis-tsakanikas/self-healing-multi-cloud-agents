@@ -7,6 +7,32 @@ conventional commits (`type(scope): description`).
 ## [Unreleased]
 
 ### Added
+- **`docs/adr/` — eight decision records**, extracted from reasoning that already existed in
+  `CLAUDE.md`, the prompts and the standards: standards-first generation, the LLM/deterministic
+  boundary, the anti-hallucination evidence gate, bounded autonomy and the terminal contract,
+  deterministic CI polling, no default cloud, Databricks as a distinct execution model, and the
+  choice of a small model with the reliability in the harness. Each records what was **rejected**.
+- **README sections `Decisions`, `What this does not do`, `Cost` and `Security`.** The limits already
+  existed — in `SECURITY.md`, where a reader looking for them in the README would not find them; they
+  are now summarised there with a pointer to the full version. `Cost` is new: three managed Kubernetes
+  clusters and four managed databases bill by the hour, which is why `bootstrap` is per-cloud.
+- **`The problem` as a heading.** The opening paragraphs already did the work but had no heading, so
+  the Contents could not link to them.
+
+### Changed
+- **`Testing` now states a number** — **380 tests**, hermetic — and what they do *not* cover: the
+  LLM's output quality (which is what the eval harness is for) and anything requiring a cloud.
+- **Dependabot version updates switched off** (`open-pull-requests-limit: 0`), matching the rest of
+  the portfolio. The existing reasoning is kept verbatim — the `lockfile-only` strategy and its
+  pyarrow-cap explanation, and the major-version `ignore` for workflows a PR's CI never exercises —
+  because turning updates back on should be one line, not a re-derivation.
+
+### Note
+No agent code, standard, config, bootstrap or workflow was modified. This release is documentation
+and repository configuration only.
+
+
+### Added
 - **Offline replay + eval harness for the self-healing Medic** ([`evals/`](evals/), [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md)) — makes the agent's core loop verifiable and its LLM judgment measurable, with no cloud, spend, or credentials:
   - `evals/corpus/corpus.json` — a golden corpus of the documented failure classes (script-logic → architect; missing library/secret/resource → infra; plus clean/green/speculation negatives), with realistic trigger logs matching the Medic's routing signatures and links to the real self-heal commits.
   - **Replay mode** (`make eval-replay`) — `evals/harness/` scores the *real* deterministic routing (`_ci_error_owner` + the failing-file fallback) and the anti-hallucination evidence gate (`request_fix`) against the corpus, writing `evals/report/{metrics.json,REPORT.md}`. The regression net the whack-a-mole guards never had — gated in CI (`make eval-check`) and asserted by `tests/test_evals.py`.

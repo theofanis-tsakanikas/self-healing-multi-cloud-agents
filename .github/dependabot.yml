@@ -1,13 +1,26 @@
-# Automated dependency updates. Python deps resolve through uv (pyproject +
-# uv.lock); GitHub Actions pins are bumped per workflow file. The generated
-# pipeline workflow (pipe_*.yml) is an agent OUTPUT — Dependabot PRs against
-# it are fine to close: the standard owns its action versions.
+# Dependabot — deliberately configured for a pinned reference implementation.
+#
+# `open-pull-requests-limit: 0` switches OFF *version-update* pull requests, matching the rest
+# of this portfolio. This repository is a reference implementation pinned to a stack the 380
+# hermetic tests and the golden codegen fixtures were validated against; left on, the bumps pile
+# up unreviewed, which reads far worse than a clean tree.
+#
+# What stays ON is the part that matters: **Dependabot security updates and alerts** (a separate
+# repository setting) still raise a pull request when a dependency carries an actual advisory.
+#
+# The reasoning below is kept because it is hard-won and turning updates back on is one line per
+# ecosystem — raise the limit to 5 and the settings that follow are already correct.
+#
+# Python deps resolve through uv (pyproject + uv.lock); GitHub Actions pins are bumped per
+# workflow file. The generated pipeline workflow (pipe_*.yml) is an agent OUTPUT — Dependabot PRs
+# against it are fine to close: the standard owns its action versions.
 version: 2
 updates:
   - package-ecosystem: uv
     directory: "/"
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
     # Refresh uv.lock within the EXISTING pyproject ranges. The default
     # bump_versions strategy raises the pyproject floors to the newest
     # release, which conflicts with transitive caps (e.g. raising
@@ -23,6 +36,7 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
     groups:
       actions:
         patterns: ["*"]
