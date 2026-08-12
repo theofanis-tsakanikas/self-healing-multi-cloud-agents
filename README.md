@@ -457,20 +457,57 @@ A portfolio that lists only what works is a sales page. This is the rest of it �
 
 ## Cost
 
-**This is the most expensive footprint in the portfolio to stand up, and the cheapest to leave alone** — because nothing is meant to stay standing.
+**Nothing is standing today.** Each cloud baseline is stood up, exercised and destroyed. What follows
+is what it would cost *while it stands* — list-price estimates, not a measured bill.
 
-The one-time `bootstrap/` per cloud is what costs money while it exists:
+This is the largest footprint here: **three managed Kubernetes clusters and four managed databases**,
+one set per cloud. That is precisely why `bootstrap` is per-cloud rather than one target — you are
+meant to stand up **one** at a time.
 
-| Cloud | What the baseline provisions |
-|---|---|
-| **AWS** | EKS cluster · RDS PostgreSQL · S3 · ECR · SSM parameters |
-| **Azure** | AKS cluster · Azure PostgreSQL Flexible · storage · ACR |
-| **GCP** | GKE cluster · Cloud SQL · GCS · Artifact Registry |
-| **Databricks** | Workspace + Unity Catalog · a 1-worker jobs cluster · serverless SQL warehouse · its own source RDS |
+| Resource | Spec | Rate | Monthly |
+|---|---|---|---:|
+| **AWS baseline** | | | |
+| EKS — control plane | 1 cluster, Auto Mode | $0.10/hr | $73.00 |
+| EKS — Auto Mode compute | `general-purpose` + `system` node pools | EC2 + ~12% management fee | ~$140 |
+| RDS PostgreSQL | `db.t4g.micro`, 20 GB gp3 | $0.016/hr + $0.092/GB-mo | ~$14 |
+| S3 + ECR + SSM | pipeline output, images, parameters | — | ~$2 |
+| | | *AWS subtotal* | ***≈ $229*** |
+| **Azure baseline** | | | |
+| AKS — control plane | Free tier | $0.00 | $0.00 |
+| AKS — node pool | **2 × `Standard_D2s_v6`** | ~$0.115/hr each | ~$168 |
+| PostgreSQL Flexible | `B_Standard_B1ms`, 32 GB | ~$0.017/hr + storage | ~$16 |
+| Storage account + ACR | — | — | ~$7 |
+| | | *Azure subtotal* | ***≈ $191*** |
+| **GCP baseline** | | | |
+| GKE Autopilot — cluster fee | 1 cluster | $0.10/hr | $73.00 |
+| GKE Autopilot — pod resources | Trino, Grafana, Prometheus, the pipeline Job | ~$0.0445/vCPU-hr | ~$95 |
+| Cloud SQL | `db-f1-micro`, 10 GB | ~$0.0105/hr + storage | ~$9 |
+| GCS + Artifact Registry | — | — | ~$2 |
+| | | *GCP subtotal* | ***≈ $179*** |
+| **Databricks baseline** | | | |
+| Jobs cluster | `m5d.xlarge`, **1 worker** + driver, on-demand runs | $0.15/DBU + EC2 | ~$25 |
+| SQL warehouse | serverless `2X-Small`, auto-stop 10 min | $0.70/DBU | ~$30 |
+| Source RDS | `db.t4g.micro`, 20 GB | $0.016/hr | ~$14 |
+| Unity Catalog + workspace | control plane | free | $0.00 |
+| | | *Databricks subtotal* | ***≈ $69*** |
+| **The agent run itself** | | | |
+| OpenAI `gpt-4o-mini` | ~40 calls per mission, ~20 missions/mo | $0.15/M in · $0.60/M out | ~$2 |
+| Pinecone | starter index, ~50 standards | free tier | $0.00 |
+| **Total — all four clouds up** | | | **≈ $670 / month** |
+| **Total — one cloud (AWS) up** | | | **≈ $231 / month** |
 
-A managed Kubernetes control plane and a managed database bill by the hour whether or not a pipeline runs, so **bootstrap one cloud at a time** — that is why `make bootstrap-aws` is per-cloud rather than a single target. The agent run itself is negligible: `gpt-4o-mini` tokens, a Pinecone starter index, and the Kubernetes Job that executes the pipeline for seconds.
+**The Kubernetes control planes and node pools are about 80% of this**, and they bill by the hour
+whether or not a pipeline ever runs. The agent itself is a rounding error: **~$2/month of
+`gpt-4o-mini`** against ~$670 of infrastructure — which is the cost argument behind
+[ADR-0008](docs/adr/0008-small-model-strong-architecture.md) seen from the other side. Model spend was
+never the thing worth optimising here.
 
-`destroy.yml` tears any cloud down from GitHub Actions behind a typed confirmation. On Databricks the teardown is **two-phase** by necessity: runtime-created managed tables need `force_destroy` applied into state before `terraform destroy`, so a plain destroy always fails — documented in [docs/RUNBOOK.md](docs/RUNBOOK.md).
+`destroy.yml` tears any cloud down from GitHub Actions behind a typed confirmation. On Databricks the
+teardown is **two-phase** by necessity: runtime-created managed tables need `force_destroy` applied
+into state before `terraform destroy`, so a plain destroy always fails — documented in
+[docs/RUNBOOK.md](docs/RUNBOOK.md).
+
+*Rates are list prices and change; verify before quoting.*
 
 ---
 
