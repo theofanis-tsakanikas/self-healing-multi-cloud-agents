@@ -298,7 +298,7 @@ Describe a pipeline in plain English → the system extracts a typed intent, fil
 </tr>
 <tr>
 <td width="50%"><img src="images/streamlit-business-rules.png" alt="Business rules"><br><sub><b>3 · Rules</b> — plain-language quality rules → real pandas conditions</sub></td>
-<td width="50%"><img src="images/streamlit-cost-comparison-full-tight.png" alt="Cost comparison"><br><sub><b>4 · Price it</b> — itemized monthly cost, all four platforms</sub></td>
+<td width="50%"><img src="images/streamlit-cost-comparison-full-tight.png" alt="Cost comparison"><br><sub><b>4 · Price it</b> — itemized monthly cost, all four platforms<br><i>(captured before the 2026-08-12 rate verification: the absolute figures are the pre-refresh ones, the cheapest-to-dearest order is unchanged — current rates in <a href="#cost">Cost</a>)</i></sub></td>
 </tr>
 </table>
 
@@ -509,6 +509,12 @@ cluster fee for a single cluster.
 teardown is **two-phase** by necessity: runtime-created managed tables need `force_destroy` applied
 into state before `terraform destroy`, so a plain destroy always fails — documented in
 [docs/RUNBOOK.md](docs/RUNBOOK.md).
+
+These are the same rates [`utils/cost_estimator.py`](utils/cost_estimator.py) applies — it is the
+single source of truth for every cost figure in this repo, and its per-cloud subtotals agree with the
+table above line-by-line (`python -m utils.cost_estimator`). The Streamlit screenshots and the promo
+recording predate the verification and still show the earlier figures; the ranking they illustrate is
+unchanged.
 
 *Rates verified 2026-08-12 against public pricing sources; verify before quoting.*
 
