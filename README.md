@@ -170,7 +170,7 @@ Hub-and-spoke: the Supervisor routes to Architect / Infra / Medic and each retur
 
 **Infra** — generates the per-cloud pipeline Terraform, then pushes all artifacts and triggers CI. The Kubernetes manifests, Dockerfile and deploy workflow are rendered deterministically from config.
 
-**Medic** — watches the CI run with exponential-backoff polling, then diagnoses failures from a **structured validation summary built in Python** — never by free-form log "interpretation". Its `request_fix` tool *rejects* any diagnosis whose evidence quote is not present verbatim in a real tool/log output (a provenance check), so a hallucinated fix has nothing to route to. Fixes are surgical patches to the named file only; clean files are off-limits.
+**Medic** — watches the CI run with exponential-backoff polling, then diagnoses failures from a **structured validation summary built in Python** — never by free-form log "interpretation". Its `request_fix` tool *refuses* any quote carrying no genuine failure marker, and the node then checks the quote's **provenance** — text that appears in no real tool/log output of that run does not get routed, however well-formed it looks. A hallucinated fix has nothing to route to. Fixes are surgical patches to the named file only; clean files are off-limits.
 
 ### The self-healing loop
 
@@ -411,7 +411,7 @@ CI (`tests.yml`) runs lint + the suite with a coverage floor on every push and p
 
 **What the tests do not cover:** the LLM. No test asserts that a generated pipeline script is *good*, because that is a judgment call under an open input — which is exactly why the eval harness below exists, and why the boundary between LLM-owned and code-owned artifacts is drawn where it is ([ADR-0002](docs/adr/0002-the-llm-deterministic-boundary.md)). Nor is any cloud exercised: the four validated runs in the table above are evidence from real deployments, not assertions in CI.
 
-**Self-heal eval harness ([`evals/`](evals/), [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md)).** The Medic's judgment — diagnosing a failed CI run and routing an evidence-grounded fix — is measured offline against a corpus of the documented failure classes. **Replay mode** (`make eval-replay`, gated in CI) scores the *real* routing + anti-hallucination evidence gate with **no LLM, no cloud, no keys** — 17 failure classes, routing and evidence gate at 100%. **Eval mode** (`make eval-live`) scores the current model's diagnosis quality, catching model regressions. The `heal` CLI runs the same judgment on any failing log, decoupled from the pipelines this agent generated.
+**Self-heal eval harness ([`evals/`](evals/), [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md)).** The Medic's judgment — diagnosing a failed CI run and routing an evidence-grounded fix — is measured offline against a corpus of the documented failure classes. **Replay mode** (`make eval-replay`, gated in CI) scores the *real* routing + anti-hallucination evidence gate with **no LLM, no cloud, no keys** — 17 cases across 14 failure classes, routing 14/14 and evidence gate 17/17. **Eval mode** (`make eval-live`) scores the current model's diagnosis quality, catching model regressions. The `heal` CLI runs the same judgment on any failing log, decoupled from the pipelines this agent generated.
 
 ---
 
@@ -450,7 +450,7 @@ A portfolio that lists only what works is a sales page. This is the rest of it �
 - **Generated manifests do not pin `runAsNonRoot`/`runAsUser`.** The images already run as non-root, but several upstream ones declare non-numeric users, so a blanket policy fails kubelet verification. Deferred deliberately rather than half-applied.
 - **`GH_PAT` is a classic personal access token.** The built-in `GITHUB_TOKEN` cannot push to `.github/workflows/` and its pushes do not re-trigger CI — both of which this agent needs. A GitHub App installation token is the production answer.
 - **The knowledge base lives in Pinecone**, a third-party SaaS. The corpus is audited to hold no credentials, but it does carry naming conventions and the SSM namespace — classification *internal*, not *secret*.
-- **The eval harness measures the Medic, not the pipelines.** 17 failure classes, routing and evidence gate at 100% in replay mode. That is a regression score for the *judgment*, not a claim about generated-code quality.
+- **The eval harness measures the Medic, not the pipelines.** 17 cases across 14 failure classes, routing and evidence gate at 100% in replay mode. That is a regression score for the *judgment*, not a claim about generated-code quality.
 - **Every validated run was a fresh build.** The four clouds in the table above were each deployed, healed, captured and destroyed. Nothing has been kept running, and no run has been repeated on an estate that already existed.
 
 ---
