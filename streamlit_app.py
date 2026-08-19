@@ -1468,7 +1468,7 @@ def _render_cost_charts(size_gb: int = 50, key: str = "cost"):
 # ---------------------------------------------------------------------------
 
 def _render_cost_panel(selected_cloud: str | None = None):
-    from utils.cost_estimator import compare_clouds
+    from utils.cost_estimator import PRICES_LAST_UPDATED, compare_clouds
     estimates = compare_clouds()
     cheapest  = estimates[0]["cloud"]
     flags     = {"aws": "🟠 AWS", "azure": "🔵 Azure", "gcp": "🟢 GCP", "databricks": "⚡ Databricks"}
@@ -1520,8 +1520,9 @@ def _render_cost_panel(selected_cloud: str | None = None):
                 )
         st.markdown(
             '<p style="color:#334155;font-size:0.72rem;margin-top:0.6rem;">'
-            '* List prices (~2026-06) · representative regions · fixed bootstrap footprint · '
-            '50 GB storage · Databricks compute is usage-billed (assumes ~2h/day jobs + 1h/day SQL)</p>',
+            f'* List prices (verified {PRICES_LAST_UPDATED}) · representative regions · fixed bootstrap '
+            f'footprint · 50 GB storage · Databricks compute is usage-billed '
+            f'(assumes ~1h/day jobs + ~20min/day SQL)</p>',
             unsafe_allow_html=True,
         )
 
